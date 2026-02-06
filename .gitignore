@@ -1,0 +1,18 @@
+# 环境变量文件（包含敏感信息）
+.env
+
+# 编译输出
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 日志
+*.log
+
+# 操作系统
+.DS_Store
+Thumbs.db
