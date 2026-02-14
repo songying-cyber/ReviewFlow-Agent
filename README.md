@@ -2,6 +2,12 @@
 
 一个简单的 Java Agent CLI，类似 Claude Code / Qoder CLI。
 
+## 运行截图
+
+真实运行截图，展示了 `paicli` 在本地仓库中的实际启动与交互界面：
+
+![PaiCLI 运行截图](./img/paicli-demo-window.png)
+
 ## 功能
 
 - 🤖 基于 GLM-5.1 的智能对话
