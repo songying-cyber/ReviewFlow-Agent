@@ -1,6 +1,7 @@
 package com.paicli.cli;
 
 import com.paicli.agent.Agent;
+import com.paicli.agent.PlanExecuteAgent;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -9,11 +10,11 @@ import java.io.IOException;
 import java.util.Scanner;
 
 /**
- * PaiCLI - 简单的 Java Agent CLI
- * 类似 Claude Code / Qoder CLI
+ * PaiCLI v2.0 - Plan-and-Execute Agent CLI
+ * 支持 ReAct 和 Plan-and-Execute 两种模式
  */
 public class Main {
-    private static final String VERSION = "1.0.0";
+    private static final String VERSION = "2.0.0";
     private static final String ENV_FILE = ".env";
 
     public static void main(String[] args) {
@@ -29,14 +30,24 @@ public class Main {
 
         System.out.println("✅ API Key 已加载\n");
 
-        // 创建 Agent
-        Agent agent = new Agent(apiKey);
-
-        // 交互式循环
         Scanner scanner = new Scanner(System.in);
+
+        // 选择模式
+        AgentMode mode = selectMode(scanner);
+
+        // 创建 Agent
+        Object agent;
+        if (mode == AgentMode.REACT) {
+            agent = new Agent(apiKey);
+            System.out.println("🔄 使用 ReAct 模式\n");
+        } else {
+            agent = new PlanExecuteAgent(apiKey);
+            System.out.println("📋 使用 Plan-and-Execute 模式\n");
+        }
 
         System.out.println("💡 提示:");
         System.out.println("   - 输入你的问题或任务");
+        System.out.println("   - 输入 'mode' 切换执行模式");
         System.out.println("   - 输入 'clear' 清空对话历史");
         System.out.println("   - 输入 'exit' 或 'quit' 退出\n");
 
@@ -54,20 +65,60 @@ public class Main {
                 break;
             }
 
+            if (input.equalsIgnoreCase("mode")) {
+                mode = selectMode(scanner);
+                if (mode == AgentMode.REACT) {
+                    agent = new Agent(apiKey);
+                    System.out.println("🔄 已切换到 ReAct 模式\n");
+                } else {
+                    agent = new PlanExecuteAgent(apiKey);
+                    System.out.println("📋 已切换到 Plan-and-Execute 模式\n");
+                }
+                continue;
+            }
+
             if (input.equalsIgnoreCase("clear")) {
-                agent.clearHistory();
+                if (agent instanceof Agent) {
+                    ((Agent) agent).clearHistory();
+                }
                 System.out.println("🗑️ 对话历史已清空\n");
                 continue;
             }
 
             // 运行 Agent
             System.out.println();
-            String response = agent.run(input);
+            String response;
+            if (agent instanceof Agent) {
+                response = ((Agent) agent).run(input);
+            } else {
+                response = ((PlanExecuteAgent) agent).run(input);
+            }
             System.out.println("🤖 Agent: " + response);
             System.out.println();
         }
 
         scanner.close();
+    }
+
+    /**
+     * 选择执行模式
+     */
+    private static AgentMode selectMode(Scanner scanner) {
+        System.out.println("请选择执行模式:");
+        System.out.println("  1. ReAct - 边思考边执行（适合简单任务）");
+        System.out.println("  2. Plan-and-Execute - 先规划后执行（适合复杂任务）");
+        System.out.print("> ");
+
+        String choice = scanner.nextLine().trim();
+        if (choice.equals("2")) {
+            return AgentMode.PLAN_EXECUTE;
+        }
+        return AgentMode.REACT;
+    }
+
+    private enum AgentMode {
+        REACT,
+        PLAN_EXECUTE
     }
 
     /**
@@ -112,19 +163,10 @@ public class Main {
     }
 
     private static void printBanner() {
-        System.out.println("""
-                ╔══════════════════════════════════════════════════════════╗
-                ║                                                          ║
-                ║   ██████╗  █████╗ ██╗      ██████╗██╗     ██╗            ║
-                ║   ██╔══██╗██╔══██╗██║     ██╔════╝██║     ██║            ║
-                ║   ██████╔╝███████║██║     ██║     ██║     ██║            ║
-                ║   ██╔═══╝ ██╔══██║██║     ██║     ██║     ██║            ║
-                ║   ██║     ██║  ██║███████╗╚██████╗███████╗██║            ║
-                ║   ╚═╝     ╚═╝  ╚═╝╚══════╝ ╚═════╝╚══════╝╚═╝            ║
-                ║                                                          ║
-                ║              简单的 Java Agent CLI v""" + VERSION + """
-                ║                                                          ║
-                ╚══════════════════════════════════════════════════════════╝
-                """);
+        System.out.println("========================================");
+        System.out.println("           PaiCLI v" + VERSION);
+        System.out.println("      Plan-and-Execute Agent CLI");
+        System.out.println("========================================");
+        System.out.println();
     }
 }
