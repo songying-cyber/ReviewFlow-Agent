@@ -32,22 +32,16 @@ public class Main {
 
         Scanner scanner = new Scanner(System.in);
 
-        // 选择模式
-        AgentMode mode = selectMode(scanner);
-
-        // 创建 Agent
-        Object agent;
-        if (mode == AgentMode.REACT) {
-            agent = new Agent(apiKey);
-            System.out.println("🔄 使用 ReAct 模式\n");
-        } else {
-            agent = new PlanExecuteAgent(apiKey);
-            System.out.println("📋 使用 Plan-and-Execute 模式\n");
-        }
+        // 默认使用 ReAct，Plan 模式通过 /plan 进入
+        AgentMode mode = AgentMode.REACT;
+        Object agent = createAgent(apiKey, mode, false);
 
         System.out.println("💡 提示:");
         System.out.println("   - 输入你的问题或任务");
         System.out.println("   - 输入 'mode' 切换执行模式");
+        System.out.println("   - 输入 '/plan' 进入 Plan-and-Execute 模式");
+        System.out.println("   - 输入 '/plan 任务内容' 直接用计划模式执行任务");
+        System.out.println("   - 默认模式是 ReAct");
         System.out.println("   - 输入 'clear' 清空对话历史");
         System.out.println("   - 输入 'exit' 或 'quit' 退出\n");
 
@@ -59,30 +53,37 @@ public class Main {
                 continue;
             }
 
-            // 处理特殊命令
-            if (input.equalsIgnoreCase("exit") || input.equalsIgnoreCase("quit")) {
-                System.out.println("\n👋 再见!");
-                break;
-            }
-
-            if (input.equalsIgnoreCase("mode")) {
-                mode = selectMode(scanner);
-                if (mode == AgentMode.REACT) {
-                    agent = new Agent(apiKey);
-                    System.out.println("🔄 已切换到 ReAct 模式\n");
-                } else {
-                    agent = new PlanExecuteAgent(apiKey);
-                    System.out.println("📋 已切换到 Plan-and-Execute 模式\n");
+            CliCommandParser.ParsedCommand command = CliCommandParser.parse(input);
+            boolean revertToReactAfterRun = false;
+            switch (command.type()) {
+                case EXIT -> {
+                    System.out.println("\n👋 再见!");
+                    scanner.close();
+                    return;
                 }
-                continue;
-            }
-
-            if (input.equalsIgnoreCase("clear")) {
-                if (agent instanceof Agent) {
-                    ((Agent) agent).clearHistory();
+                case SELECT_MODE -> {
+                    mode = selectMode(scanner);
+                    agent = createAgent(apiKey, mode, true);
+                    continue;
                 }
-                System.out.println("🗑️ 对话历史已清空\n");
-                continue;
+                case CLEAR -> {
+                    if (agent instanceof Agent) {
+                        ((Agent) agent).clearHistory();
+                    }
+                    System.out.println("🗑️ 对话历史已清空\n");
+                    continue;
+                }
+                case SWITCH_PLAN -> {
+                    mode = AgentMode.PLAN_EXECUTE;
+                    agent = createAgent(apiKey, mode, true);
+                    if (command.payload() == null || command.payload().isEmpty()) {
+                        continue;
+                    }
+                    input = command.payload();
+                    revertToReactAfterRun = true;
+                }
+                case NONE -> {
+                }
             }
 
             // 运行 Agent
@@ -95,9 +96,13 @@ public class Main {
             }
             System.out.println("🤖 Agent: " + response);
             System.out.println();
+
+            if (revertToReactAfterRun && mode == AgentMode.PLAN_EXECUTE) {
+                mode = AgentMode.REACT;
+                agent = createAgent(apiKey, mode, true);
+            }
         }
 
-        scanner.close();
     }
 
     /**
@@ -114,6 +119,18 @@ public class Main {
             return AgentMode.PLAN_EXECUTE;
         }
         return AgentMode.REACT;
+    }
+
+    private static Object createAgent(String apiKey, AgentMode mode, boolean switched) {
+        if (mode == AgentMode.REACT) {
+            Agent agent = new Agent(apiKey);
+            System.out.println(switched ? "🔄 已切换到 ReAct 模式\n" : "🔄 使用 ReAct 模式\n");
+            return agent;
+        }
+
+        PlanExecuteAgent agent = new PlanExecuteAgent(apiKey);
+        System.out.println(switched ? "📋 已切换到 Plan-and-Execute 模式\n" : "📋 使用 Plan-and-Execute 模式\n");
+        return agent;
     }
 
     private enum AgentMode {
