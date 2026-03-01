@@ -5,7 +5,6 @@ final class CliCommandParser {
     enum CommandType {
         NONE,
         EXIT,
-        SELECT_MODE,
         CLEAR,
         SWITCH_PLAN
     }
@@ -29,15 +28,14 @@ final class CliCommandParser {
             return ParsedCommand.none();
         }
 
-        if (trimmed.equalsIgnoreCase("exit") || trimmed.equalsIgnoreCase("quit")) {
+        if (trimmed.equalsIgnoreCase("/exit")
+                || trimmed.equalsIgnoreCase("/quit")
+                || trimmed.equalsIgnoreCase("exit")
+                || trimmed.equalsIgnoreCase("quit")) {
             return new ParsedCommand(CommandType.EXIT, null);
         }
 
-        if (trimmed.equalsIgnoreCase("mode")) {
-            return new ParsedCommand(CommandType.SELECT_MODE, null);
-        }
-
-        if (trimmed.equalsIgnoreCase("clear")) {
+        if (trimmed.equalsIgnoreCase("/clear") || trimmed.equalsIgnoreCase("clear")) {
             return new ParsedCommand(CommandType.CLEAR, null);
         }
 

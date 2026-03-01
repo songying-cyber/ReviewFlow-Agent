@@ -24,6 +24,22 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesClearSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/clear");
+
+        assertEquals(CliCommandParser.CommandType.CLEAR, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesExitSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/exit");
+
+        assertEquals(CliCommandParser.CommandType.EXIT, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
     void keepsNormalInputAsNone() {
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("帮我读取 pom.xml");
 

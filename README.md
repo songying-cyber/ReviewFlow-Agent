@@ -14,7 +14,8 @@
 
 - 在保留 `ReAct` 模式的基础上新增复杂任务规划能力
 - 支持先拆解任务，再按照依赖顺序执行
-- 新增 `mode` 和 `/plan` 切换，可在 `ReAct` 与 `Plan-and-Execute` 之间切换
+- 新增 `/plan` 入口，以一次性计划执行方式增强默认的 `ReAct`
+- 计划生成后，会先与用户确认再执行
 - 更适合多步骤、带依赖关系的复杂任务
 
 ## 启动界面
@@ -24,10 +25,18 @@
 当前启动输出以命令行实际产物为准：
 
 ```text
-========================================
-           PaiCLI v2.0.0
-      Plan-and-Execute Agent CLI
-========================================
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║   ██████╗  █████╗ ██╗ ██████╗██╗     ██╗                ║
+║   ██╔══██╗██╔══██╗██║██╔════╝██║     ██║                ║
+║   ██████╔╝███████║██║██║     ██║     ██║                ║
+║   ██╔═══╝ ██╔══██║██║██║     ██║     ██║                ║
+║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
+║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
+║                                                          ║
+║      Plan-and-Execute Agent CLI v2.0.0                 ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
 
 🔄 使用 ReAct 模式
 ```
@@ -44,7 +53,7 @@
 ### 第二期
 
 - 📋 Plan-and-Execute + DAG 任务拆解与顺序执行
-- 🔀 `mode` 模式切换
+- ⌨️ `/plan` 一次性进入计划执行
 - 🧭 更清晰的复杂任务执行顺序与依赖展示
 
 ## 快速开始
@@ -82,10 +91,11 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 
 ### 3. 如何进入 Plan 模式
 
-当前默认模式是 `ReAct`。进入 `Plan-and-Execute` 模式有 2 种方式：
+当前默认模式是 `ReAct`。进入 `Plan-and-Execute` 的方式只有 `/plan`：
 
-1. 进入交互界面后输入 `mode`，再选择 `2`
-2. 直接输入 `/plan`
+1. 输入 `/plan`
+2. 下一条任务会用计划模式执行
+3. 执行完成后自动回到默认 `ReAct`
 
 如果想一条命令切模式并执行任务，可以直接输入：
 
@@ -94,6 +104,12 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ```
 
 这条命令执行完成后，会自动回到默认的 `ReAct` 模式。
+
+计划生成后，CLI 会先停下来等待确认：
+
+- 按 `Enter`：按当前计划执行
+- 按 `ESC`：取消本次计划
+- 按 `I`：输入补充要求并重新规划
 
 ## 使用示例
 
@@ -118,16 +134,14 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ```text
 💡 提示:
    - 输入你的问题或任务
-   - 输入 'mode' 切换执行模式
-   - 输入 '/plan' 进入 Plan-and-Execute 模式
-   - 输入 '/plan 任务内容' 直接用计划模式执行任务
-   - 输入 '/react' 切回 ReAct 模式
-   - 输入 'clear' 清空对话历史
-   - 输入 'exit' 或 'quit' 退出
+   - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式
+   - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
+   - 输入 '/clear' 清空对话历史
+   - 输入 '/exit' 或 '/quit' 退出
 
 👤 你: /plan 创建一个名为 demoapp 的 java 项目，然后读取 pom.xml，最后验证项目结构
 
-📋 已切换到 Plan-and-Execute 模式
+📋 使用 Plan-and-Execute 模式
 
 📋 正在规划任务: 创建一个名为 demoapp 的 java 项目，然后读取 pom.xml，最后验证项目结构
 
@@ -142,9 +156,17 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ║     验证项目结构与 Maven 配置                          ║
 ╚══════════════════════════════════════════════════════════╝
 
-🚀 开始执行计划...
+📝 计划已生成。
+   - 回车：按当前计划执行
+   - ESC：取消本次计划
+   - I：输入补充要求后重新规划
 
-🔄 已切换到 ReAct 模式
+I
+补充> 请在执行前先检查 README
+
+📝 已收到补充要求，正在重新规划...
+
+🚀 开始执行计划...
 ```
 
 ## 可用工具
@@ -157,12 +179,10 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 
 ## 命令
 
-- `mode` - 切换 ReAct / Plan-and-Execute 模式
-- `/plan` - 切换到 Plan-and-Execute 模式
-- `/plan <任务>` - 切换到 Plan-and-Execute 模式并立即执行任务
-- `/react` - 切换回 ReAct 模式
-- `clear` - 清空对话历史
-- `exit` / `quit` - 退出程序
+- `/plan` - 下一条任务使用 Plan-and-Execute 模式
+- `/plan <任务>` - 直接用 Plan-and-Execute 模式执行这条任务
+- `/clear` - 清空对话历史
+- `/exit` / `/quit` - 退出程序
 
 ## 运行效果
 
@@ -186,10 +206,18 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ### 第二期：当前运行效果
 
 ```text
-========================================
-           PaiCLI v2.0.0
-      Plan-and-Execute Agent CLI
-========================================
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║   ██████╗  █████╗ ██╗ ██████╗██╗     ██╗                ║
+║   ██╔══██╗██╔══██╗██║██╔════╝██║     ██║                ║
+║   ██████╔╝███████║██║██║     ██║     ██║                ║
+║   ██╔═══╝ ██╔══██║██║██║     ██║     ██║                ║
+║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
+║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
+║                                                          ║
+║      Plan-and-Execute Agent CLI v2.0.0                 ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
 
 ✅ API Key 已加载
 
@@ -197,13 +225,11 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 
 💡 提示:
    - 输入你的问题或任务
-   - 输入 'mode' 切换执行模式
-   - 输入 '/plan' 进入 Plan-and-Execute 模式
-   - 输入 '/plan 任务内容' 直接用计划模式执行任务
-   - 输入 '/react' 切回 ReAct 模式
+   - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式
+   - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
    - 默认模式是 ReAct
-   - 输入 'clear' 清空对话历史
-   - 输入 'exit' 或 'quit' 退出
+   - 输入 '/clear' 清空对话历史
+   - 输入 '/exit' 或 '/quit' 退出
 
 👤 你: 你好，请列出当前目录的文件
 
@@ -229,7 +255,7 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 🤖 Agent: 当前目录包含 `src`、`target`、`pom.xml`、`README.md` 等文件，
 这是一个标准的 Java Maven 项目。
 
-👤 你: exit
+👤 你: /exit
 
 👋 再见!
 ```
