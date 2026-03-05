@@ -123,7 +123,12 @@ public class ToolRegistry {
                             }
                         }
 
-                        int exitCode = process.waitFor();
+                        boolean finished = process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
+                        if (!finished) {
+                            process.destroyForcibly();
+                            return "命令执行超时（60秒），已强制终止";
+                        }
+                        int exitCode = process.exitValue();
                         return String.format("命令执行完成 (exit code: %d)\n%s", exitCode, output);
                     } catch (Exception e) {
                         return "执行命令失败: " + e.getMessage();

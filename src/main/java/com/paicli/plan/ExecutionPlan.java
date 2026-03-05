@@ -224,10 +224,10 @@ public class ExecutionPlan {
             sb.append(String.format("║  %d. %s %-20s ", i + 1, statusIcon, task.getId()));
             sb.append(String.format("[%-10s] 依赖: %-15s║%n",
                     task.getType(), deps));
-            sb.append(String.format("║     %s%n",
-                    task.getDescription().length() > 50 ?
-                            task.getDescription().substring(0, 47) + "..." :
-                            task.getDescription()));
+            String desc = task.getDescription().length() > 50
+                    ? task.getDescription().substring(0, 47) + "..."
+                    : task.getDescription();
+            sb.append(String.format("║     %-53s║%n", desc));
         }
 
         sb.append("╚══════════════════════════════════════════════════════════╝\n");

@@ -18,16 +18,15 @@ public class GLMClient {
     private static final String API_URL = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions";
     private static final String MODEL = "glm-5.1";
     private static final ObjectMapper mapper = new ObjectMapper();
-    private final OkHttpClient httpClient;
+    private static final OkHttpClient SHARED_HTTP_CLIENT = new OkHttpClient.Builder()
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .build();
     private final String apiKey;
 
     public GLMClient(String apiKey) {
         this.apiKey = apiKey;
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(60, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
-                .build();
     }
 
     /**
@@ -88,12 +87,17 @@ public class GLMClient {
                 .post(body)
                 .build();
 
-        try (Response response = httpClient.newCall(request).execute()) {
+        try (Response response = SHARED_HTTP_CLIENT.newCall(request).execute()) {
+            ResponseBody responseBodyObj = response.body();
             if (!response.isSuccessful()) {
-                throw new IOException("API请求失败: " + response.code() + " - " + response.body().string());
+                String errorBody = responseBodyObj != null ? responseBodyObj.string() : "无响应体";
+                throw new IOException("API请求失败: " + response.code() + " - " + errorBody);
+            }
+            if (responseBodyObj == null) {
+                throw new IOException("API返回空响应体");
             }
 
-            String responseBody = response.body().string();
+            String responseBody = responseBodyObj.string();
             JsonNode root = mapper.readTree(responseBody);
 
             // 解析响应

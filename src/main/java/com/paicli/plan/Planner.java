@@ -94,8 +94,8 @@ public class Planner {
         ExecutionPlan plan = new ExecutionPlan(generatePlanId(), goal);
         plan.setSummary(summary);
 
-        // 解析任务
-        Map<String, String> idMapping = new HashMap<>();  // 用于处理可能的重复ID
+        // 第一遍：创建所有任务（不处理依赖，因为可能有前向引用）
+        Map<String, String> idMapping = new HashMap<>();
         int taskIndex = 1;
 
         for (JsonNode taskNode : tasksNode) {
@@ -107,12 +107,10 @@ public class Planner {
             String typeStr = taskNode.path("type").asText();
             Task.TaskType type = parseTaskType(typeStr);
 
-            // 先创建任务（不处理依赖，因为可能有前向引用）
-            Task task = new Task(newId, description, type);
-            plan.addTask(task);
+            plan.addTask(new Task(newId, description, type));
         }
 
-        // 第二遍处理依赖关系
+        // 第二遍：建立依赖和被依赖关系
         taskIndex = 1;
         for (JsonNode taskNode : tasksNode) {
             String newId = "task_" + taskIndex++;
@@ -123,19 +121,11 @@ public class Planner {
                 for (JsonNode depNode : depsNode) {
                     String originalDepId = depNode.asText();
                     String newDepId = idMapping.getOrDefault(originalDepId, originalDepId);
-                    if (plan.getTask(newDepId) != null) {
+                    Task dep = plan.getTask(newDepId);
+                    if (dep != null) {
                         task.addDependency(newDepId);
+                        dep.addDependent(task.getId());
                     }
-                }
-            }
-        }
-
-        // 重新建立依赖关系
-        for (Task task : plan.getAllTasks()) {
-            for (String depId : task.getDependencies()) {
-                Task dep = plan.getTask(depId);
-                if (dep != null) {
-                    dep.addDependent(task.getId());
                 }
             }
         }

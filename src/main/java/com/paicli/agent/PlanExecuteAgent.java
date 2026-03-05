@@ -96,23 +96,7 @@ public class PlanExecuteAgent {
         }
     }
 
-    /**
-     * 判断是否需要规划
-     */
-    private boolean shouldPlan(String input) {
-        // 启发式判断：包含多个动作或复杂逻辑的任务需要规划
-        String lower = input.toLowerCase();
-        int actionCount = 0;
-        String[] actionKeywords = {"创建", "写", "读", "执行", "编译", "运行", "修改", "删除", "然后", "接着", "再", "最后"};
-
-        for (String keyword : actionKeywords) {
-            if (lower.contains(keyword)) actionCount++;
-        }
-
-        return actionCount >= 3 || input.length() > 50;
-    }
-
-    /**
+/**
      * 使用Plan-and-Execute模式执行
      */
     private String runWithPlan(String goal) throws IOException {
@@ -229,7 +213,7 @@ public class PlanExecuteAgent {
                 .collect(Collectors.joining(", "));
         System.out.println("⚡ 本轮并行执行 " + executableTasks.size() + " 个任务: " + parallelTaskIds);
 
-        ExecutorService executor = Executors.newFixedThreadPool(executableTasks.size());
+        ExecutorService executor = Executors.newFixedThreadPool(Math.min(executableTasks.size(), 4));
         try {
             List<Future<TaskExecutionResult>> futures = new ArrayList<>();
             for (Task task : executableTasks) {
@@ -265,28 +249,41 @@ public class PlanExecuteAgent {
         }
     }
 
+    private static final int MAX_TASK_ITERATIONS = 5;
+
     /**
-     * 执行单个任务
+     * 执行单个任务（支持多轮工具调用）
      */
     private String executeTask(String goal, ExecutionPlan plan, Task task) throws IOException {
-        // 构建执行提示
         String prompt = String.format(EXECUTION_PROMPT,
                 task.getType(), task.getDescription());
 
-        List<GLMClient.Message> messages = Arrays.asList(
+        List<GLMClient.Message> messages = new ArrayList<>(Arrays.asList(
                 GLMClient.Message.system(prompt),
                 GLMClient.Message.user(buildTaskContext(goal, plan, task))
-        );
+        ));
 
-        // 调用LLM
-        GLMClient.ChatResponse response = llmClient.chat(
-                messages,
-                toolRegistry.getToolDefinitions()
-        );
+        StringBuilder allResults = new StringBuilder();
+        int iteration = 0;
 
-        // 如果有工具调用，执行工具
-        if (response.hasToolCalls()) {
-            StringBuilder results = new StringBuilder();
+        while (iteration < MAX_TASK_ITERATIONS) {
+            iteration++;
+
+            GLMClient.ChatResponse response = llmClient.chat(
+                    messages,
+                    toolRegistry.getToolDefinitions()
+            );
+
+            if (!response.hasToolCalls()) {
+                // 没有工具调用，返回最终结果
+                if (!allResults.isEmpty() && (response.content() == null || response.content().isBlank())) {
+                    return allResults.toString().trim();
+                }
+                return response.content();
+            }
+
+            // 有工具调用：执行工具并将结果回灌到消息历史
+            messages.add(GLMClient.Message.assistant(response.content(), response.toolCalls()));
 
             for (GLMClient.ToolCall toolCall : response.toolCalls()) {
                 String toolName = toolCall.function().name();
@@ -295,14 +292,12 @@ public class PlanExecuteAgent {
                 System.out.println("   🔧 调用工具: " + toolName);
 
                 String toolResult = toolRegistry.executeTool(toolName, toolArgs);
-                results.append(toolResult).append("\n");
+                allResults.append(toolResult).append("\n");
+                messages.add(GLMClient.Message.tool(toolCall.id(), toolResult));
             }
-
-            return results.toString().trim();
-        } else {
-            // 直接返回分析结果
-            return response.content();
         }
+
+        return allResults.toString().trim();
     }
 
     private String buildTaskContext(String goal, ExecutionPlan plan, Task task) {
@@ -360,43 +355,4 @@ public class PlanExecuteAgent {
                 .orElse("");
     }
 
-    /**
-     * 简单任务直接用ReAct
-     */
-    private String runSimple(String userInput) throws IOException {
-        System.out.println("💡 简单任务，直接执行...\n");
-
-        // 复用第1期的ReAct逻辑
-        List<GLMClient.Message> messages = new ArrayList<>();
-        messages.add(GLMClient.Message.system("你是一个智能编程助手，可以调用工具完成任务。"));
-        messages.add(GLMClient.Message.user(userInput));
-
-        GLMClient.ChatResponse response = llmClient.chat(
-                messages,
-                toolRegistry.getToolDefinitions()
-        );
-
-        if (response.hasToolCalls()) {
-            StringBuilder results = new StringBuilder();
-
-            for (GLMClient.ToolCall toolCall : response.toolCalls()) {
-                String toolResult = toolRegistry.executeTool(
-                        toolCall.function().name(),
-                        toolCall.function().arguments()
-                );
-                results.append(toolResult).append("\n");
-            }
-
-            return results.toString().trim();
-        } else {
-            return response.content();
-        }
-    }
-
-    /**
-     * 获取执行统计
-     */
-    public String getStats() {
-        return "PlanExecuteAgent 已就绪";
-    }
 }

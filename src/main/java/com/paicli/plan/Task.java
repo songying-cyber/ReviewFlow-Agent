@@ -9,13 +9,13 @@ public class Task {
     private final String id;
     private final String description;
     private final TaskType type;
-    private TaskStatus status;
-    private String result;
-    private String error;
+    private volatile TaskStatus status;
+    private volatile String result;
+    private volatile String error;
     private final List<String> dependencies;  // 依赖的其他任务ID
     private final List<String> dependents;    // 依赖此任务的其他任务ID
-    private long startTime;
-    private long endTime;
+    private volatile long startTime;
+    private volatile long endTime;
 
     public enum TaskType {
         PLANNING,      // 规划任务

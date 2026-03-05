@@ -200,8 +200,8 @@ public class Main {
             while (true) {
                 Integer key = readSingleKeyFromTerminal(terminal);
                 if (key != null) {
-                    // Enter (13 或 10)
-                    if (key == '\n' || key == '\r' || key == 13 || key == 10) {
+                    // Enter
+                    if (key == '\n' || key == '\r') {
                         System.out.println();
                         return PlanExecuteAgent.PlanReviewDecision.execute();
                     }
@@ -390,7 +390,7 @@ public class Main {
     }
 
     private static boolean isSubmitKey(int key) {
-        return key == '\n' || key == '\r' || key == 13 || key == 10;
+        return key == '\n' || key == '\r';
     }
 
     private static void drainEscapeSequence(Terminal terminal) {
