@@ -1,6 +1,6 @@
 # PaiCLI
 
-一个简单的 Java Agent CLI，从第一期的 `ReAct` 单代理循环，演进到第二期的 `Plan-and-Execute + DAG` 执行模式。
+一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第三期的 `Memory + 上下文工程`。
 
 ## 演进历程
 
@@ -18,9 +18,16 @@
 - 计划生成后，会先与用户确认再执行
 - 更适合多步骤、带依赖关系的复杂任务
 
+### 第三期：Memory + 上下文工程
+
+- 短期记忆管理当前对话与工具结果
+- 长期记忆持久化关键事实，跨会话复用
+- 对话接近预算时自动做摘要压缩
+- 新增 `/memory` 查看状态、`/save` 手动保存事实
+
 ## 启动界面
 
-### 第二期当前启动界面
+### 第三期当前启动界面
 
 当前启动输出以命令行实际产物为准：
 
@@ -34,7 +41,7 @@
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      Plan-and-Execute Agent CLI v2.0.0                 ║
+║      Memory-Enhanced Agent CLI v3.0.0                 ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -56,6 +63,12 @@
 - ⌨️ `/plan` 一次性进入计划执行
 - 🧭 更清晰的复杂任务执行顺序与依赖展示
 
+### 第三期
+
+- 🧠 短期记忆、长期记忆与相关记忆检索
+- 📦 长对话摘要压缩与 Token 预算管理
+- 💾 `/memory` 与 `/save` 记忆管理入口
+
 ## 快速开始
 
 ### 1. 配置 API Key
@@ -71,6 +84,14 @@ cp .env.example .env
 
 ```bash
 export GLM_API_KEY=your_api_key_here
+```
+
+长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
+
+如果你想为某次运行指定单独目录，可以额外传入：
+
+```bash
+java -Dpaicli.memory.dir=/tmp/paicli-memory -jar target/paicli-1.0-SNAPSHOT.jar
 ```
 
 ### 2. 编译运行
@@ -108,7 +129,8 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 计划生成后，CLI 会先停下来等待确认：
 
 - 按 `Enter`：按当前计划执行
-- 按 `ESC`：取消本次计划
+- 按 `Ctrl+O`：展开完整计划
+- 按 `ESC`：折叠完整计划或取消本次计划
 - 按 `I`：输入补充要求并重新规划
 
 ## 使用示例
@@ -136,6 +158,8 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
    - 输入你的问题或任务
    - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式
    - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
+   - 输入 '/memory' 查看记忆状态
+   - 输入 '/save 事实内容' 手动保存关键事实
    - 输入 '/clear' 清空对话历史
    - 输入 '/exit' 或 '/quit' 退出
 
@@ -181,6 +205,8 @@ I
 
 - `/plan` - 下一条任务使用 Plan-and-Execute 模式
 - `/plan <任务>` - 直接用 Plan-and-Execute 模式执行这条任务
+- `/memory` / `/mem` - 查看记忆系统状态
+- `/save <事实>` - 手动保存关键事实到长期记忆
 - `/clear` - 清空对话历史
 - `/exit` / `/quit` - 退出程序
 
@@ -203,7 +229,7 @@ I
 ╚══════════════════════════════════════════════════════════╝
 ```
 
-### 第二期：当前运行效果
+### 第三期：当前运行效果
 
 ```text
 ╔══════════════════════════════════════════════════════════╗
@@ -215,7 +241,7 @@ I
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      Plan-and-Execute Agent CLI v2.0.0                 ║
+║      Memory-Enhanced Agent CLI v3.0.0                 ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -229,6 +255,8 @@ I
    - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
    - 默认模式是 ReAct
    - 输入 '/clear' 清空对话历史
+   - 输入 '/memory' 查看记忆状态
+   - 输入 '/save 事实内容' 手动保存关键事实
    - 输入 '/exit' 或 '/quit' 退出
 
 👤 你: 你好，请列出当前目录的文件
@@ -267,3 +295,34 @@ I
 - GLM-5.1 API
 - OkHttp
 - Jackson
+- JLine3（终端交互）
+
+## 项目结构
+
+```
+src/main/java/com/paicli
+├── agent/
+│   ├── Agent.java              # ReAct Agent
+│   └── PlanExecuteAgent.java   # Plan-and-Execute Agent
+├── cli/
+│   ├── Main.java               # CLI 入口
+│   ├── CliCommandParser.java   # 命令解析
+│   └── PlanReviewInputParser.java  # 计划审核输入
+├── llm/
+│   └── GLMClient.java          # GLM-5.1 API 客户端
+├── memory/
+│   ├── MemoryEntry.java        # 记忆条目
+│   ├── Memory.java             # Memory 接口
+│   ├── ConversationMemory.java # 短期记忆
+│   ├── LongTermMemory.java     # 长期记忆
+│   ├── ContextCompressor.java  # 上下文压缩
+│   ├── TokenBudget.java        # Token 预算管理
+│   ├── MemoryRetriever.java    # 记忆检索
+│   └── MemoryManager.java      # 记忆门面类
+├── plan/
+│   ├── Task.java               # 任务定义
+│   ├── ExecutionPlan.java      # 执行计划
+│   └── Planner.java            # 规划器
+└── tool/
+    └── ToolRegistry.java       # 工具注册表
+```

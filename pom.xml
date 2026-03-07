@@ -54,6 +54,13 @@
             <artifactId>jline</artifactId>
             <version>3.26.3</version>
         </dependency>
+
+        <!-- 中文分词 -->
+        <dependency>
+            <groupId>com.huaban</groupId>
+            <artifactId>jieba-analysis</artifactId>
+            <version>1.0.2</version>
+        </dependency>
     </dependencies>
 
     <build>

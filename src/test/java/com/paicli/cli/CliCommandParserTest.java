@@ -40,6 +40,22 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesMemorySlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/memory");
+
+        assertEquals(CliCommandParser.CommandType.MEMORY_STATUS, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesSaveSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/save 记住这个事实");
+
+        assertEquals(CliCommandParser.CommandType.MEMORY_SAVE, command.type());
+        assertEquals("记住这个事实", command.payload());
+    }
+
+    @Test
     void keepsNormalInputAsNone() {
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("帮我读取 pom.xml");
 

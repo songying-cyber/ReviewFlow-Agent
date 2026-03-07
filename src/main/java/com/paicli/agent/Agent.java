@@ -1,6 +1,7 @@
 package com.paicli.agent;
 
 import com.paicli.llm.GLMClient;
+import com.paicli.memory.MemoryManager;
 import com.paicli.tool.ToolRegistry;
 
 import java.io.IOException;
@@ -14,6 +15,7 @@ public class Agent {
     private final GLMClient llmClient;
     private final ToolRegistry toolRegistry;
     private final List<GLMClient.Message> conversationHistory;
+    private final MemoryManager memoryManager;
     private static final int MAX_ITERATIONS = 10;
 
     // 系统提示词
@@ -30,6 +32,8 @@ public class Agent {
             当需要操作文件、执行命令或创建项目时，请使用工具调用。
             使用工具后，根据工具返回的结果继续思考下一步行动。
 
+            如果提供了相关记忆，请参考其中的信息来辅助决策。
+
             请用中文回复用户。
             """;
 
@@ -37,6 +41,7 @@ public class Agent {
         this.llmClient = new GLMClient(apiKey);
         this.toolRegistry = new ToolRegistry();
         this.conversationHistory = new ArrayList<>();
+        this.memoryManager = new MemoryManager(llmClient);
 
         // 添加系统提示
         conversationHistory.add(GLMClient.Message.system(SYSTEM_PROMPT));
@@ -46,7 +51,14 @@ public class Agent {
      * 运行 Agent 循环
      */
     public String run(String userInput) {
-        // 添加用户输入到历史
+        // 存入短期记忆
+        memoryManager.addUserMessage(userInput);
+
+        // 检索相关长期记忆，注入到 system prompt
+        String memoryContext = memoryManager.buildContextForQuery(userInput, 500);
+        updateSystemPromptWithMemory(memoryContext);
+
+        // 添加用户输入到历史（保持原文，不污染 user message）
         conversationHistory.add(GLMClient.Message.user(userInput));
 
         System.out.println("🤔 思考中...\n");
@@ -84,6 +96,9 @@ public class Agent {
                         System.out.println("   结果: " + toolResult.substring(0, Math.min(200, toolResult.length()))
                                 + (toolResult.length() > 200 ? "..." : "") + "\n");
 
+                        // 存入记忆
+                        memoryManager.addToolResult(toolName, toolResult);
+
                         // 添加工具结果到历史
                         conversationHistory.add(GLMClient.Message.tool(toolCall.id(), toolResult));
                     }
@@ -94,6 +109,12 @@ public class Agent {
                 } else {
                     // 没有工具调用，直接返回结果
                     conversationHistory.add(GLMClient.Message.assistant(response.content()));
+
+                    // 存入记忆
+                    memoryManager.addAssistantMessage(response.content());
+
+                    // 记录 token 使用
+                    memoryManager.recordTokenUsage(response.inputTokens(), response.outputTokens());
 
                     // 打印 token 使用情况
                     System.out.printf("📊 Token使用: 输入=%d, 输出=%d%n\n",
@@ -111,12 +132,31 @@ public class Agent {
     }
 
     /**
-     * 清空对话历史（保留系统提示）
+     * 清空对话历史（保留系统提示），并提取关键事实到长期记忆
      */
     public void clearHistory() {
+        // 先保存当前对话的关键事实
+        memoryManager.extractAndSaveFacts();
+
         GLMClient.Message systemMsg = conversationHistory.get(0);
         conversationHistory.clear();
         conversationHistory.add(systemMsg);
+
+        // 清空短期记忆
+        memoryManager.getShortTermMemory().clear();
+    }
+
+    /**
+     * 将记忆上下文注入到 system prompt 中（替换 conversationHistory[0]）
+     */
+    private void updateSystemPromptWithMemory(String memoryContext) {
+        if (memoryContext == null || memoryContext.isEmpty()) {
+            // 恢复原始 system prompt
+            conversationHistory.set(0, GLMClient.Message.system(SYSTEM_PROMPT));
+        } else {
+            String enrichedPrompt = SYSTEM_PROMPT + "\n" + memoryContext;
+            conversationHistory.set(0, GLMClient.Message.system(enrichedPrompt));
+        }
     }
 
     /**
@@ -124,5 +164,12 @@ public class Agent {
      */
     public List<GLMClient.Message> getConversationHistory() {
         return new ArrayList<>(conversationHistory);
+    }
+
+    /**
+     * 获取记忆管理器
+     */
+    public MemoryManager getMemoryManager() {
+        return memoryManager;
     }
 }

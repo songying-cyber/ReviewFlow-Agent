@@ -25,10 +25,10 @@
 
 - 项目名：`PaiCLI`
 - 定位：一个教学导向的 Java Agent CLI，目标是从简单 Agent CLI 逐步演进到更完整的 Agent 产品
-- 当前主线：已完成第 1 期 `ReAct`，已落地第 2 期 `Plan-and-Execute + DAG`
-- 当前用户可感知版本：CLI Banner 显示 `v2.0.0`
+- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`
+- 当前用户可感知版本：CLI Banner 显示 `v3.0.0`
 - 当前 Maven 产物版本：`pom.xml` 仍是 `1.0-SNAPSHOT`
-- 结论：如果你看到运行界面是 `v2.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
+- 结论：如果你看到运行界面是 `v3.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
 
 ## 运行前提
 
@@ -47,6 +47,11 @@ API Key 当前读取顺序以代码为准：
 ```bash
 GLM_API_KEY=your_api_key_here
 ```
+
+长期记忆默认持久化位置：
+
+1. `~/.paicli/memory/long_term_memory.json`
+2. 如果传入 `-Dpaicli.memory.dir=/path/to/dir`，则优先使用该目录
 
 ## 常用命令
 
@@ -73,6 +78,7 @@ mvn test -Dtest=ExecutionPlanTest
 - 维护对话历史
 - 最多迭代 10 轮
 - 支持工具调用后继续思考
+- 会写入短期记忆，并在清空时提取关键事实到长期记忆
 
 ### 2. Plan-and-Execute 模式
 
@@ -96,6 +102,15 @@ mvn test -Dtest=ExecutionPlanTest
 - 原始按键处理依赖 JLine raw mode
 - 涉及这块的改动，不能只看字符串，要连输入模式和回退路径一起看
 
+### 4. Memory 系统
+
+- 主模块在 `src/main/java/com/paicli/memory/`
+- 默认包含：短期记忆、长期记忆、摘要压缩、事实提取、Token 预算、相关记忆检索
+- CLI 命令：
+  - `/memory` 或 `/mem`：查看当前记忆状态
+  - `/save <事实>`：手动保存关键事实
+- `ReAct` 和 `Plan-and-Execute` 两条主路径都应写回记忆；改动其中一条时，另一条也要检查
+
 ## 仓库结构
 
 ```text
@@ -109,6 +124,14 @@ src/main/java/com/paicli
 │   └── PlanReviewInputParser.java
 ├── llm/
 │   └── GLMClient.java
+├── memory/
+│   ├── ConversationMemory.java
+│   ├── LongTermMemory.java
+│   ├── MemoryManager.java
+│   ├── MemoryRetriever.java
+│   ├── ContextCompressor.java
+│   ├── MemoryEntry.java
+│   └── TokenBudget.java
 ├── plan/
 │   ├── ExecutionPlan.java
 │   ├── Planner.java
@@ -123,6 +146,12 @@ src/main/java/com/paicli
 - `PlanReviewInputParserTest`
 - `MainInputNormalizationTest`
 - `ExecutionPlanTest`
+- `MemoryEntryTest`
+- `ConversationMemoryTest`
+- `LongTermMemoryTest`
+- `MemoryRetrieverTest`
+- `MemoryManagerTest`
+- `PlanExecuteAgentTest`
 
 这意味着当前自动化测试更偏解析和计划结构，不覆盖真实 LLM 联调，也不覆盖终端交互的完整手工体验。
 
@@ -183,7 +212,6 @@ src/main/java/com/paicli
 
 下面这些内容在路线图里出现了，但当前仓库还没有真正交付：
 
-- Memory 系统
 - RAG / 代码库检索
 - Multi-Agent
 - HITL 审批流
@@ -206,7 +234,7 @@ src/main/java/com/paicli
 
 ### 2. 改命令入口，要联动这几处
 
-如果修改 `/plan`、`/clear`、`/exit` 或输入解析：
+如果修改 `/plan`、`/clear`、`/memory`、`/save`、`/exit` 或输入解析：
 
 - `Main.java`
 - `CliCommandParser.java`
@@ -246,6 +274,15 @@ src/main/java/com/paicli
 - `GLMClient.java`
 - `Main.java`（如果配置读取方式变化）
 - `.env.example`
+- `README.md`
+- `AGENTS.md`
+
+### 5.1 改 Memory 持久化或预算策略，要联动这几处
+
+- `MemoryManager.java`
+- `LongTermMemory.java`
+- `TokenBudget.java`
+- 至少一个 memory 测试
 - `README.md`
 - `AGENTS.md`
 

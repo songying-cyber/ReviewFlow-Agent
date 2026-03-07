@@ -6,7 +6,9 @@ final class CliCommandParser {
         NONE,
         EXIT,
         CLEAR,
-        SWITCH_PLAN
+        SWITCH_PLAN,
+        MEMORY_STATUS,
+        MEMORY_SAVE
     }
 
     record ParsedCommand(CommandType type, String payload) {
@@ -45,6 +47,14 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/plan ", 0, 6)) {
             return new ParsedCommand(CommandType.SWITCH_PLAN, trimmed.substring(6).trim());
+        }
+
+        if (trimmed.equalsIgnoreCase("/memory") || trimmed.equalsIgnoreCase("/mem")) {
+            return new ParsedCommand(CommandType.MEMORY_STATUS, null);
+        }
+
+        if (trimmed.regionMatches(true, 0, "/save ", 0, 6)) {
+            return new ParsedCommand(CommandType.MEMORY_SAVE, trimmed.substring(6).trim());
         }
 
         return ParsedCommand.none();

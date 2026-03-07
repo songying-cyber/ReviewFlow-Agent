@@ -18,11 +18,11 @@ import java.io.FileReader;
 import java.io.IOException;
 
 /**
- * PaiCLI v2.0 - Plan-and-Execute Agent CLI
- * 支持 ReAct 和 Plan-and-Execute 两种模式
+ * PaiCLI v3.0 - Memory-Enhanced Agent CLI
+ * 支持 ReAct、Plan-and-Execute 与 Memory 能力
  */
 public class Main {
-    private static final String VERSION = "2.0.0";
+    private static final String VERSION = "3.0.0";
     private static final String ENV_FILE = ".env";
     private static final String BRACKETED_PASTE_BEGIN = "[200~";
     private static final String BRACKETED_PASTE_END = "\u001b[201~";
@@ -83,6 +83,8 @@ public class Main {
             System.out.println("   - 计划生成后可直接执行、补充要求重规划，或取消");
             System.out.println("   - 默认模式是 ReAct");
             System.out.println("   - 输入 '/clear' 清空对话历史");
+            System.out.println("   - 输入 '/memory' 查看记忆状态");
+            System.out.println("   - 输入 '/save 事实内容' 手动保存关键事实");
             System.out.println("   - 输入 '/exit' 或 '/quit' 退出\n");
 
             while (true) {
@@ -117,7 +119,21 @@ public class Main {
                     }
                     case CLEAR -> {
                         reactAgent.clearHistory();
-                        System.out.println("🗑️ 对话历史已清空\n");
+                        System.out.println("🗑️ 对话历史已清空，关键事实已保存到长期记忆\n");
+                        continue;
+                    }
+                    case MEMORY_STATUS -> {
+                        System.out.println("📋 记忆系统状态：");
+                        System.out.println(reactAgent.getMemoryManager().getSystemStatus());
+                        System.out.println();
+                        continue;
+                    }
+                    case MEMORY_SAVE -> {
+                        String fact = command.payload();
+                        if (fact != null && !fact.isEmpty()) {
+                            reactAgent.getMemoryManager().storeFact(fact);
+                            System.out.println("💾 已保存到长期记忆: " + fact + "\n");
+                        }
                         continue;
                     }
                     case SWITCH_PLAN -> {
@@ -464,7 +480,7 @@ public class Main {
         System.out.println("║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║");
         System.out.println("║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║");
         System.out.println("║                                                          ║");
-        System.out.printf("║      Plan-and-Execute Agent CLI %-8s                 ║%n", "v" + VERSION);
+        System.out.printf("║      Memory-Enhanced Agent CLI %-8s                 ║%n", "v" + VERSION);
         System.out.println("║                                                          ║");
         System.out.println("╚══════════════════════════════════════════════════════════╝");
         System.out.println();
