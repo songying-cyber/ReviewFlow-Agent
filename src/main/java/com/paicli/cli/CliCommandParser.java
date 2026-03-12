@@ -8,7 +8,10 @@ final class CliCommandParser {
         CLEAR,
         SWITCH_PLAN,
         MEMORY_STATUS,
-        MEMORY_SAVE
+        MEMORY_SAVE,
+        INDEX_CODE,
+        SEARCH_CODE,
+        GRAPH_QUERY
     }
 
     record ParsedCommand(CommandType type, String payload) {
@@ -55,6 +58,22 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/save ", 0, 6)) {
             return new ParsedCommand(CommandType.MEMORY_SAVE, trimmed.substring(6).trim());
+        }
+
+        if (trimmed.equalsIgnoreCase("/index")) {
+            return new ParsedCommand(CommandType.INDEX_CODE, null);
+        }
+
+        if (trimmed.regionMatches(true, 0, "/index ", 0, 7)) {
+            return new ParsedCommand(CommandType.INDEX_CODE, trimmed.substring(7).trim());
+        }
+
+        if (trimmed.regionMatches(true, 0, "/search ", 0, 8)) {
+            return new ParsedCommand(CommandType.SEARCH_CODE, trimmed.substring(8).trim());
+        }
+
+        if (trimmed.regionMatches(true, 0, "/graph ", 0, 7)) {
+            return new ParsedCommand(CommandType.GRAPH_QUERY, trimmed.substring(7).trim());
         }
 
         return ParsedCommand.none();

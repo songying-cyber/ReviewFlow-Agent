@@ -1,6 +1,6 @@
 # PaiCLI
 
-一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第三期的 `Memory + 上下文工程`。
+一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第四期的 `RAG 检索 + 代码库理解`。
 
 ## 演进历程
 
@@ -25,6 +25,15 @@
 - 对话接近预算时自动做摘要压缩
 - 新增 `/memory` 查看状态、`/save` 手动保存事实
 
+### 第四期：RAG 检索 + 代码库理解
+
+- 代码向量化（Embedding），支持本地 Ollama 和远程 API
+- SQLite 持久化 + 余弦相似度语义检索
+- 代码分块（文件/类/方法粒度）与 AST 解析
+- 代码关系图谱（extends/implements/imports/calls/contains）
+- 新增 `/index`、`/search`、`/graph` CLI 命令
+- Agent 自动调用 `search_code` 工具理解代码库
+
 ## 启动界面
 
 ### 第三期当前启动界面
@@ -41,7 +50,7 @@
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      Memory-Enhanced Agent CLI v3.0.0                 ║
+║      RAG-Enhanced Agent CLI v4.0.0                  ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -69,6 +78,13 @@
 - 📦 长对话摘要压缩与 Token 预算管理
 - 💾 `/memory` 与 `/save` 记忆管理入口
 
+### 第四期
+
+- 🔍 代码库语义检索（自然语言搜代码）
+- 🕸️ 代码关系图谱（类继承、接口实现、方法调用）
+- 📡 本地 Ollama Embedding + 远程 API 可配置
+- 🗃️ SQLite 向量存储与持久化
+
 ## 快速开始
 
 ### 1. 配置 API Key
@@ -87,11 +103,16 @@ export GLM_API_KEY=your_api_key_here
 ```
 
 长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
+代码索引默认保存在 `~/.paicli/rag/codebase.db`。
 
 如果你想为某次运行指定单独目录，可以额外传入：
 
 ```bash
+# 指定记忆目录
 java -Dpaicli.memory.dir=/tmp/paicli-memory -jar target/paicli-1.0-SNAPSHOT.jar
+
+# 指定 RAG 索引目录
+java -Dpaicli.rag.dir=/tmp/paicli-rag -jar target/paicli-1.0-SNAPSHOT.jar
 ```
 
 ### 2. 编译运行
@@ -100,7 +121,7 @@ java -Dpaicli.memory.dir=/tmp/paicli-memory -jar target/paicli-1.0-SNAPSHOT.jar
 # 编译
 mvn clean package
 
-# 运行
+# 运行（需要本地 Ollama 已启动且拉取了 nomic-embed-text）
 java -jar target/paicli-1.0-SNAPSHOT.jar
 ```
 
@@ -158,6 +179,10 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
    - 输入你的问题或任务
    - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式
    - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
+   - 计划生成后可直接执行、补充要求重规划，或取消
+   - 输入 '/index [路径]' 为代码库建立向量索引
+   - 输入 '/search <查询>' 语义检索代码
+   - 输入 '/graph <类名>' 查看代码关系图谱
    - 输入 '/memory' 查看记忆状态
    - 输入 '/save 事实内容' 手动保存关键事实
    - 输入 '/clear' 清空对话历史
@@ -200,6 +225,7 @@ I
 - `list_dir` - 列出目录内容
 - `execute_command` - 执行 Shell 命令
 - `create_project` - 创建项目结构（java/python/node）
+- `search_code` - 语义检索代码库（自然语言查询）
 
 ## 命令
 
@@ -207,6 +233,9 @@ I
 - `/plan <任务>` - 直接用 Plan-and-Execute 模式执行这条任务
 - `/memory` / `/mem` - 查看记忆系统状态
 - `/save <事实>` - 手动保存关键事实到长期记忆
+- `/index [路径]` - 索引代码库（默认当前目录）
+- `/search <查询>` - 语义检索代码
+- `/graph <类名>` - 查看代码关系图谱
 - `/clear` - 清空对话历史
 - `/exit` / `/quit` - 退出程序
 
@@ -253,6 +282,10 @@ I
    - 输入你的问题或任务
    - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式
    - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
+   - 计划生成后可直接执行、补充要求重规划，或取消
+   - 输入 '/index [路径]' 为代码库建立向量索引
+   - 输入 '/search <查询>' 语义检索代码
+   - 输入 '/graph <类名>' 查看代码关系图谱
    - 默认模式是 ReAct
    - 输入 '/clear' 清空对话历史
    - 输入 '/memory' 查看记忆状态
@@ -296,6 +329,9 @@ I
 - OkHttp
 - Jackson
 - JLine3（终端交互）
+- SQLite（向量与图谱持久化）
+- JavaParser（AST 分析）
+- Ollama（本地 Embedding）
 
 ## 项目结构
 
@@ -312,7 +348,6 @@ src/main/java/com/paicli
 │   └── GLMClient.java          # GLM-5.1 API 客户端
 ├── memory/
 │   ├── MemoryEntry.java        # 记忆条目
-│   ├── Memory.java             # Memory 接口
 │   ├── ConversationMemory.java # 短期记忆
 │   ├── LongTermMemory.java     # 长期记忆
 │   ├── ContextCompressor.java  # 上下文压缩
@@ -323,6 +358,15 @@ src/main/java/com/paicli
 │   ├── Task.java               # 任务定义
 │   ├── ExecutionPlan.java      # 执行计划
 │   └── Planner.java            # 规划器
+├── rag/
+│   ├── EmbeddingClient.java    # Embedding API 客户端
+│   ├── VectorStore.java        # SQLite 向量存储
+│   ├── CodeChunk.java          # 代码块模型
+│   ├── CodeChunker.java        # 代码分块器
+│   ├── CodeAnalyzer.java       # AST 关系分析
+│   ├── CodeRelation.java       # 代码关系模型
+│   ├── CodeIndex.java          # 索引管理器
+│   └── CodeRetriever.java      # 检索入口
 └── tool/
     └── ToolRegistry.java       # 工具注册表
 ```

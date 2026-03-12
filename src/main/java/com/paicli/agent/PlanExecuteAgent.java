@@ -71,7 +71,9 @@ public class PlanExecuteAgent {
             3. list_dir - 列出目录内容，参数：{"path": "目录路径"}
             4. execute_command - 执行命令，参数：{"command": "命令"}
             5. create_project - 创建项目，参数：{"name": "名称", "type": "java|python|node"}
+            6. search_code - 语义检索代码库，参数：{"query": "自然语言描述", "top_k": 5}
 
+            如果任务涉及理解代码库（如分析代码结构、查找实现位置），请优先使用 search_code 工具。
             如果是ANALYSIS或VERIFICATION类型任务，请直接输出分析结果，不需要调用工具。
 
             请用中文回复。

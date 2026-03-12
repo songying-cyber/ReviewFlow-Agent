@@ -28,9 +28,13 @@ public class Agent {
             3. list_dir - 列出目录内容
             4. execute_command - 执行Shell命令
             5. create_project - 创建新项目结构
+            6. search_code - 语义检索代码库，参数：{"query": "自然语言描述", "top_k": 5}
 
             当需要操作文件、执行命令或创建项目时，请使用工具调用。
             使用工具后，根据工具返回的结果继续思考下一步行动。
+
+            如果用户询问与代码库相关的问题（如"这个类是干什么的"、"哪里用了某个功能"），
+            请优先使用 search_code 工具检索相关代码，再基于检索结果回答。
 
             如果提供了相关记忆，请参考其中的信息来辅助决策。
 
@@ -171,5 +175,12 @@ public class Agent {
      */
     public MemoryManager getMemoryManager() {
         return memoryManager;
+    }
+
+    /**
+     * 获取工具注册表（用于同步项目路径等配置）
+     */
+    public ToolRegistry getToolRegistry() {
+        return toolRegistry;
     }
 }

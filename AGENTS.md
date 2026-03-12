@@ -25,10 +25,10 @@
 
 - 项目名：`PaiCLI`
 - 定位：一个教学导向的 Java Agent CLI，目标是从简单 Agent CLI 逐步演进到更完整的 Agent 产品
-- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`
-- 当前用户可感知版本：CLI Banner 显示 `v3.0.0`
+- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`
+- 当前用户可感知版本：CLI Banner 显示 `v4.0.0`
 - 当前 Maven 产物版本：`pom.xml` 仍是 `1.0-SNAPSHOT`
-- 结论：如果你看到运行界面是 `v3.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
+- 结论：如果你看到运行界面是 `v4.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
 
 ## 运行前提
 
@@ -53,6 +53,17 @@ GLM_API_KEY=your_api_key_here
 1. `~/.paicli/memory/long_term_memory.json`
 2. 如果传入 `-Dpaicli.memory.dir=/path/to/dir`，则优先使用该目录
 
+代码索引（RAG）默认持久化位置：
+
+1. `~/.paicli/rag/codebase.db`
+2. 如果传入 `-Dpaicli.rag.dir=/path/to/dir`，则优先使用该目录
+
+Embedding 配置读取顺序（以代码实际行为为准）：
+
+1. 环境变量：`EMBEDDING_PROVIDER`、`EMBEDDING_MODEL`、`EMBEDDING_BASE_URL`、`EMBEDDING_API_KEY`
+2. 系统属性（同上）
+3. 默认值：`ollama` / `nomic-embed-text:latest` / `http://localhost:11434`
+
 ## 常用命令
 
 ```bash
@@ -61,6 +72,12 @@ mvn clean package
 java -jar target/paicli-1.0-SNAPSHOT.jar
 mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 mvn test
+```
+
+验证 RAG 相关测试：
+
+```bash
+mvn test -Dtest=CodeChunkerTest,CodeAnalyzerTest,VectorStoreTest,CodeIndexTest
 ```
 
 如果只是验证一个测试类：
@@ -111,6 +128,17 @@ mvn test -Dtest=ExecutionPlanTest
   - `/save <事实>`：手动保存关键事实
 - `ReAct` 和 `Plan-and-Execute` 两条主路径都应写回记忆；改动其中一条时，另一条也要检查
 
+### 5. RAG 系统
+
+- 主模块在 `src/main/java/com/paicli/rag/`
+- 默认包含：EmbeddingClient、VectorStore（SQLite）、CodeChunker、CodeAnalyzer、CodeIndex、CodeRetriever
+- CLI 命令：
+  - `/index [路径]`：索引代码库
+  - `/search <查询>`：语义检索代码
+  - `/graph <类名>`：查看代码关系图谱
+- Agent 工具：`search_code`（语义检索代码库）
+- 在 ReAct 和 Plan 模式下，Agent 会自动检索代码上下文辅助回答
+
 ## 仓库结构
 
 ```text
@@ -136,6 +164,15 @@ src/main/java/com/paicli
 │   ├── ExecutionPlan.java
 │   ├── Planner.java
 │   └── Task.java
+├── rag/
+│   ├── EmbeddingClient.java
+│   ├── VectorStore.java
+│   ├── CodeChunk.java
+│   ├── CodeChunker.java
+│   ├── CodeAnalyzer.java
+│   ├── CodeRelation.java
+│   ├── CodeIndex.java
+│   └── CodeRetriever.java
 └── tool/
     └── ToolRegistry.java
 ```
@@ -152,8 +189,13 @@ src/main/java/com/paicli
 - `MemoryRetrieverTest`
 - `MemoryManagerTest`
 - `PlanExecuteAgentTest`
+- `EmbeddingClientTest`
+- `VectorStoreTest`
+- `CodeChunkerTest`
+- `CodeAnalyzerTest`
+- `CodeIndexTest`
 
-这意味着当前自动化测试更偏解析和计划结构，不覆盖真实 LLM 联调，也不覆盖终端交互的完整手工体验。
+这意味着当前自动化测试更偏解析、计划结构、RAG 核心模块，不覆盖真实 LLM 联调、真实 Embedding API 联调，也不覆盖终端交互的完整手工体验。
 
 ## 核心文件说明
 
@@ -234,7 +276,7 @@ src/main/java/com/paicli
 
 ### 2. 改命令入口，要联动这几处
 
-如果修改 `/plan`、`/clear`、`/memory`、`/save`、`/exit` 或输入解析：
+如果修改 `/plan`、`/clear`、`/memory`、`/save`、`/index`、`/search`、`/graph`、`/exit` 或输入解析：
 
 - `Main.java`
 - `CliCommandParser.java`
@@ -277,7 +319,17 @@ src/main/java/com/paicli
 - `README.md`
 - `AGENTS.md`
 
-### 5.1 改 Memory 持久化或预算策略，要联动这几处
+### 5.1 改 Embedding 配置或向量存储，要联动这几处
+
+如果修改 Embedding provider、模型、接口或向量存储结构：
+
+- `EmbeddingClient.java`
+- `VectorStore.java`
+- `.env.example`
+- `README.md`
+- `AGENTS.md`
+
+### 5.2 改 Memory 持久化或预算策略，要联动这几处
 
 - `MemoryManager.java`
 - `LongTermMemory.java`
@@ -349,6 +401,8 @@ mvn test -Dtest=ExecutionPlanTest
 - 规划/DAG 问题：先看 `PlanExecuteAgent.java` + `Planner.java` + `ExecutionPlan.java`
 - 工具调用问题：先看 `ToolRegistry.java` + `Agent.java`
 - API/模型问题：先看 `GLMClient.java`
+- RAG/代码检索问题：先看 `CodeRetriever.java` + `CodeIndex.java` + `VectorStore.java`
+- 代码分块/AST 问题：先看 `CodeChunker.java` + `CodeAnalyzer.java`
 
 ## 持续维护约定
 

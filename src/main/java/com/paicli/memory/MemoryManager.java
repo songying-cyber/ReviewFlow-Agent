@@ -19,7 +19,7 @@ public class MemoryManager {
     private final TokenBudget tokenBudget;
 
     public MemoryManager(GLMClient llmClient) {
-        this(llmClient, 8192, 200000, null);
+        this(llmClient, 32768, 200000, null);
     }
 
     /**
@@ -69,16 +69,23 @@ public class MemoryManager {
         compressIfNeeded();
     }
 
+    // 工具结果在记忆中的最大长度（完整结果已在任务消息历史里，记忆只需保留摘要）
+    private static final int MAX_TOOL_RESULT_CHARS = 500;
+
     /**
-     * 添加工具执行结果到短期记忆
+     * 添加工具执行结果到短期记忆（截断过长结果，避免快速撑满预算）
      */
     public void addToolResult(String toolName, String result) {
+        String truncated = result.length() > MAX_TOOL_RESULT_CHARS
+                ? result.substring(0, MAX_TOOL_RESULT_CHARS) + "...(已截断)"
+                : result;
+        String content = "[" + toolName + "] " + truncated;
         MemoryEntry entry = new MemoryEntry(
                 "tool-" + UUID.randomUUID().toString().substring(0, 8),
-                "[" + toolName + "] " + result,
+                content,
                 MemoryEntry.MemoryType.TOOL_RESULT,
                 null,
-                MemoryEntry.estimateTokens(result)
+                MemoryEntry.estimateTokens(content)
         );
         shortTermMemory.store(entry);
         compressIfNeeded();

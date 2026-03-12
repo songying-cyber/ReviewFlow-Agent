@@ -3,6 +3,10 @@ package com.paicli.cli;
 import com.paicli.agent.Agent;
 import com.paicli.agent.PlanExecuteAgent;
 import com.paicli.plan.ExecutionPlan;
+import com.paicli.rag.CodeIndex;
+import com.paicli.rag.CodeRetriever;
+import com.paicli.rag.CodeRelation;
+import com.paicli.rag.SearchResultFormatter;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.jline.terminal.Attributes;
@@ -16,13 +20,14 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.List;
 
 /**
- * PaiCLI v3.0 - Memory-Enhanced Agent CLI
- * 支持 ReAct、Plan-and-Execute 与 Memory 能力
+ * PaiCLI v4.0 - RAG-Enhanced Agent CLI
+ * 支持 ReAct、Plan-and-Execute、Memory 与 RAG 能力
  */
 public class Main {
-    private static final String VERSION = "3.0.0";
+    private static final String VERSION = "4.0.0";
     private static final String ENV_FILE = ".env";
     private static final String BRACKETED_PASTE_BEGIN = "[200~";
     private static final String BRACKETED_PASTE_END = "\u001b[201~";
@@ -76,16 +81,7 @@ public class Main {
             System.out.println("🔄 使用 ReAct 模式\n");
             boolean nextTaskUsePlanMode = false;
 
-            System.out.println("💡 提示:");
-            System.out.println("   - 输入你的问题或任务");
-            System.out.println("   - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式");
-            System.out.println("   - 输入 '/plan 任务内容' 直接用计划模式执行这条任务");
-            System.out.println("   - 计划生成后可直接执行、补充要求重规划，或取消");
-            System.out.println("   - 默认模式是 ReAct");
-            System.out.println("   - 输入 '/clear' 清空对话历史");
-            System.out.println("   - 输入 '/memory' 查看记忆状态");
-            System.out.println("   - 输入 '/save 事实内容' 手动保存关键事实");
-            System.out.println("   - 输入 '/exit' 或 '/quit' 退出\n");
+            printStartupHints();
 
             while (true) {
                 PromptInput promptInput;
@@ -143,6 +139,76 @@ public class Main {
                             continue;
                         }
                         input = command.payload();
+                    }
+                    case INDEX_CODE -> {
+                        String indexPath = command.payload() != null ? command.payload() : ".";
+                        System.out.println("📦 正在索引代码库: " + indexPath);
+                        CodeIndex indexer = new CodeIndex();
+                        CodeIndex.IndexResult result = indexer.index(indexPath);
+                        System.out.println(result.message() + "\n");
+
+                        // 同步项目路径到 ToolRegistry，让 search_code 工具可以正常工作
+                        String absPath = new File(indexPath).getAbsolutePath();
+                        reactAgent.getToolRegistry().setProjectPath(absPath);
+                        continue;
+                    }
+                    case SEARCH_CODE -> {
+                        String query = command.payload();
+                        if (query == null || query.isEmpty()) {
+                            System.out.println("❌ 请提供检索关键词，例如 /search 用户登录实现\n");
+                            continue;
+                        }
+                        System.out.println("🔍 检索: " + query);
+                        try (CodeRetriever retriever = new CodeRetriever(".")) {
+                            var stats = retriever.getStats();
+                            if (stats.chunkCount() == 0) {
+                                System.out.println("⚠️ 代码库尚未索引，请先使用 /index 命令\n");
+                                continue;
+                            }
+                            List<com.paicli.rag.VectorStore.SearchResult> results = retriever.hybridSearch(query, 5);
+                            if (results.isEmpty()) {
+                                System.out.println("📭 未找到相关代码\n");
+                            } else {
+                                System.out.println(SearchResultFormatter.formatForCli(query, results) + "\n");
+                            }
+                        } catch (Exception e) {
+                            System.out.println("❌ 检索失败: " + e.getMessage() + "\n");
+                        }
+                        continue;
+                    }
+                    case GRAPH_QUERY -> {
+                        String className = command.payload();
+                        if (className == null || className.isEmpty()) {
+                            System.out.println("❌ 请提供类名，例如 /graph Main\n");
+                            continue;
+                        }
+                        System.out.println("🕸️ 查询类关系图谱: " + className);
+                        try (CodeRetriever retriever = new CodeRetriever(".")) {
+                            var stats = retriever.getStats();
+                            if (stats.chunkCount() == 0) {
+                                System.out.println("⚠️ 代码库尚未索引，请先使用 /index 命令\n");
+                                continue;
+                            }
+                            List<CodeRelation> relations = retriever.getRelationGraph(className);
+                            if (relations.isEmpty()) {
+                                System.out.println("📭 未找到相关关系\n");
+                            } else {
+                                System.out.println("📋 找到 " + relations.size() + " 条关系:\n");
+                                for (CodeRelation rel : relations) {
+                                    String arrow = rel.relationType().equals("contains") ? "├── contains -->"
+                                            : rel.relationType().equals("extends") ? "└── extends -->"
+                                            : rel.relationType().equals("implements") ? "└── implements -->"
+                                            : rel.relationType().equals("calls") ? "├── calls -->"
+                                            : "├── " + rel.relationType() + " -->";
+                                    System.out.printf("   %s %s [%s]%n", rel.fromName(), arrow,
+                                            rel.toName() != null ? rel.toName() : "unknown");
+                                }
+                                System.out.println();
+                            }
+                        } catch (Exception e) {
+                            System.out.println("❌ 查询失败: " + e.getMessage() + "\n");
+                        }
+                        continue;
                     }
                     case NONE -> {
                     }
@@ -391,6 +457,31 @@ public class Main {
         return normalizeLineEndings(rawInput);
     }
 
+    static List<String> startupHints() {
+        return List.of(
+                "输入你的问题或任务",
+                "输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式",
+                "输入 '/plan 任务内容' 直接用计划模式执行这条任务",
+                "计划生成后可直接执行、补充要求重规划，或取消",
+                "输入 '/index [路径]' 为代码库建立向量索引",
+                "输入 '/search <查询>' 语义检索代码",
+                "输入 '/graph <类名>' 查看代码关系图谱",
+                "默认模式是 ReAct",
+                "输入 '/clear' 清空对话历史",
+                "输入 '/memory' 查看记忆状态",
+                "输入 '/save 事实内容' 手动保存关键事实",
+                "输入 '/exit' 或 '/quit' 退出"
+        );
+    }
+
+    private static void printStartupHints() {
+        System.out.println("💡 提示:");
+        for (String hint : startupHints()) {
+            System.out.println("   - " + hint);
+        }
+        System.out.println();
+    }
+
     static String normalizeLineEndings(String rawInput) {
         return rawInput
                 .replace("\r\n", "\n")
@@ -480,7 +571,7 @@ public class Main {
         System.out.println("║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║");
         System.out.println("║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║");
         System.out.println("║                                                          ║");
-        System.out.printf("║      Memory-Enhanced Agent CLI %-8s                 ║%n", "v" + VERSION);
+        System.out.printf("║      RAG-Enhanced Agent CLI %-8s                    ║%n", "v" + VERSION);
         System.out.println("║                                                          ║");
         System.out.println("╚══════════════════════════════════════════════════════════╝");
         System.out.println();

@@ -2,7 +2,10 @@ package com.paicli.cli;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MainInputNormalizationTest {
 
@@ -25,5 +28,14 @@ class MainInputNormalizationTest {
         String normalized = Main.prepareSeedBuffer("第一行\r第二行\r\n第三行");
 
         assertEquals("第一行\n第二行\n第三行", normalized);
+    }
+
+    @Test
+    void startupHintsIncludeRagSlashCommands() {
+        List<String> hints = Main.startupHints();
+
+        assertTrue(hints.stream().anyMatch(hint -> hint.contains("/index [路径]")));
+        assertTrue(hints.stream().anyMatch(hint -> hint.contains("/search <查询>")));
+        assertTrue(hints.stream().anyMatch(hint -> hint.contains("/graph <类名>")));
     }
 }
