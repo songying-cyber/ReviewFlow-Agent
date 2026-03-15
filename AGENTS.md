@@ -95,6 +95,7 @@ mvn test -Dtest=ExecutionPlanTest
 - 维护对话历史
 - 最多迭代 10 轮
 - 支持工具调用后继续思考
+- 用户默认看到的是模型 `reasoning_content`（如果接口返回）和最终结果；工具参数、工具返回片段、Token 使用量不再作为默认用户输出
 - 会写入短期记忆，并在清空时提取关键事实到长期记忆
 
 ### 2. Plan-and-Execute 模式
@@ -248,7 +249,7 @@ src/main/java/com/paicli
 
 - 当前固定模型：`glm-5.1`
 - 当前固定接口：`https://open.bigmodel.cn/api/coding/paas/v4/chat/completions`
-- 负责消息、tools、tool_calls、usage 解析
+- 负责消息、`reasoning_content`、tools、tool_calls、usage 解析
 
 ## 当前已知边界
 

@@ -56,6 +56,30 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesSaveWithoutPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/save");
+
+        assertEquals(CliCommandParser.CommandType.MEMORY_SAVE, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesSearchWithoutPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/search");
+
+        assertEquals(CliCommandParser.CommandType.SEARCH_CODE, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesGraphWithoutPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/graph");
+
+        assertEquals(CliCommandParser.CommandType.GRAPH_QUERY, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
     void keepsNormalInputAsNone() {
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("帮我读取 pom.xml");
 

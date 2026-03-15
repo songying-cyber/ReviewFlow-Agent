@@ -126,7 +126,9 @@ public class Main {
                     }
                     case MEMORY_SAVE -> {
                         String fact = command.payload();
-                        if (fact != null && !fact.isEmpty()) {
+                        if (fact == null || fact.isEmpty()) {
+                            System.out.println("❌ 请提供要保存的内容，例如 /save 这个项目使用Java 17\n");
+                        } else {
                             reactAgent.getMemoryManager().storeFact(fact);
                             System.out.println("💾 已保存到长期记忆: " + fact + "\n");
                         }
@@ -224,7 +226,7 @@ public class Main {
                 } else {
                     response = reactAgent.run(input);
                 }
-                System.out.println("🤖 Agent: " + response);
+                System.out.println(response);
                 System.out.println();
             }
 

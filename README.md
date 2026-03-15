@@ -65,6 +65,7 @@
 - 🔄 ReAct Agent 循环（思考-行动-观察）
 - 🛠️ 工具调用（文件操作、Shell命令、项目创建）
 - 💬 交互式命令行界面
+- 🧠 默认展示模型思考过程与最终结果，不把工具调试日志作为用户输出
 
 ### 第二期
 
@@ -161,15 +162,11 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ```text
 👤 你: 创建一个Java项目叫myapp
 
-🤔 思考中...
+🧠 思考过程:
+用户要创建一个 Java 项目。我先调用 create_project 工具生成基础结构，再根据工具返回结果确认是否创建成功。
 
-🔧 执行工具: create_project
-   参数: {"name":"myapp","type":"java"}
-   结果: 项目已创建: myapp (类型: java)
-
-📊 Token使用: 输入=156, 输出=89
-
-🤖 Agent: 已成功创建 Java 项目 "myapp"，包含基本的 Maven 结构。
+🤖 最终结果:
+已成功创建 Java 项目 "myapp"，包含基本的 Maven 结构。
 ```
 
 ### 第二期：Plan-and-Execute 示例
@@ -294,26 +291,11 @@ I
 
 👤 你: 你好，请列出当前目录的文件
 
-🤔 思考中...
+🧠 思考过程:
+用户想了解当前目录结构。我先读取目录，再基于结果做归类说明，而不是只回原始文件列表。
 
-🔧 执行工具: list_dir
-   参数: {"path":"."}
-   结果: 目录内容:
-[D] demo
-[D] .qoder
-[D] target
-[F] pom.xml
-[F] README.md
-[F] .gitignore
-[F] .env
-[F] .env.example
-[D] .git
-[D] src
-
-
-📊 Token使用: 输入=596, 输出=205
-
-🤖 Agent: 当前目录包含 `src`、`target`、`pom.xml`、`README.md` 等文件，
+🤖 最终结果:
+当前目录包含 `src`、`target`、`pom.xml`、`README.md` 等文件，
 这是一个标准的 Java Maven 项目。
 
 👤 你: /exit

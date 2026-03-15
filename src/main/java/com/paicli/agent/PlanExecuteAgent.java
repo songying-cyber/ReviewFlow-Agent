@@ -318,13 +318,15 @@ public class PlanExecuteAgent {
             }
 
             // 有工具调用：执行工具并将结果回灌到消息历史
-            messages.add(GLMClient.Message.assistant(response.content(), response.toolCalls()));
+            messages.add(GLMClient.Message.assistant(
+                    response.reasoningContent(),
+                    response.content(),
+                    response.toolCalls()
+            ));
 
             for (GLMClient.ToolCall toolCall : response.toolCalls()) {
                 String toolName = toolCall.function().name();
                 String toolArgs = toolCall.function().arguments();
-
-                System.out.println("   🔧 调用工具: " + toolName);
 
                 String toolResult = toolRegistry.executeTool(toolName, toolArgs);
                 memoryManager.addToolResult(toolName, toolResult);
