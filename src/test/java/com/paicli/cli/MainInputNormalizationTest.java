@@ -1,7 +1,15 @@
 package com.paicli.cli;
 
+import org.jline.reader.History;
+import org.jline.reader.LineReader;
+import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.impl.history.DefaultHistory;
+import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,5 +45,53 @@ class MainInputNormalizationTest {
         assertTrue(hints.stream().anyMatch(hint -> hint.contains("/index [路径]")));
         assertTrue(hints.stream().anyMatch(hint -> hint.contains("/search <查询>")));
         assertTrue(hints.stream().anyMatch(hint -> hint.contains("/graph <类名>")));
+    }
+
+    @Test
+    void classifiesStandaloneEscapeAsCancelIntent() {
+        assertEquals(Main.EscapeSequenceType.STANDALONE_ESC, Main.classifyEscapeSequence(""));
+    }
+
+    @Test
+    void classifiesArrowKeysAsControlSequences() {
+        assertEquals(Main.EscapeSequenceType.CONTROL_SEQUENCE, Main.classifyEscapeSequence("[A"));
+        assertEquals(Main.EscapeSequenceType.CONTROL_SEQUENCE, Main.classifyEscapeSequence("[B"));
+        assertEquals(Main.EscapeSequenceType.CONTROL_SEQUENCE, Main.classifyEscapeSequence("OA"));
+    }
+
+    @Test
+    void classifiesBracketedPasteSequenceSeparately() {
+        assertEquals(Main.EscapeSequenceType.BRACKETED_PASTE, Main.classifyEscapeSequence("[200~hello"));
+    }
+
+    @Test
+    void upArrowPrefillsLatestHistoryEntry() throws Exception {
+        LineReader lineReader = newLineReader();
+        History history = lineReader.getHistory();
+        history.add("第一条");
+        history.add("最近一条");
+
+        assertEquals("最近一条", Main.seedBufferForHistoryNavigation(lineReader, "[A"));
+    }
+
+    @Test
+    void downArrowKeepsPromptEmpty() throws Exception {
+        LineReader lineReader = newLineReader();
+        lineReader.getHistory().add("最近一条");
+
+        assertEquals("", Main.seedBufferForHistoryNavigation(lineReader, "[B"));
+    }
+
+    private static LineReader newLineReader() throws Exception {
+        Terminal terminal = TerminalBuilder.builder()
+                .dumb(true)
+                .streams(new ByteArrayInputStream(new byte[0]), new ByteArrayOutputStream())
+                .build();
+
+        DefaultHistory history = new DefaultHistory();
+        return LineReaderBuilder.builder()
+                .terminal(terminal)
+                .history(history)
+                .build();
     }
 }

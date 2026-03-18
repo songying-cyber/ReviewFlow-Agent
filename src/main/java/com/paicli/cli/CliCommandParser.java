@@ -4,6 +4,7 @@ final class CliCommandParser {
 
     enum CommandType {
         NONE,
+        UNKNOWN_COMMAND,
         EXIT,
         CLEAR,
         SWITCH_PLAN,
@@ -86,6 +87,10 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/graph ", 0, 7)) {
             return new ParsedCommand(CommandType.GRAPH_QUERY, trimmed.substring(7).trim());
+        }
+
+        if (trimmed.startsWith("/")) {
+            return new ParsedCommand(CommandType.UNKNOWN_COMMAND, trimmed);
         }
 
         return ParsedCommand.none();

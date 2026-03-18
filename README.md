@@ -65,13 +65,15 @@
 - 🔄 ReAct Agent 循环（思考-行动-观察）
 - 🛠️ 工具调用（文件操作、Shell命令、项目创建）
 - 💬 交互式命令行界面
-- 🧠 默认展示模型思考过程与最终结果，不把工具调试日志作为用户输出
+- 🧠 默认通过流式接口获取模型输出；ReAct 与用户可见的 Plan 阶段都会按流式展示思考过程与最终结果，不把工具调试日志作为用户输出
+- 🖥️ 终端会对常见 Markdown（标题、列表、表格、代码块）做渲染后再显示，避免直接暴露原始标记符号
 
 ### 第二期
 
 - 📋 Plan-and-Execute + DAG 任务拆解与顺序执行
 - ⌨️ `/plan` 一次性进入计划执行
 - 🧭 更清晰的复杂任务执行顺序与依赖展示
+- ⚖️ 简单任务会自动生成最小计划，不再为了凑步数扩展无关步骤
 
 ### 第三期
 
@@ -105,6 +107,7 @@ export GLM_API_KEY=your_api_key_here
 
 长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
 代码索引默认保存在 `~/.paicli/rag/codebase.db`。
+调试日志默认滚动写入 `~/.paicli/logs/paicli.log`，旧日志会按保留天数和总容量自动清理。
 
 如果你想为某次运行指定单独目录，可以额外传入：
 
@@ -114,6 +117,24 @@ java -Dpaicli.memory.dir=/tmp/paicli-memory -jar target/paicli-1.0-SNAPSHOT.jar
 
 # 指定 RAG 索引目录
 java -Dpaicli.rag.dir=/tmp/paicli-rag -jar target/paicli-1.0-SNAPSHOT.jar
+
+# 指定日志目录与保留策略
+java -Dpaicli.log.dir=/tmp/paicli-logs \
+     -Dpaicli.log.level=DEBUG \
+     -Dpaicli.log.maxHistory=3 \
+     -Dpaicli.log.maxFileSize=5MB \
+     -Dpaicli.log.totalSizeCap=20MB \
+     -jar target/paicli-1.0-SNAPSHOT.jar
+```
+
+也可以放到 `.env` 或环境变量中：
+
+```bash
+PAICLI_LOG_LEVEL=DEBUG
+PAICLI_LOG_DIR=/Users/yourname/.paicli/logs
+PAICLI_LOG_MAX_HISTORY=7
+PAICLI_LOG_MAX_FILE_SIZE=10MB
+PAICLI_LOG_TOTAL_SIZE_CAP=100MB
 ```
 
 ### 2. 编译运行
@@ -154,6 +175,7 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 - 按 `Ctrl+O`：展开完整计划
 - 按 `ESC`：折叠完整计划或取消本次计划
 - 按 `I`：输入补充要求并重新规划
+- 按方向键不会触发取消；只有单独按下 `ESC` 才会取消待执行 plan
 
 ## 使用示例
 
@@ -182,6 +204,7 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
    - 输入 '/graph <类名>' 查看代码关系图谱
    - 输入 '/memory' 查看记忆状态
    - 输入 '/save 事实内容' 手动保存关键事实
+   - 未识别的 `/xxx` 命令会直接提示“未知命令”，不会再交给 Agent 当普通对话处理
    - 输入 '/clear' 清空对话历史
    - 输入 '/exit' 或 '/quit' 退出
 

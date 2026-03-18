@@ -2,7 +2,11 @@ package com.paicli.agent;
 
 import com.paicli.llm.GLMClient;
 import com.paicli.memory.MemoryManager;
+import com.paicli.util.AnsiStyle;
 import com.paicli.tool.ToolRegistry;
+import com.paicli.util.TerminalMarkdownRenderer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -12,6 +16,7 @@ import java.util.List;
  * Agent 核心类 - 实现 ReAct 循环
  */
 public class Agent {
+    private static final Logger log = LoggerFactory.getLogger(Agent.class);
     private final GLMClient llmClient;
     private final ToolRegistry toolRegistry;
     private final List<GLMClient.Message> conversationHistory;
@@ -55,6 +60,7 @@ public class Agent {
      * 运行 Agent 循环
      */
     public String run(String userInput) {
+        log.info("ReAct run started: inputLength={}", userInput == null ? 0 : userInput.length());
         // 存入短期记忆
         memoryManager.addUserMessage(userInput);
 
@@ -65,6 +71,7 @@ public class Agent {
         // 添加用户输入到历史（保持原文，不污染 user message）
         conversationHistory.add(GLMClient.Message.user(userInput));
         StringBuilder reasoningTranscript = new StringBuilder();
+        StreamRenderer streamRenderer = new StreamRenderer();
 
         int iteration = 0;
         while (iteration < MAX_ITERATIONS) {
@@ -74,12 +81,14 @@ public class Agent {
                 // 调用 LLM
                 GLMClient.ChatResponse response = llmClient.chat(
                         conversationHistory,
-                        toolRegistry.getToolDefinitions()
+                        toolRegistry.getToolDefinitions(),
+                        streamRenderer
                 );
 
                 // 如果有工具调用
                 if (response.hasToolCalls()) {
                     appendReasoning(reasoningTranscript, response.reasoningContent());
+                    log.info("LLM requested {} tool call(s) in iteration {}", response.toolCalls().size(), iteration);
                     // 添加助手消息（包含工具调用）
                     conversationHistory.add(GLMClient.Message.assistant(
                             response.reasoningContent(),
@@ -89,10 +98,14 @@ public class Agent {
 
                     // 执行每个工具调用
                     for (GLMClient.ToolCall toolCall : response.toolCalls()) {
+                        log.info("Executing tool: {} (iteration={})", toolCall.function().name(), iteration);
+                        log.debug("Tool args [{}]: {}", toolCall.function().name(), toolCall.function().arguments());
                         String toolArgs = toolCall.function().arguments();
 
                         // 执行工具
                         String toolResult = toolRegistry.executeTool(toolCall.function().name(), toolArgs);
+                        log.debug("Tool result preview [{}]: {}", toolCall.function().name(),
+                                preview(toolResult, 300));
 
                         // 存入记忆
                         memoryManager.addToolResult(toolCall.function().name(), toolResult);
@@ -117,15 +130,29 @@ public class Agent {
 
                     // 记录 token 使用
                     memoryManager.recordTokenUsage(response.inputTokens(), response.outputTokens());
+                    log.info("ReAct run finished: inputTokens={}, outputTokens={}, reasoningChars={}, answerChars={}",
+                            response.inputTokens(),
+                            response.outputTokens(),
+                            response.reasoningContent() == null ? 0 : response.reasoningContent().length(),
+                            response.content() == null ? 0 : response.content().length());
+                    if (log.isDebugEnabled()) {
+                        log.debug("Assistant answer preview: {}", preview(response.content(), 500));
+                    }
 
+                    if (streamRenderer.hasStreamedOutput()) {
+                        streamRenderer.finish();
+                        return "";
+                    }
                     return formatUserFacingResponse(reasoningTranscript.toString(), response.content());
                 }
 
             } catch (IOException e) {
+                log.error("LLM call failed in ReAct loop", e);
                 return "❌ 调用 LLM 失败: " + e.getMessage();
             }
         }
 
+        log.warn("ReAct run reached max iterations: {}", MAX_ITERATIONS);
         return "❌ 达到最大迭代次数限制，任务未完成";
     }
 
@@ -199,5 +226,75 @@ public class Agent {
             return "🧠 思考过程:\n" + normalizedReasoning;
         }
         return "🧠 思考过程:\n" + normalizedReasoning + "\n\n🤖 最终结果:\n" + normalizedAnswer;
+    }
+
+    private String preview(String content, int maxLength) {
+        if (content == null) {
+            return "";
+        }
+        String normalized = content.replace("\r\n", "\n").replace('\r', '\n');
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLength) + "...";
+    }
+
+    private static final class StreamRenderer implements GLMClient.StreamListener {
+        private TerminalMarkdownRenderer reasoningRenderer;
+        private TerminalMarkdownRenderer contentRenderer;
+        private boolean reasoningStarted;
+        private boolean contentStarted;
+        private boolean streamedOutput;
+
+        @Override
+        public void onReasoningDelta(String delta) {
+            if (delta == null || delta.isEmpty()) {
+                return;
+            }
+            if (!reasoningStarted) {
+                System.out.println(AnsiStyle.heading("🧠 思考过程"));
+                reasoningRenderer = new TerminalMarkdownRenderer(System.out);
+                reasoningStarted = true;
+                streamedOutput = true;
+            }
+            reasoningRenderer.append(delta);
+            System.out.flush();
+        }
+
+        @Override
+        public void onContentDelta(String delta) {
+            if (delta == null || delta.isEmpty()) {
+                return;
+            }
+            if (!contentStarted) {
+                if (!reasoningStarted) {
+                    System.out.println(AnsiStyle.section("🤖 最终结果"));
+                } else {
+                    System.out.println();
+                    System.out.println(AnsiStyle.section("🤖 最终结果"));
+                }
+                contentRenderer = new TerminalMarkdownRenderer(System.out);
+                contentStarted = true;
+                streamedOutput = true;
+            }
+            contentRenderer.append(delta);
+            System.out.flush();
+        }
+
+        private boolean hasStreamedOutput() {
+            return streamedOutput;
+        }
+
+        private void finish() {
+            if (streamedOutput) {
+                if (reasoningRenderer != null) {
+                    reasoningRenderer.finish();
+                }
+                if (contentRenderer != null) {
+                    contentRenderer.finish();
+                }
+                System.out.println();
+            }
+        }
     }
 }

@@ -49,6 +49,11 @@ class MemoryManagerTest {
 
         @Override
         public ChatResponse chat(List<Message> messages, List<Tool> tools) throws IOException {
+            return chat(messages, tools, StreamListener.NO_OP);
+        }
+
+        @Override
+        public ChatResponse chat(List<Message> messages, List<Tool> tools, StreamListener listener) throws IOException {
             ChatResponse response = responses.poll();
             if (response == null) {
                 throw new IOException("缺少预设响应");

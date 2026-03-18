@@ -42,10 +42,19 @@ API Key 当前读取顺序以代码为准：
 2. 用户主目录下的 `.env`
 3. 环境变量 `GLM_API_KEY`
 
-`.env.example` 只定义了：
+`.env.example` 当前包含：
 
 ```bash
 GLM_API_KEY=your_api_key_here
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_MODEL=nomic-embed-text:latest
+EMBEDDING_BASE_URL=http://localhost:11434
+# EMBEDDING_API_KEY=your_api_key_here
+# PAICLI_LOG_LEVEL=INFO
+# PAICLI_LOG_DIR=/Users/yourname/.paicli/logs
+# PAICLI_LOG_MAX_HISTORY=7
+# PAICLI_LOG_MAX_FILE_SIZE=10MB
+# PAICLI_LOG_TOTAL_SIZE_CAP=100MB
 ```
 
 长期记忆默认持久化位置：
@@ -63,6 +72,12 @@ Embedding 配置读取顺序（以代码实际行为为准）：
 1. 环境变量：`EMBEDDING_PROVIDER`、`EMBEDDING_MODEL`、`EMBEDDING_BASE_URL`、`EMBEDDING_API_KEY`
 2. 系统属性（同上）
 3. 默认值：`ollama` / `nomic-embed-text:latest` / `http://localhost:11434`
+
+日志配置读取顺序（以代码实际行为为准）：
+
+1. 系统属性：`paicli.log.dir`、`paicli.log.level`、`paicli.log.maxHistory`、`paicli.log.maxFileSize`、`paicli.log.totalSizeCap`
+2. 环境变量或 `.env`：`PAICLI_LOG_DIR`、`PAICLI_LOG_LEVEL`、`PAICLI_LOG_MAX_HISTORY`、`PAICLI_LOG_MAX_FILE_SIZE`、`PAICLI_LOG_TOTAL_SIZE_CAP`
+3. 默认值：`~/.paicli/logs` / `INFO` / `7` / `10MB` / `100MB`
 
 ## 常用命令
 
@@ -95,7 +110,7 @@ mvn test -Dtest=ExecutionPlanTest
 - 维护对话历史
 - 最多迭代 10 轮
 - 支持工具调用后继续思考
-- 用户默认看到的是模型 `reasoning_content`（如果接口返回）和最终结果；工具参数、工具返回片段、Token 使用量不再作为默认用户输出
+- 用户默认看到的是流式输出的模型 `reasoning_content`（如果接口返回）和最终结果；ReAct 与用户可见的 Plan 阶段都走流式展示；终端会先渲染常见 Markdown 再输出；工具参数、工具返回片段、Token 使用量不再作为默认用户输出
 - 会写入短期记忆，并在清空时提取关键事实到长期记忆
 
 ### 2. Plan-and-Execute 模式
@@ -104,6 +119,7 @@ mvn test -Dtest=ExecutionPlanTest
 - 主入口在 `src/main/java/com/paicli/agent/PlanExecuteAgent.java`
 - 流程是：规划 -> 用户审阅 -> 执行 DAG -> 汇总结果
 - 计划执行完后会回到默认 `ReAct`
+- 简单任务应优先生成最小计划；不要为了凑步数引入无关读写文件或中间落盘步骤
 
 ### 3. Plan 审阅交互
 
@@ -118,6 +134,7 @@ mvn test -Dtest=ExecutionPlanTest
 
 - 这里不是 README 里旧描述的“只有 Enter / ESC / I”
 - 原始按键处理依赖 JLine raw mode
+- 方向键属于终端控制序列，不应被误判成 `ESC` 取消
 - 涉及这块的改动，不能只看字符串，要连输入模式和回退路径一起看
 
 ### 4. Memory 系统
@@ -205,6 +222,7 @@ src/main/java/com/paicli
 - CLI 入口
 - Banner 输出
 - `.env` / 环境变量读取
+- 日志目录初始化与 logback 配置系统属性注入
 - ReAct 与 Plan 模式切换
 - JLine 单键交互、raw mode、bracketed paste 处理
 
@@ -225,6 +243,7 @@ src/main/java/com/paicli
 ### `src/main/java/com/paicli/plan/Planner.java`
 
 - 调用 LLM 生成计划 JSON
+- 对明显简单的任务走最小计划快捷路径，避免过度规划
 - 解析任务列表
 - 重新编号为 `task_1`、`task_2`...
 - 计算依赖关系和执行顺序
@@ -249,7 +268,13 @@ src/main/java/com/paicli
 
 - 当前固定模型：`glm-5.1`
 - 当前固定接口：`https://open.bigmodel.cn/api/coding/paas/v4/chat/completions`
-- 负责消息、`reasoning_content`、tools、tool_calls、usage 解析
+- 底层默认通过流式接口获取响应，并负责消息、`reasoning_content`、tools、tool_calls、usage 解析
+
+### `src/main/resources/logback.xml`
+
+- 默认日志落盘配置
+- 按天 + 按文件大小滚动
+- 支持保留天数和总容量上限
 
 ## 当前已知边界
 
@@ -284,6 +309,11 @@ src/main/java/com/paicli
 - 对应测试
 - `README.md`
 - `AGENTS.md`
+
+当前输入解析约定补充：
+
+- 任何未识别的 `/xxx` 都应在 CLI 层直接报“未知命令”
+- 不要把未知 slash 命令回退给 Agent 当普通自然语言处理
 
 ### 3. 改 Plan 审阅交互，要联动这几处
 

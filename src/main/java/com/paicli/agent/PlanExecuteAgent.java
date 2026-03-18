@@ -3,7 +3,11 @@ package com.paicli.agent;
 import com.paicli.llm.GLMClient;
 import com.paicli.memory.MemoryManager;
 import com.paicli.plan.*;
+import com.paicli.util.AnsiStyle;
 import com.paicli.tool.ToolRegistry;
+import com.paicli.util.TerminalMarkdownRenderer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.*;
@@ -14,13 +18,34 @@ import java.util.stream.Collectors;
  * Plan-and-Execute Agent - 先规划后执行
  */
 public class PlanExecuteAgent {
-    private record TaskExecutionResult(Task task, String result, Exception error) {
-        static TaskExecutionResult success(Task task, String result) {
-            return new TaskExecutionResult(task, result, null);
+    private static final Logger log = LoggerFactory.getLogger(PlanExecuteAgent.class);
+    private record PlanRunOutcome(String result, boolean persistAssistantMessage, boolean extractFacts) {
+        static PlanRunOutcome executed(String result) {
+            return new PlanRunOutcome(result, true, true);
+        }
+
+        static PlanRunOutcome canceled(String result) {
+            return new PlanRunOutcome(result, false, false);
+        }
+
+        static PlanRunOutcome failed(String result) {
+            return new PlanRunOutcome(result, true, false);
+        }
+    }
+
+    private record TaskRunResult(String result, boolean streamedOutput) {
+        static TaskRunResult of(String result, boolean streamedOutput) {
+            return new TaskRunResult(result, streamedOutput);
+        }
+    }
+
+    private record TaskExecutionResult(Task task, String result, boolean streamedOutput, Exception error) {
+        static TaskExecutionResult success(Task task, TaskRunResult taskRunResult) {
+            return new TaskExecutionResult(task, taskRunResult.result(), taskRunResult.streamedOutput(), null);
         }
 
         static TaskExecutionResult failure(Task task, Exception error) {
-            return new TaskExecutionResult(task, null, error);
+            return new TaskExecutionResult(task, null, false, error);
         }
 
         boolean failed() {
@@ -100,16 +125,23 @@ public class PlanExecuteAgent {
      * 运行任务（自动判断是否需要规划）
      */
     public String run(String userInput) {
+        log.info("Plan run started: inputLength={}", userInput == null ? 0 : userInput.length());
         memoryManager.addUserMessage(userInput);
+        StreamState streamState = new StreamState();
         try {
-            String result = runWithPlan(userInput);
-            if (result != null && !result.isBlank()) {
-                memoryManager.addAssistantMessage("[计划结果] " + result);
+            PlanRunOutcome outcome = runWithPlan(userInput, streamState);
+            if (outcome.persistAssistantMessage() && outcome.result() != null && !outcome.result().isBlank()) {
+                memoryManager.addAssistantMessage("[计划结果] " + outcome.result());
             }
-            // 计划执行完成后提取事实（每次 plan 只触发一次）
-            memoryManager.extractAndSaveFacts();
-            return result;
+            if (outcome.extractFacts()) {
+                memoryManager.extractAndSaveFacts();
+            }
+            if (streamState.hasStreamedOutput() && (outcome.result() == null || outcome.result().isBlank())) {
+                return "";
+            }
+            return outcome.result();
         } catch (Exception e) {
+            log.error("Plan run failed", e);
             String errorMessage = "❌ 执行失败: " + e.getMessage();
             memoryManager.addAssistantMessage(errorMessage);
             return errorMessage;
@@ -119,25 +151,25 @@ public class PlanExecuteAgent {
 /**
      * 使用Plan-and-Execute模式执行
      */
-    private String runWithPlan(String goal) throws IOException {
+    private PlanRunOutcome runWithPlan(String goal, StreamState streamState) throws IOException {
         ExecutionPlan plan = planner.createPlan(goal);
-        return reviewAndExecutePlan(plan);
+        return reviewAndExecutePlan(plan, streamState);
     }
 
-    private String reviewAndExecutePlan(ExecutionPlan plan) throws IOException {
+    private PlanRunOutcome reviewAndExecutePlan(ExecutionPlan plan, StreamState streamState) throws IOException {
         while (true) {
             PlanReviewDecision decision = reviewHandler.review(plan.getGoal(), plan);
             if (decision == null || decision.action() == PlanReviewAction.EXECUTE) {
-                return executePlan(plan);
+                return PlanRunOutcome.executed(executePlan(plan, streamState));
             }
 
             if (decision.action() == PlanReviewAction.CANCEL) {
-                return "⏹️ 已取消本次计划执行。";
+                return PlanRunOutcome.canceled("⏹️ 已取消本次计划执行。");
             }
 
             String feedback = decision.feedback() == null ? "" : decision.feedback().trim();
             if (feedback.isEmpty()) {
-                return executePlan(plan);
+                return PlanRunOutcome.executed(executePlan(plan, streamState));
             }
 
             System.out.println("📝 已收到补充要求，正在重新规划...\n");
@@ -145,11 +177,13 @@ public class PlanExecuteAgent {
         }
     }
 
-    private String executePlan(ExecutionPlan plan) throws IOException {
+    private String executePlan(ExecutionPlan plan, StreamState streamState) throws IOException {
+        log.info("Executing plan: goal='{}', taskCount={}", plan.getGoal(), plan.getAllTasks().size());
         System.out.println("🚀 开始执行计划...\n");
 
         plan.markStarted();
         StringBuilder finalResult = new StringBuilder();
+        Map<String, Boolean> streamedTaskOutputs = new HashMap<>();
 
         while (true) {
             List<Task> executableTasks = getExecutableTasksInOrder(plan);
@@ -157,25 +191,33 @@ public class PlanExecuteAgent {
                 break;
             }
 
-            List<TaskExecutionResult> batchResults = executeTaskBatch(plan, executableTasks);
+            List<TaskExecutionResult> batchResults = executeTaskBatch(plan, executableTasks, streamState);
             for (TaskExecutionResult batchResult : batchResults) {
                 Task task = batchResult.task();
 
                 if (!batchResult.failed()) {
                     task.markCompleted(batchResult.result());
-                    System.out.println("✅ 完成 [" + task.getId() + "]: "
-                            + batchResult.result().substring(0, Math.min(100, batchResult.result().length())) + "\n");
+                    streamedTaskOutputs.put(task.getId(), batchResult.streamedOutput());
+                    log.info("Task completed: {} status={} resultChars={}",
+                            task.getId(), task.getStatus(), batchResult.result() == null ? 0 : batchResult.result().length());
+                    if (batchResult.streamedOutput() || batchResult.result() == null || batchResult.result().isBlank()) {
+                        System.out.println("✅ 完成 [" + task.getId() + "]\n");
+                    } else {
+                        System.out.println("✅ 完成 [" + task.getId() + "]: "
+                                + batchResult.result().substring(0, Math.min(100, batchResult.result().length())) + "\n");
+                    }
                     continue;
                 }
 
                 Exception error = batchResult.error();
                 task.markFailed(error.getMessage());
+                log.warn("Task failed: {} error={}", task.getId(), error.getMessage());
                 System.out.println("❌ 失败 [" + task.getId() + "]: " + error.getMessage() + "\n");
 
                 if (plan.getProgress() < 0.5) {
                     System.out.println("🔄 尝试重新规划...\n");
                     ExecutionPlan replanned = planner.replan(plan, error.getMessage());
-                    return reviewAndExecutePlan(replanned);
+                    return reviewAndExecutePlan(replanned, streamState).result();
                 }
 
                 if (!finalResult.isEmpty()) {
@@ -190,18 +232,23 @@ public class PlanExecuteAgent {
             return "⚠️ 计划未能继续推进，存在未满足依赖的任务。";
         }
 
-        if (finalResult.isEmpty()) {
-            finalResult.append(buildFinalResult(plan));
-        }
+        String planSummary = finalResult.isEmpty()
+                ? buildFinalResult(plan, streamedTaskOutputs)
+                : finalResult.toString();
 
-        // 3. 完成
         if (plan.hasFailed()) {
             plan.markFailed();
-            return "⚠️ 计划部分完成，有任务失败。\n" + finalResult;
-        } else {
-            plan.markCompleted();
-            return "✅ 计划执行完成！\n" + finalResult;
+            if (planSummary.isBlank()) {
+                return "⚠️ 计划部分完成，有任务失败。";
+            }
+            return "⚠️ 计划部分完成，有任务失败。\n" + planSummary;
         }
+
+        plan.markCompleted();
+        if (planSummary.isBlank()) {
+            return "✅ 计划执行完成！";
+        }
+        return "✅ 计划执行完成！\n" + planSummary;
     }
 
     private List<Task> getExecutableTasksInOrder(ExecutionPlan plan) {
@@ -215,14 +262,16 @@ public class PlanExecuteAgent {
                 .toList();
     }
 
-    private List<TaskExecutionResult> executeTaskBatch(ExecutionPlan plan, List<Task> executableTasks) {
+    private List<TaskExecutionResult> executeTaskBatch(ExecutionPlan plan, List<Task> executableTasks,
+                                                       StreamState streamState) {
         if (executableTasks.size() == 1) {
             Task task = executableTasks.get(0);
+            log.info("Executing single task: {} type={}", task.getId(), task.getType());
             System.out.println("▶️ 执行任务 [" + task.getId() + "]: " + task.getDescription());
             task.markStarted();
 
             try {
-                return List.of(TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task)));
+                return List.of(TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState)));
             } catch (Exception e) {
                 return List.of(TaskExecutionResult.failure(task, e));
             }
@@ -231,6 +280,7 @@ public class PlanExecuteAgent {
         String parallelTaskIds = executableTasks.stream()
                 .map(Task::getId)
                 .collect(Collectors.joining(", "));
+        log.info("Executing parallel batch: {}", parallelTaskIds);
         System.out.println("⚡ 本轮并行执行 " + executableTasks.size() + " 个任务: " + parallelTaskIds);
 
         ExecutorService executor = Executors.newFixedThreadPool(Math.min(executableTasks.size(), 4));
@@ -241,7 +291,7 @@ public class PlanExecuteAgent {
                 task.markStarted();
                 futures.add(executor.submit(() -> {
                     try {
-                        return TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task));
+                        return TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState));
                     } catch (Exception e) {
                         return TaskExecutionResult.failure(task, e);
                     }
@@ -274,7 +324,7 @@ public class PlanExecuteAgent {
     /**
      * 执行单个任务（支持多轮工具调用）
      */
-    private String executeTask(String goal, ExecutionPlan plan, Task task) throws IOException {
+    private TaskRunResult executeTask(String goal, ExecutionPlan plan, Task task, StreamState streamState) throws IOException {
         String prompt = String.format(EXECUTION_PROMPT,
                 task.getType(), task.getDescription());
 
@@ -292,14 +342,22 @@ public class PlanExecuteAgent {
 
         StringBuilder allResults = new StringBuilder();
         int iteration = 0;
+        TaskStreamRenderer streamRenderer = new TaskStreamRenderer(task.getId(), streamState);
 
         while (iteration < MAX_TASK_ITERATIONS) {
             iteration++;
 
             GLMClient.ChatResponse response = llmClient.chat(
                     messages,
-                    toolRegistry.getToolDefinitions()
+                    toolRegistry.getToolDefinitions(),
+                    streamRenderer
             );
+            log.info("Task {} iteration {} response: toolCalls={}, reasoningChars={}, contentChars={}",
+                    task.getId(),
+                    iteration,
+                    response.toolCalls() == null ? 0 : response.toolCalls().size(),
+                    response.reasoningContent() == null ? 0 : response.reasoningContent().length(),
+                    response.content() == null ? 0 : response.content().length());
 
             if (!response.hasToolCalls()) {
                 // 没有工具调用，返回最终结果
@@ -309,12 +367,14 @@ public class PlanExecuteAgent {
                     if (!toolOnlyResult.isBlank()) {
                         memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + toolOnlyResult);
                     }
-                    return toolOnlyResult;
+                    streamRenderer.finish();
+                    return TaskRunResult.of(toolOnlyResult, streamRenderer.hasStreamedOutput());
                 }
                 if (response.content() != null && !response.content().isBlank()) {
                     memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + response.content());
                 }
-                return response.content();
+                streamRenderer.finish();
+                return TaskRunResult.of(response.content(), streamRenderer.hasStreamedOutput());
             }
 
             // 有工具调用：执行工具并将结果回灌到消息历史
@@ -327,8 +387,11 @@ public class PlanExecuteAgent {
             for (GLMClient.ToolCall toolCall : response.toolCalls()) {
                 String toolName = toolCall.function().name();
                 String toolArgs = toolCall.function().arguments();
+                log.info("Task {} calling tool {}", task.getId(), toolName);
+                log.debug("Task {} tool args [{}]: {}", task.getId(), toolName, toolArgs);
 
                 String toolResult = toolRegistry.executeTool(toolName, toolArgs);
+                log.debug("Task {} tool result preview [{}]: {}", task.getId(), toolName, preview(toolResult, 300));
                 memoryManager.addToolResult(toolName, toolResult);
                 allResults.append(toolResult).append("\n");
                 messages.add(GLMClient.Message.tool(toolCall.id(), toolResult));
@@ -339,7 +402,99 @@ public class PlanExecuteAgent {
         if (!fallbackResult.isBlank()) {
             memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + fallbackResult);
         }
-        return fallbackResult;
+        streamRenderer.finish();
+        return TaskRunResult.of(fallbackResult, streamRenderer.hasStreamedOutput());
+    }
+
+    private String preview(String content, int maxLength) {
+        if (content == null) {
+            return "";
+        }
+        String normalized = content.replace("\r\n", "\n").replace('\r', '\n');
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLength) + "...";
+    }
+
+    private static final class StreamState {
+        private volatile boolean streamedOutput;
+
+        private void markStreamed() {
+            this.streamedOutput = true;
+        }
+
+        private boolean hasStreamedOutput() {
+            return streamedOutput;
+        }
+    }
+
+    private static final class TaskStreamRenderer implements GLMClient.StreamListener {
+        private final String taskId;
+        private final StreamState streamState;
+        private TerminalMarkdownRenderer reasoningRenderer;
+        private TerminalMarkdownRenderer contentRenderer;
+        private boolean reasoningStarted;
+        private boolean contentStarted;
+        private boolean streamedOutput;
+
+        private TaskStreamRenderer(String taskId, StreamState streamState) {
+            this.taskId = taskId;
+            this.streamState = streamState;
+        }
+
+        @Override
+        public synchronized void onReasoningDelta(String delta) {
+            if (delta == null || delta.isEmpty()) {
+                return;
+            }
+            if (!reasoningStarted) {
+                System.out.println(AnsiStyle.heading("🧠 任务思考 [" + taskId + "]"));
+                reasoningRenderer = new TerminalMarkdownRenderer(System.out);
+                reasoningStarted = true;
+                streamedOutput = true;
+                streamState.markStreamed();
+            }
+            reasoningRenderer.append(delta);
+            System.out.flush();
+        }
+
+        @Override
+        public synchronized void onContentDelta(String delta) {
+            if (delta == null || delta.isEmpty()) {
+                return;
+            }
+            if (!contentStarted) {
+                if (!reasoningStarted) {
+                    System.out.println(AnsiStyle.section("🤖 任务结果 [" + taskId + "]"));
+                } else {
+                    System.out.println();
+                    System.out.println(AnsiStyle.section("🤖 任务结果 [" + taskId + "]"));
+                }
+                contentRenderer = new TerminalMarkdownRenderer(System.out);
+                contentStarted = true;
+                streamedOutput = true;
+                streamState.markStreamed();
+            }
+            contentRenderer.append(delta);
+            System.out.flush();
+        }
+
+        private synchronized void finish() {
+            if (streamedOutput) {
+                if (reasoningRenderer != null) {
+                    reasoningRenderer.finish();
+                }
+                if (contentRenderer != null) {
+                    contentRenderer.finish();
+                }
+                System.out.println("\n");
+            }
+        }
+
+        private synchronized boolean hasStreamedOutput() {
+            return streamedOutput;
+        }
     }
 
     private String buildTaskContext(String goal, ExecutionPlan plan, Task task) {
@@ -370,13 +525,16 @@ public class PlanExecuteAgent {
         return context.toString();
     }
 
-    private String buildFinalResult(ExecutionPlan plan) {
+    private String buildFinalResult(ExecutionPlan plan, Map<String, Boolean> streamedTaskOutputs) {
         StringBuilder result = new StringBuilder();
         List<Task> leafTasks = plan.getAllTasks().stream()
                 .filter(task -> task.getDependents().isEmpty())
                 .toList();
 
         for (Task task : leafTasks) {
+            if (Boolean.TRUE.equals(streamedTaskOutputs.get(task.getId()))) {
+                continue;
+            }
             if (task.getResult() == null || task.getResult().isBlank()) {
                 continue;
             }
@@ -391,6 +549,7 @@ public class PlanExecuteAgent {
         }
 
         return plan.getAllTasks().stream()
+                .filter(task -> !Boolean.TRUE.equals(streamedTaskOutputs.get(task.getId())))
                 .filter(task -> task.getResult() != null && !task.getResult().isBlank())
                 .reduce((first, second) -> second)
                 .map(Task::getResult)

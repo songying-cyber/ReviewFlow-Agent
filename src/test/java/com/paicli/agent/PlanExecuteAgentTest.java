@@ -17,6 +17,7 @@ import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanExecuteAgentTest {
@@ -74,6 +75,65 @@ class PlanExecuteAgentTest {
         assertTrue(memoryManager.getLongTermMemory().size() > 0);
     }
 
+    @Test
+    void shouldNotExtractFactsWhenPlanIsCanceled() throws Exception {
+        StubGLMClient llmClient = new StubGLMClient(List.of());
+        LongTermMemory longTermMemory = new LongTermMemory(tempDir.resolve("memory-store-cancel").toFile());
+        MemoryManager memoryManager = new MemoryManager(
+                llmClient,
+                4096,
+                128000,
+                longTermMemory
+        );
+        PlanExecuteAgent agent = new PlanExecuteAgent(
+                llmClient,
+                new ToolRegistry(),
+                new StubPlanner(llmClient),
+                memoryManager,
+                (goal, plan) -> PlanExecuteAgent.PlanReviewDecision.cancel()
+        );
+
+        String result = agent.run("列出当前目录的文件");
+
+        assertEquals("⏹️ 已取消本次计划执行。", result);
+        assertEquals(0, longTermMemory.size());
+    }
+
+    @Test
+    void shouldNotRepeatStreamedTaskOutputInFinalPlanSummary() throws Exception {
+        StubGLMClient llmClient = StubGLMClient.streaming(List.of(
+                StubResponse.streamed(new GLMClient.ChatResponse(
+                        "assistant",
+                        "当前目录包含 8 个目录和 8 个文件。",
+                        null,
+                        60,
+                        20
+                ))
+        ));
+
+        PlanExecuteAgent agent = new PlanExecuteAgent(
+                llmClient,
+                new ToolRegistry(),
+                new StubPlanner(llmClient),
+                null,
+                (goal, plan) -> PlanExecuteAgent.PlanReviewDecision.execute()
+        );
+
+        String result = agent.run("列出当前目录的文件");
+
+        assertEquals("✅ 计划执行完成！", result);
+    }
+
+    private record StubResponse(GLMClient.ChatResponse response, boolean streamContent) {
+        private static StubResponse plain(GLMClient.ChatResponse response) {
+            return new StubResponse(response, false);
+        }
+
+        private static StubResponse streamed(GLMClient.ChatResponse response) {
+            return new StubResponse(response, true);
+        }
+    }
+
     private static final class StubPlanner extends Planner {
         private StubPlanner(GLMClient llmClient) {
             super(llmClient);
@@ -89,20 +149,37 @@ class PlanExecuteAgentTest {
     }
 
     private static final class StubGLMClient extends GLMClient {
-        private final Queue<ChatResponse> responses;
+        private final Queue<StubResponse> responses;
 
         private StubGLMClient(List<ChatResponse> responses) {
             super("test-key");
-            this.responses = new ArrayDeque<>(responses);
+            this.responses = new ArrayDeque<>(responses.stream().map(StubResponse::plain).toList());
+        }
+
+        private StubGLMClient(Queue<StubResponse> responses) {
+            super("test-key");
+            this.responses = responses;
+        }
+
+        private static StubGLMClient streaming(List<StubResponse> responses) {
+            return new StubGLMClient(new ArrayDeque<>(responses));
         }
 
         @Override
         public ChatResponse chat(List<Message> messages, List<Tool> tools) throws IOException {
-            ChatResponse response = responses.poll();
-            if (response == null) {
+            return chat(messages, tools, StreamListener.NO_OP);
+        }
+
+        @Override
+        public ChatResponse chat(List<Message> messages, List<Tool> tools, StreamListener listener) throws IOException {
+            StubResponse stubResponse = responses.poll();
+            if (stubResponse == null) {
                 throw new IOException("缺少预设响应");
             }
-            return response;
+            if (stubResponse.streamContent() && stubResponse.response().content() != null) {
+                listener.onContentDelta(stubResponse.response().content());
+            }
+            return stubResponse.response();
         }
     }
 }

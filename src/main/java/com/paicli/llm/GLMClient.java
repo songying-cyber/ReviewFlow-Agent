@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import okhttp3.*;
+import okio.BufferedSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -33,53 +34,21 @@ public class GLMClient {
      * 发送聊天请求（支持工具调用）
      */
     public ChatResponse chat(List<Message> messages, List<Tool> tools) throws IOException {
-        ObjectNode requestBody = mapper.createObjectNode();
-        requestBody.put("model", MODEL);
+        return chat(messages, tools, StreamListener.NO_OP);
+    }
 
-        // 添加消息
-        ArrayNode messagesArray = requestBody.putArray("messages");
-        for (Message msg : messages) {
-            ObjectNode msgNode = messagesArray.addObject();
-            msgNode.put("role", msg.role());
-            msgNode.put("content", msg.content());
-            if (msg.reasoningContent() != null && !msg.reasoningContent().isBlank()) {
-                msgNode.put("reasoning_content", msg.reasoningContent());
-            }
+    public ChatResponse chat(List<Message> messages, List<Tool> tools, StreamListener listener) throws IOException {
+        return chatStream(messages, tools, listener);
+    }
 
-            // 添加工具调用信息
-            if (msg.toolCalls() != null && !msg.toolCalls().isEmpty()) {
-                ArrayNode toolCallsArray = msgNode.putArray("tool_calls");
-                for (ToolCall tc : msg.toolCalls()) {
-                    ObjectNode tcNode = toolCallsArray.addObject();
-                    tcNode.put("id", tc.id());
-                    tcNode.put("type", "function");
-                    ObjectNode functionNode = tcNode.putObject("function");
-                    functionNode.put("name", tc.function().name());
-                    functionNode.put("arguments", tc.function().arguments());
-                }
-            }
-
-            // 添加工具调用结果
-            if (msg.toolCallId() != null) {
-                msgNode.put("tool_call_id", msg.toolCallId());
-            }
-        }
-
-        // 添加工具定义
-        if (tools != null && !tools.isEmpty()) {
-            ArrayNode toolsArray = requestBody.putArray("tools");
-            for (Tool tool : tools) {
-                ObjectNode toolNode = toolsArray.addObject();
-                toolNode.put("type", "function");
-                ObjectNode functionNode = toolNode.putObject("function");
-                functionNode.put("name", tool.name());
-                functionNode.put("description", tool.description());
-                functionNode.set("parameters", tool.parameters());
-            }
-        }
-
+    /**
+     * 流式聊天请求。会通过 listener 持续返回 reasoning/content 增量，
+     * 同时在结束后汇总为完整的 ChatResponse。
+     */
+    public ChatResponse chatStream(List<Message> messages, List<Tool> tools, StreamListener listener) throws IOException {
+        StreamListener streamListener = listener == null ? StreamListener.NO_OP : listener;
         RequestBody body = RequestBody.create(
-                requestBody.toString(),
+                buildRequestBody(messages, tools, true).toString(),
                 MediaType.parse("application/json")
         );
 
@@ -100,39 +69,177 @@ public class GLMClient {
                 throw new IOException("API返回空响应体");
             }
 
-            String responseBody = responseBodyObj.string();
-            JsonNode root = mapper.readTree(responseBody);
+            BufferedSource source = responseBodyObj.source();
+            String role = "assistant";
+            StringBuilder content = new StringBuilder();
+            StringBuilder reasoning = new StringBuilder();
+            List<ToolCallAccumulator> toolAccumulators = new ArrayList<>();
+            int inputTokens = 0;
+            int outputTokens = 0;
 
-            // 解析响应
-            JsonNode choice = root.path("choices").get(0);
-            JsonNode message = choice.path("message");
+            while (!source.exhausted()) {
+                String line = source.readUtf8Line();
+                if (line == null) {
+                    break;
+                }
 
-            String role = message.path("role").asText();
-            String content = message.path("content").asText();
-            String reasoningContent = message.path("reasoning_content").asText();
+                String trimmed = line.trim();
+                if (trimmed.isEmpty() || !trimmed.startsWith("data:")) {
+                    continue;
+                }
 
-            // 解析工具调用
-            List<ToolCall> toolCalls = null;
-            if (message.has("tool_calls") && message.path("tool_calls").isArray()) {
-                toolCalls = new ArrayList<>();
-                for (JsonNode tc : message.path("tool_calls")) {
-                    toolCalls.add(new ToolCall(
-                            tc.path("id").asText(),
-                            new ToolCall.Function(
-                                    tc.path("function").path("name").asText(),
-                                    tc.path("function").path("arguments").asText()
-                            )
-                    ));
+                String payload = trimmed.substring("data:".length()).trim();
+                if (payload.isEmpty()) {
+                    continue;
+                }
+                if ("[DONE]".equals(payload)) {
+                    break;
+                }
+
+                JsonNode root = mapper.readTree(payload);
+                JsonNode usage = root.path("usage");
+                if (!usage.isMissingNode()) {
+                    inputTokens = usage.path("prompt_tokens").asInt(inputTokens);
+                    outputTokens = usage.path("completion_tokens").asInt(outputTokens);
+                }
+
+                JsonNode choices = root.path("choices");
+                if (!choices.isArray() || choices.isEmpty()) {
+                    continue;
+                }
+
+                JsonNode choice = choices.get(0);
+                JsonNode delta = choice.path("delta");
+                if (delta.isMissingNode() || delta.isNull()) {
+                    delta = choice.path("message");
+                }
+                if (delta.isMissingNode() || delta.isNull()) {
+                    continue;
+                }
+
+                String deltaRole = delta.path("role").asText();
+                if (!deltaRole.isEmpty()) {
+                    role = deltaRole;
+                }
+
+                String reasoningDelta = delta.path("reasoning_content").asText();
+                if (!reasoningDelta.isEmpty()) {
+                    reasoning.append(reasoningDelta);
+                    streamListener.onReasoningDelta(reasoningDelta);
+                }
+
+                String contentDelta = delta.path("content").asText();
+                if (!contentDelta.isEmpty()) {
+                    content.append(contentDelta);
+                    streamListener.onContentDelta(contentDelta);
+                }
+
+                mergeToolCallDeltas(toolAccumulators, delta.path("tool_calls"));
+            }
+
+            return new ChatResponse(
+                    role,
+                    content.toString(),
+                    reasoning.toString(),
+                    buildToolCalls(toolAccumulators),
+                    inputTokens,
+                    outputTokens
+            );
+        }
+    }
+
+    private ObjectNode buildRequestBody(List<Message> messages, List<Tool> tools, boolean stream) {
+        ObjectNode requestBody = mapper.createObjectNode();
+        requestBody.put("model", MODEL);
+        if (stream) {
+            requestBody.put("stream", true);
+        }
+
+        ArrayNode messagesArray = requestBody.putArray("messages");
+        for (Message msg : messages) {
+            ObjectNode msgNode = messagesArray.addObject();
+            msgNode.put("role", msg.role());
+            msgNode.put("content", msg.content());
+            if (msg.reasoningContent() != null && !msg.reasoningContent().isBlank()) {
+                msgNode.put("reasoning_content", msg.reasoningContent());
+            }
+
+            if (msg.toolCalls() != null && !msg.toolCalls().isEmpty()) {
+                ArrayNode toolCallsArray = msgNode.putArray("tool_calls");
+                for (ToolCall tc : msg.toolCalls()) {
+                    ObjectNode tcNode = toolCallsArray.addObject();
+                    tcNode.put("id", tc.id());
+                    tcNode.put("type", "function");
+                    ObjectNode functionNode = tcNode.putObject("function");
+                    functionNode.put("name", tc.function().name());
+                    functionNode.put("arguments", tc.function().arguments());
                 }
             }
 
-            // 解析token使用
-            JsonNode usage = root.path("usage");
-            int inputTokens = usage.path("prompt_tokens").asInt();
-            int outputTokens = usage.path("completion_tokens").asInt();
-
-            return new ChatResponse(role, content, reasoningContent, toolCalls, inputTokens, outputTokens);
+            if (msg.toolCallId() != null) {
+                msgNode.put("tool_call_id", msg.toolCallId());
+            }
         }
+
+        if (tools != null && !tools.isEmpty()) {
+            ArrayNode toolsArray = requestBody.putArray("tools");
+            for (Tool tool : tools) {
+                ObjectNode toolNode = toolsArray.addObject();
+                toolNode.put("type", "function");
+                ObjectNode functionNode = toolNode.putObject("function");
+                functionNode.put("name", tool.name());
+                functionNode.put("description", tool.description());
+                functionNode.set("parameters", tool.parameters());
+            }
+        }
+        return requestBody;
+    }
+
+    private void mergeToolCallDeltas(List<ToolCallAccumulator> accumulators, JsonNode toolCallsNode) {
+        if (toolCallsNode == null || !toolCallsNode.isArray()) {
+            return;
+        }
+
+        for (JsonNode tc : toolCallsNode) {
+            int index = tc.path("index").asInt(accumulators.size());
+            while (accumulators.size() <= index) {
+                accumulators.add(new ToolCallAccumulator());
+            }
+
+            ToolCallAccumulator acc = accumulators.get(index);
+            String id = tc.path("id").asText();
+            if (!id.isEmpty()) {
+                acc.id = id;
+            }
+
+            JsonNode function = tc.path("function");
+            String name = function.path("name").asText();
+            if (!name.isEmpty()) {
+                acc.name.append(name);
+            }
+            String arguments = function.path("arguments").asText();
+            if (!arguments.isEmpty()) {
+                acc.arguments.append(arguments);
+            }
+        }
+    }
+
+    private List<ToolCall> buildToolCalls(List<ToolCallAccumulator> accumulators) {
+        if (accumulators.isEmpty()) {
+            return null;
+        }
+
+        List<ToolCall> toolCalls = new ArrayList<>();
+        for (ToolCallAccumulator acc : accumulators) {
+            if (acc.id == null || acc.id.isBlank()) {
+                continue;
+            }
+            toolCalls.add(new ToolCall(
+                    acc.id,
+                    new ToolCall.Function(acc.name.toString(), acc.arguments.toString())
+            ));
+        }
+        return toolCalls.isEmpty() ? null : toolCalls;
     }
 
     // 记录定义
@@ -177,6 +284,14 @@ public class GLMClient {
 
     public record Tool(String name, String description, JsonNode parameters) {}
 
+    public interface StreamListener {
+        StreamListener NO_OP = new StreamListener() {};
+
+        default void onReasoningDelta(String delta) {}
+
+        default void onContentDelta(String delta) {}
+    }
+
     public record ChatResponse(String role, String content, String reasoningContent, List<ToolCall> toolCalls,
                                int inputTokens, int outputTokens) {
         public ChatResponse(String role, String content, List<ToolCall> toolCalls,
@@ -187,5 +302,11 @@ public class GLMClient {
         public boolean hasToolCalls() {
             return toolCalls != null && !toolCalls.isEmpty();
         }
+    }
+
+    private static final class ToolCallAccumulator {
+        private String id;
+        private final StringBuilder name = new StringBuilder();
+        private final StringBuilder arguments = new StringBuilder();
     }
 }

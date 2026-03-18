@@ -1,6 +1,7 @@
 package com.paicli.rag;
 
 import com.huaban.analysis.jieba.JiebaSegmenter;
+import com.paicli.util.JiebaSegmenterFactory;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -16,7 +17,7 @@ import java.util.regex.Pattern;
  * 例如类名、方法名、ReAct、Agent、index、memory 等，用于混合检索加权。
  */
 final class RagQueryTokenizer {
-    private static final JiebaSegmenter SEGMENTER = new JiebaSegmenter();
+    private static final JiebaSegmenter SEGMENTER = JiebaSegmenterFactory.createSilently();
     private static final Pattern ASCII_TOKEN = Pattern.compile("[A-Za-z][A-Za-z0-9_.$-]{1,}");
 
     private RagQueryTokenizer() {

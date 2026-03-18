@@ -3,6 +3,8 @@ package com.paicli.plan;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.llm.GLMClient;
+import com.paicli.util.AnsiStyle;
+import com.paicli.util.TerminalMarkdownRenderer;
 
 import java.io.IOException;
 import java.util.*;
@@ -49,7 +51,10 @@ public class Planner {
             2. dependencies列出依赖的任务id
             3. 任务应该按执行顺序排列
             4. 任务描述要具体明确
-            5. 复杂任务拆分为5-10个子任务
+            5. 简单任务（如列目录、读取单个文件、执行单条命令）允许只生成1-3个任务；不要为了凑步数引入无关步骤
+            6. 复杂任务再拆分为5-10个子任务
+            7. 不要为了“保存中间结果”而额外创建 FILE_WRITE / FILE_READ，除非用户明确要求落盘
+            8. 如果一个任务一步就能完成，就保持最短计划
 
             只输出JSON，不要有其他内容。
             """;
@@ -64,6 +69,10 @@ public class Planner {
     public ExecutionPlan createPlan(String goal) throws IOException {
         System.out.println("📋 正在规划任务: " + goal + "\n");
 
+        if (isSimpleGoal(goal)) {
+            return createMinimalPlan(goal);
+        }
+
         // 构建规划请求
         List<GLMClient.Message> messages = Arrays.asList(
                 GLMClient.Message.system(PLANNING_PROMPT),
@@ -71,7 +80,9 @@ public class Planner {
         );
 
         // 调用LLM生成计划
-        GLMClient.ChatResponse response = llmClient.chat(messages, null);
+        PlanningStreamRenderer streamRenderer = new PlanningStreamRenderer();
+        GLMClient.ChatResponse response = llmClient.chat(messages, null, streamRenderer);
+        streamRenderer.finish();
         String planJson = response.content();
 
         // 解析JSON计划
@@ -181,5 +192,110 @@ public class Planner {
         context.append("\n请制定新的执行计划，避开之前的问题。");
 
         return createPlan(context.toString());
+    }
+
+    private boolean isSimpleGoal(String goal) {
+        if (goal == null) {
+            return false;
+        }
+
+        String normalized = goal.trim();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+
+        boolean hasMultiStepCue = normalized.contains("然后")
+                || normalized.contains("并且")
+                || normalized.contains("并")
+                || normalized.contains("再")
+                || normalized.contains("最后")
+                || normalized.contains("同时")
+                || normalized.contains("先")
+                || normalized.contains("之后")
+                || normalized.contains("接着")
+                || normalized.contains("以及");
+        if (hasMultiStepCue) {
+            return false;
+        }
+
+        if (normalized.length() > 30) {
+            return false;
+        }
+
+        return normalized.contains("列出")
+                || normalized.contains("查看")
+                || normalized.contains("读取")
+                || normalized.contains("显示")
+                || normalized.contains("执行")
+                || normalized.contains("运行")
+                || normalized.contains("搜索")
+                || normalized.contains("当前目录")
+                || normalized.contains("文件");
+    }
+
+    private ExecutionPlan createMinimalPlan(String goal) {
+        ExecutionPlan plan = new ExecutionPlan(generatePlanId(), goal);
+        plan.setSummary(buildMinimalSummary(goal));
+        plan.addTask(new Task("task_1", goal.trim(), inferSimpleTaskType(goal)));
+        if (!plan.computeExecutionOrder()) {
+            throw new IllegalStateException("简单计划不应出现循环依赖");
+        }
+        return plan;
+    }
+
+    private String buildMinimalSummary(String goal) {
+        String normalized = goal == null ? "" : goal.trim();
+        if (normalized.isEmpty()) {
+            return "执行简单任务";
+        }
+        return "直接执行简单任务：" + normalized;
+    }
+
+    private Task.TaskType inferSimpleTaskType(String goal) {
+        String normalized = goal == null ? "" : goal.trim();
+        if (normalized.contains("读取") || normalized.contains("打开") || normalized.contains("查看")
+                && normalized.contains("文件")) {
+            return Task.TaskType.FILE_READ;
+        }
+        if (normalized.contains("写入") || normalized.contains("修改") || normalized.contains("创建文件")) {
+            return Task.TaskType.FILE_WRITE;
+        }
+        if (normalized.contains("分析") || normalized.contains("总结") || normalized.contains("解释")) {
+            return Task.TaskType.ANALYSIS;
+        }
+        if (normalized.contains("验证") || normalized.contains("检查")) {
+            return Task.TaskType.VERIFICATION;
+        }
+        return Task.TaskType.COMMAND;
+    }
+
+    private static final class PlanningStreamRenderer implements GLMClient.StreamListener {
+        private TerminalMarkdownRenderer reasoningRenderer;
+        private boolean reasoningStarted;
+        private boolean streamed;
+
+        @Override
+        public void onReasoningDelta(String delta) {
+            if (delta == null || delta.isEmpty()) {
+                return;
+            }
+            if (!reasoningStarted) {
+                System.out.println(AnsiStyle.heading("🧠 规划思考"));
+                reasoningRenderer = new TerminalMarkdownRenderer(System.out);
+                reasoningStarted = true;
+                streamed = true;
+            }
+            reasoningRenderer.append(delta);
+            System.out.flush();
+        }
+
+        private void finish() {
+            if (streamed) {
+                if (reasoningRenderer != null) {
+                    reasoningRenderer.finish();
+                }
+                System.out.println("\n");
+            }
+        }
     }
 }

@@ -86,4 +86,12 @@ class CliCommandParserTest {
         assertEquals(CliCommandParser.CommandType.NONE, command.type());
         assertNull(command.payload());
     }
+
+    @Test
+    void parsesUnknownSlashCommandAsUnknownCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/unknown");
+
+        assertEquals(CliCommandParser.CommandType.UNKNOWN_COMMAND, command.type());
+        assertEquals("/unknown", command.payload());
+    }
 }
