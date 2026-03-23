@@ -8,6 +8,7 @@ final class CliCommandParser {
         EXIT,
         CLEAR,
         SWITCH_PLAN,
+        SWITCH_TEAM,
         MEMORY_STATUS,
         MEMORY_SAVE,
         INDEX_CODE,
@@ -51,6 +52,14 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/plan ", 0, 6)) {
             return new ParsedCommand(CommandType.SWITCH_PLAN, trimmed.substring(6).trim());
+        }
+
+        if (trimmed.equalsIgnoreCase("/team")) {
+            return new ParsedCommand(CommandType.SWITCH_TEAM, null);
+        }
+
+        if (trimmed.regionMatches(true, 0, "/team ", 0, 6)) {
+            return new ParsedCommand(CommandType.SWITCH_TEAM, trimmed.substring(6).trim());
         }
 
         if (trimmed.equalsIgnoreCase("/memory") || trimmed.equalsIgnoreCase("/mem")) {

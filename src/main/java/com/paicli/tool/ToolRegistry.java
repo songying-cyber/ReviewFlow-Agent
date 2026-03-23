@@ -15,16 +15,25 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.*;
 
 /**
  * 工具注册表 - 管理所有可用工具
  */
 public class ToolRegistry {
     private static final ObjectMapper mapper = new ObjectMapper();
+    private static final int DEFAULT_COMMAND_TIMEOUT_SECONDS = 60;
+    private static final int MAX_COMMAND_OUTPUT_CHARS = 8_000;
     private final Map<String, Tool> tools = new HashMap<>();
+    private final long commandTimeoutSeconds;
     private String projectPath = System.getProperty("user.dir");
 
     public ToolRegistry() {
+        this(DEFAULT_COMMAND_TIMEOUT_SECONDS);
+    }
+
+    ToolRegistry(long commandTimeoutSeconds) {
+        this.commandTimeoutSeconds = commandTimeoutSeconds;
         // 注册内置工具
         registerFileTools();
         registerShellTools();
@@ -37,6 +46,13 @@ public class ToolRegistry {
      */
     public void setProjectPath(String projectPath) {
         this.projectPath = projectPath;
+    }
+
+    /**
+     * 获取代码检索的项目路径
+     */
+    public String getProjectPath() {
+        return projectPath;
     }
 
     /**
@@ -117,35 +133,9 @@ public class ToolRegistry {
     private void registerShellTools() {
         tools.put("execute_command", new Tool(
                 "execute_command",
-                "执行Shell命令",
+                "在当前项目目录中执行短时 Shell 命令（默认 60 秒超时，不允许全盘扫描）",
                 createParameters(new Param("command", "string", "要执行的命令", true)),
-                args -> {
-                    String command = args.get("command");
-                    try {
-                        ProcessBuilder pb = new ProcessBuilder("bash", "-c", command);
-                        pb.redirectErrorStream(true);
-                        Process process = pb.start();
-
-                        StringBuilder output = new StringBuilder();
-                        try (BufferedReader reader = new BufferedReader(
-                                new InputStreamReader(process.getInputStream()))) {
-                            String line;
-                            while ((line = reader.readLine()) != null) {
-                                output.append(line).append("\n");
-                            }
-                        }
-
-                        boolean finished = process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
-                        if (!finished) {
-                            process.destroyForcibly();
-                            return "命令执行超时（60秒），已强制终止";
-                        }
-                        int exitCode = process.exitValue();
-                        return String.format("命令执行完成 (exit code: %d)\n%s", exitCode, output);
-                    } catch (Exception e) {
-                        return "执行命令失败: " + e.getMessage();
-                    }
-                }
+                args -> executeCommand(args.get("command"))
         ));
     }
 
@@ -290,6 +280,90 @@ public class ToolRegistry {
 
     public boolean hasTool(String name) {
         return tools.containsKey(name);
+    }
+
+    private String executeCommand(String command) {
+        String normalized = command == null ? "" : command.trim();
+        if (normalized.isEmpty()) {
+            return "执行命令失败: 命令不能为空";
+        }
+        if (isDisallowedBroadScan(normalized)) {
+            return "拒绝执行命令: 不允许扫描 /、~ 或整个文件系统。请改用项目内相对路径，或优先使用 read_file、list_dir、search_code。";
+        }
+
+        ExecutorService outputReaderExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "paicli-command-output");
+            thread.setDaemon(true);
+            return thread;
+        });
+
+        Process process = null;
+        try {
+            ProcessBuilder pb = new ProcessBuilder("bash", "-c", normalized);
+            pb.directory(new File(projectPath));
+            pb.redirectErrorStream(true);
+            process = pb.start();
+
+            Process runningProcess = process;
+            Future<String> outputFuture = outputReaderExecutor.submit(() -> readProcessOutput(runningProcess));
+
+            boolean finished = process.waitFor(commandTimeoutSeconds, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                process.waitFor(2, TimeUnit.SECONDS);
+                outputFuture.cancel(true);
+                return "命令执行超时（" + commandTimeoutSeconds + "秒），已强制终止";
+            }
+
+            String output = getCommandOutput(outputFuture);
+            int exitCode = process.exitValue();
+            return String.format("命令执行完成 (exit code: %d)\n%s", exitCode, output);
+        } catch (Exception e) {
+            if (process != null) {
+                process.destroyForcibly();
+            }
+            return "执行命令失败: " + e.getMessage();
+        } finally {
+            outputReaderExecutor.shutdownNow();
+        }
+    }
+
+    private boolean isDisallowedBroadScan(String command) {
+        String normalized = command.replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
+        return normalized.contains("find /")
+                || normalized.contains("find ~")
+                || normalized.contains("find $home");
+    }
+
+    private String readProcessOutput(Process process) throws Exception {
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (output.length() < MAX_COMMAND_OUTPUT_CHARS) {
+                    int remaining = MAX_COMMAND_OUTPUT_CHARS - output.length();
+                    if (line.length() > remaining) {
+                        output.append(line, 0, remaining);
+                    } else {
+                        output.append(line);
+                    }
+                    output.append("\n");
+                }
+            }
+        }
+        if (output.length() >= MAX_COMMAND_OUTPUT_CHARS) {
+            return output.substring(0, MAX_COMMAND_OUTPUT_CHARS) + "\n...(输出已截断)";
+        }
+        return output.toString();
+    }
+
+    private String getCommandOutput(Future<String> outputFuture) throws Exception {
+        try {
+            return outputFuture.get(2, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            outputFuture.cancel(true);
+            return "(命令已结束，但输出读取超时)";
+        }
     }
 
     // 记录定义

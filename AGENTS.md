@@ -25,10 +25,10 @@
 
 - 项目名：`PaiCLI`
 - 定位：一个教学导向的 Java Agent CLI，目标是从简单 Agent CLI 逐步演进到更完整的 Agent 产品
-- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`
-- 当前用户可感知版本：CLI Banner 显示 `v4.0.0`
+- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`、第 5 期 `Multi-Agent 协作 + 角色分工`
+- 当前用户可感知版本：CLI Banner 显示 `v5.0.0`
 - 当前 Maven 产物版本：`pom.xml` 仍是 `1.0-SNAPSHOT`
-- 结论：如果你看到运行界面是 `v4.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
+- 结论：如果你看到运行界面是 `v5.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
 
 ## 运行前提
 
@@ -157,13 +157,36 @@ mvn test -Dtest=ExecutionPlanTest
 - Agent 工具：`search_code`（语义检索代码库）
 - 在 ReAct 和 Plan 模式下，Agent 会自动检索代码上下文辅助回答
 
+### 6. Multi-Agent 协作模式
+
+- 通过 `/team` 或 `/team <任务>` 进入
+- 主入口在 `src/main/java/com/paicli/agent/AgentOrchestrator.java`
+- 采用主从架构：编排器（Orchestrator）为"主"，子代理（SubAgent）为"从"
+- 三个角色：
+  - 规划者（Planner）：拆解任务为执行步骤
+  - 执行者（Worker）：调用工具执行具体操作（默认 2 个 Worker 轮询分配）
+  - 检查者（Reviewer）：审查执行结果质量
+- 协作流程：规划 -> 按依赖顺序分配给 Worker -> Reviewer 审查 -> 通过则完成，未通过则带反馈重试
+- 同一个依赖批次内部当前仍按步骤串行执行（Worker 仅做轮询分担对话历史，没有真正并发），以保证流式输出不交错、方便教学阅读
+- 冲突解决：每步最多重试 2 次，超过次数保留当前结果
+- Reviewer 审查结果解析不出来（空内容、缺 approved 字段、既无肯定也无否定关键词）时，采取保守策略判为未通过
+- 如果某步失败导致其依赖步骤无法执行，Orchestrator 会显式提示 `⏭️ 步骤 [step_x] 因前置步骤失败被跳过`
+- SubAgent 在执行阶段遭遇 `IOException`（LLM 调用失败、超时等）时返回 `AgentMessage.Type.ERROR`，调用方需要独立于 RESULT 处理
+- 所有子代理共享同一个 ToolRegistry 与 MemoryManager（与 ReAct 模式共享项目路径与记忆上下文，避免重复加载长期记忆）
+- 任务执行完后回到默认 `ReAct`
+- `ReAct`、`Plan-and-Execute` 和 `Multi-Agent` 三条路径都应写回记忆
+
 ## 仓库结构
 
 ```text
 src/main/java/com/paicli
 ├── agent/
 │   ├── Agent.java
-│   └── PlanExecuteAgent.java
+│   ├── PlanExecuteAgent.java
+│   ├── AgentRole.java
+│   ├── AgentMessage.java
+│   ├── SubAgent.java
+│   └── AgentOrchestrator.java
 ├── cli/
 │   ├── Main.java
 │   ├── CliCommandParser.java
@@ -207,13 +230,16 @@ src/main/java/com/paicli
 - `MemoryRetrieverTest`
 - `MemoryManagerTest`
 - `PlanExecuteAgentTest`
+- `AgentRoleTest`
+- `AgentMessageTest`
+- `AgentOrchestratorTest`
 - `EmbeddingClientTest`
 - `VectorStoreTest`
 - `CodeChunkerTest`
 - `CodeAnalyzerTest`
 - `CodeIndexTest`
 
-这意味着当前自动化测试更偏解析、计划结构、RAG 核心模块，不覆盖真实 LLM 联调、真实 Embedding API 联调，也不覆盖终端交互的完整手工体验。
+这意味着当前自动化测试更偏解析、计划结构、RAG 核心模块、Multi-Agent 编排逻辑，不覆盖真实 LLM 联调、真实 Embedding API 联调，也不覆盖终端交互的完整手工体验。
 
 ## 核心文件说明
 
@@ -240,6 +266,33 @@ src/main/java/com/paicli
 - 并行批次执行
 - 失败后重规划
 
+### `src/main/java/com/paicli/agent/AgentOrchestrator.java`
+
+- Multi-Agent 编排器（主从架构中的"主"）
+- 管理规划者、执行者、检查者三个角色
+- 按依赖顺序分配步骤给 Worker
+- 检查者审查结果，未通过则带反馈重试（最多 2 次）
+- 解析规划者输出的 JSON 执行计划
+- 解析检查者输出的审批结果
+
+### `src/main/java/com/paicli/agent/SubAgent.java`
+
+- 可配置角色的轻量子代理
+- 三个角色对应三套系统提示词（规划者/执行者/检查者）
+- 维护独立对话历史
+- 执行者可使用工具调用，规划者和检查者不使用工具
+- 支持流式输出（按角色显示不同标签）
+
+### `src/main/java/com/paicli/agent/AgentRole.java`
+
+- Agent 角色枚举：PLANNER、WORKER、REVIEWER
+- 每个角色有显示名和描述
+
+### `src/main/java/com/paicli/agent/AgentMessage.java`
+
+- Agent 间通信消息类型
+- 五种消息类型：TASK、RESULT、FEEDBACK、APPROVAL、REJECTION
+
 ### `src/main/java/com/paicli/plan/Planner.java`
 
 - 调用 LLM 生成计划 JSON
@@ -256,13 +309,14 @@ src/main/java/com/paicli
 
 ### `src/main/java/com/paicli/tool/ToolRegistry.java`
 
-当前内置工具只有 5 个：
+当前内置工具只有 6 个：
 
 - `read_file`
 - `write_file`
 - `list_dir`
-- `execute_command`
+- `execute_command`（在当前项目目录执行短时命令，默认 60 秒超时，不允许扫描 `/`、`~` 或整个文件系统）
 - `create_project`
+- `search_code`
 
 ### `src/main/java/com/paicli/llm/GLMClient.java`
 
@@ -280,8 +334,6 @@ src/main/java/com/paicli
 
 下面这些内容在路线图里出现了，但当前仓库还没有真正交付：
 
-- RAG / 代码库检索
-- Multi-Agent
 - HITL 审批流
 - 异步长任务调度
 - 沙箱与权限控制
@@ -302,7 +354,7 @@ src/main/java/com/paicli
 
 ### 2. 改命令入口，要联动这几处
 
-如果修改 `/plan`、`/clear`、`/memory`、`/save`、`/index`、`/search`、`/graph`、`/exit` 或输入解析：
+如果修改 `/plan`、`/team`、`/clear`、`/memory`、`/save`、`/index`、`/search`、`/graph`、`/exit` 或输入解析：
 
 - `Main.java`
 - `CliCommandParser.java`
@@ -334,6 +386,7 @@ src/main/java/com/paicli
 - `ToolRegistry.java`
 - `Agent.java` 的系统提示词
 - `PlanExecuteAgent.java` 的执行提示词
+- `SubAgent.java` 的 WORKER_PROMPT
 - 如有必要，`Planner.java` 的规划提示词
 - `README.md`
 - `AGENTS.md`
@@ -406,6 +459,12 @@ mvn test -Dtest=CliCommandParserTest,PlanReviewInputParserTest,MainInputNormaliz
 mvn test -Dtest=ExecutionPlanTest
 ```
 
+### Multi-Agent 相关
+
+```bash
+mvn test -Dtest=AgentRoleTest,AgentMessageTest,AgentOrchestratorTest
+```
+
 ### 改了交互或终端输入
 
 除了测试，还应手工 smoke test：
@@ -434,6 +493,7 @@ mvn test -Dtest=ExecutionPlanTest
 - API/模型问题：先看 `GLMClient.java`
 - RAG/代码检索问题：先看 `CodeRetriever.java` + `CodeIndex.java` + `VectorStore.java`
 - 代码分块/AST 问题：先看 `CodeChunker.java` + `CodeAnalyzer.java`
+- Multi-Agent 协作问题：先看 `AgentOrchestrator.java` + `SubAgent.java` + `AgentRole.java` + `AgentMessage.java`
 
 ## 持续维护约定
 

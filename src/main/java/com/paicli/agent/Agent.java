@@ -37,6 +37,8 @@ public class Agent {
 
             当需要操作文件、执行命令或创建项目时，请使用工具调用。
             使用工具后，根据工具返回的结果继续思考下一步行动。
+            对于当前项目内的文件和代码，请优先使用 read_file、list_dir、search_code。
+            execute_command 只适合在当前项目目录执行短时命令（如 git status、mvn test），不要用它扫描 /、~ 或整个文件系统。
 
             如果用户询问与代码库相关的问题（如"这个类是干什么的"、"哪里用了某个功能"），
             请优先使用 search_code 工具检索相关代码，再基于检索结果回答。
@@ -239,7 +241,21 @@ public class Agent {
         return normalized.substring(0, maxLength) + "...";
     }
 
+    /**
+     * 流式输出渲染器，将 reasoning_content 与 content 分区展示。
+     *
+     * 服务器可能把 reasoning_content 切成多段下发，甚至在 content 开始之后追加 reasoning；
+     * 终端是线性的，无法回头修改已写出的文字。渲染策略：
+     *
+     * 1. 在 content 出现之前，只要 reasoning 有实质内容（非空白），就立刻流式打印在"🧠 思考过程"下
+     * 2. 仅空白的 reasoning delta 会先暂存，不触发标题——避免出现"空的思考过程"
+     * 3. content 一出现就收尾 reasoning 区，打印"🤖 最终结果"标题并流式输出 content
+     * 4. 如果 content 启动之后又收到 reasoning（服务器把思考内容追加在答案之后），
+     *    缓冲到 lateReasoning，最终在 finish() 用"🧠 补充思考"标题独立展示，不会污染最终结果区
+     */
     private static final class StreamRenderer implements GLMClient.StreamListener {
+        private final StringBuilder pendingReasoning = new StringBuilder();
+        private final StringBuilder lateReasoning = new StringBuilder();
         private TerminalMarkdownRenderer reasoningRenderer;
         private TerminalMarkdownRenderer contentRenderer;
         private boolean reasoningStarted;
@@ -251,13 +267,25 @@ public class Agent {
             if (delta == null || delta.isEmpty()) {
                 return;
             }
+            if (contentStarted) {
+                // content 已开始，无法回头；缓冲到"补充思考"
+                lateReasoning.append(delta);
+                return;
+            }
             if (!reasoningStarted) {
+                pendingReasoning.append(delta);
+                if (pendingReasoning.toString().isBlank()) {
+                    return;  // 还没攒出实质内容，等
+                }
                 System.out.println(AnsiStyle.heading("🧠 思考过程"));
                 reasoningRenderer = new TerminalMarkdownRenderer(System.out);
+                reasoningRenderer.append(pendingReasoning.toString());
+                pendingReasoning.setLength(0);
                 reasoningStarted = true;
                 streamedOutput = true;
+            } else {
+                reasoningRenderer.append(delta);
             }
-            reasoningRenderer.append(delta);
             System.out.flush();
         }
 
@@ -267,12 +295,20 @@ public class Agent {
                 return;
             }
             if (!contentStarted) {
-                if (!reasoningStarted) {
-                    System.out.println(AnsiStyle.section("🤖 最终结果"));
-                } else {
+                if (reasoningStarted && reasoningRenderer != null) {
+                    reasoningRenderer.finish();
                     System.out.println();
-                    System.out.println(AnsiStyle.section("🤖 最终结果"));
+                } else if (pendingReasoning.length() > 0 && !pendingReasoning.toString().isBlank()) {
+                    // 有实质 reasoning 但之前没攒够阈值就被 content 打断：先补打思考过程
+                    System.out.println(AnsiStyle.heading("🧠 思考过程"));
+                    TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(System.out);
+                    r.append(pendingReasoning.toString());
+                    r.finish();
+                    System.out.println();
+                    pendingReasoning.setLength(0);
+                    reasoningStarted = true;
                 }
+                System.out.println(AnsiStyle.section("🤖 最终结果"));
                 contentRenderer = new TerminalMarkdownRenderer(System.out);
                 contentStarted = true;
                 streamedOutput = true;
@@ -286,13 +322,23 @@ public class Agent {
         }
 
         private void finish() {
+            if (reasoningRenderer != null) {
+                reasoningRenderer.finish();
+            }
+            if (contentRenderer != null) {
+                contentRenderer.finish();
+            }
+            String late = lateReasoning.toString().trim();
+            if (!late.isEmpty()) {
+                System.out.println();
+                System.out.println(AnsiStyle.heading("🧠 补充思考"));
+                TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(System.out);
+                r.append(late);
+                r.finish();
+                lateReasoning.setLength(0);
+                streamedOutput = true;
+            }
             if (streamedOutput) {
-                if (reasoningRenderer != null) {
-                    reasoningRenderer.finish();
-                }
-                if (contentRenderer != null) {
-                    contentRenderer.finish();
-                }
                 System.out.println();
             }
         }

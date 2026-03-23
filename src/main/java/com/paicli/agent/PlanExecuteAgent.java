@@ -99,6 +99,8 @@ public class PlanExecuteAgent {
             6. search_code - 语义检索代码库，参数：{"query": "自然语言描述", "top_k": 5}
 
             如果任务涉及理解代码库（如分析代码结构、查找实现位置），请优先使用 search_code 工具。
+            对于当前项目内的文件，请优先使用 read_file 或 list_dir，不要用 execute_command 扫描 /、~ 或整个文件系统。
+            execute_command 只适合在当前项目目录执行短时命令。
             如果是ANALYSIS或VERIFICATION类型任务，请直接输出分析结果，不需要调用工具。
 
             请用中文回复。

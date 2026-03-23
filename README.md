@@ -1,6 +1,6 @@
 # PaiCLI
 
-一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第四期的 `RAG 检索 + 代码库理解`。
+一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第五期的 `Multi-Agent 协作 + 角色分工`。
 
 ## 演进历程
 
@@ -34,6 +34,14 @@
 - 新增 `/index`、`/search`、`/graph` CLI 命令
 - Agent 自动调用 `search_code` 工具理解代码库
 
+### 第五期：Multi-Agent 协作 + 角色分工
+
+- 三个角色：规划者（Planner）、执行者（Worker）、检查者（Reviewer）
+- 主从架构：编排器（Orchestrator）协调子代理（SubAgent）
+- 规划者拆解任务 -> 执行者执行 -> 检查者审查质量
+- 审查未通过时带反馈重试（最多 2 次），冲突自动解决
+- 新增 `/team` CLI 命令，进入多 Agent 协作模式
+
 ## 启动界面
 
 ### 第三期当前启动界面
@@ -50,7 +58,7 @@
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      RAG-Enhanced Agent CLI v4.0.0                  ║
+║      Multi-Agent CLI v5.0.0                           ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -87,6 +95,13 @@
 - 🕸️ 代码关系图谱（类继承、接口实现、方法调用）
 - 📡 本地 Ollama Embedding + 远程 API 可配置
 - 🗃️ SQLite 向量存储与持久化
+
+### 第五期
+
+- 👥 多 Agent 协作（规划者 + 执行者 + 检查者）
+- 🎯 主从架构编排器自动分配任务
+- 🔍 检查者审查质量，未通过自动重试
+- 🛠️ 执行者共享工具集，支持文件操作与代码检索
 
 ## 快速开始
 
@@ -198,6 +213,8 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
    - 输入你的问题或任务
    - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式
    - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
+   - 输入 '/team' 后，下一条任务使用 Multi-Agent 协作模式
+   - 输入 '/team 任务内容' 直接用多 Agent 协作执行这条任务
    - 计划生成后可直接执行、补充要求重规划，或取消
    - 输入 '/index [路径]' 为代码库建立向量索引
    - 输入 '/search <查询>' 语义检索代码
@@ -243,7 +260,7 @@ I
 - `read_file` - 读取文件内容
 - `write_file` - 写入文件内容
 - `list_dir` - 列出目录内容
-- `execute_command` - 执行 Shell 命令
+- `execute_command` - 在当前项目目录执行短时 Shell 命令（默认 60 秒超时，不允许全盘扫描）
 - `create_project` - 创建项目结构（java/python/node）
 - `search_code` - 语义检索代码库（自然语言查询）
 
@@ -251,6 +268,8 @@ I
 
 - `/plan` - 下一条任务使用 Plan-and-Execute 模式
 - `/plan <任务>` - 直接用 Plan-and-Execute 模式执行这条任务
+- `/team` - 下一条任务使用 Multi-Agent 协作模式
+- `/team <任务>` - 直接用 Multi-Agent 协作模式执行这条任务
 - `/memory` / `/mem` - 查看记忆系统状态
 - `/save <事实>` - 手动保存关键事实到长期记忆
 - `/index [路径]` - 索引代码库（默认当前目录）
@@ -302,6 +321,8 @@ I
    - 输入你的问题或任务
    - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式
    - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
+   - 输入 '/team' 后，下一条任务使用 Multi-Agent 协作模式
+   - 输入 '/team 任务内容' 直接用多 Agent 协作执行这条任务
    - 计划生成后可直接执行、补充要求重规划，或取消
    - 输入 '/index [路径]' 为代码库建立向量索引
    - 输入 '/search <查询>' 语义检索代码
@@ -344,7 +365,11 @@ I
 src/main/java/com/paicli
 ├── agent/
 │   ├── Agent.java              # ReAct Agent
-│   └── PlanExecuteAgent.java   # Plan-and-Execute Agent
+│   ├── PlanExecuteAgent.java   # Plan-and-Execute Agent
+│   ├── AgentRole.java          # Agent 角色枚举
+│   ├── AgentMessage.java       # Agent 间通信消息
+│   ├── SubAgent.java           # 可配置子代理
+│   └── AgentOrchestrator.java  # Multi-Agent 编排器
 ├── cli/
 │   ├── Main.java               # CLI 入口
 │   ├── CliCommandParser.java   # 命令解析

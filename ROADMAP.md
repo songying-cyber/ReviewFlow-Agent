@@ -81,7 +81,9 @@
 
 ---
 
-## 第5期：Multi-Agent协作 + 角色分工
+## 第5期：Multi-Agent协作 + 角色分工 ✅
+
+**已完成**
 
 **目标**：多个Agent协作完成复杂任务
 
@@ -244,4 +246,4 @@ ReAct    执行     上下文    检索      协作
 
 ---
 
-*已完成第4期 RAG 检索，下一步进入第5期 Multi-Agent 协作。*
+*已完成第5期 Multi-Agent 协作，下一步进入第6期 Human-in-the-Loop 审批流。*

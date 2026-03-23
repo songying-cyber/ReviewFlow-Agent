@@ -94,4 +94,20 @@ class CliCommandParserTest {
         assertEquals(CliCommandParser.CommandType.UNKNOWN_COMMAND, command.type());
         assertEquals("/unknown", command.payload());
     }
+
+    @Test
+    void parsesTeamSlashCommandWithoutPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/team");
+
+        assertEquals(CliCommandParser.CommandType.SWITCH_TEAM, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesTeamSlashCommandWithPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/team 创建并验证一个 Java 项目");
+
+        assertEquals(CliCommandParser.CommandType.SWITCH_TEAM, command.type());
+        assertEquals("创建并验证一个 Java 项目", command.payload());
+    }
 }
