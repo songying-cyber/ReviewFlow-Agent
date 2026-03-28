@@ -1,6 +1,6 @@
 # PaiCLI
 
-一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第五期的 `Multi-Agent 协作 + 角色分工`。
+一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第六期的 `HITL 人工审批 + 危险操作拦截`。
 
 ## 演进历程
 
@@ -21,9 +21,10 @@
 ### 第三期：Memory + 上下文工程
 
 - 短期记忆管理当前对话与工具结果
-- 长期记忆持久化关键事实，跨会话复用
+- 长期记忆通过 `/save <事实>` 手动保存关键事实，跨会话复用
+- 注入给模型的相关记忆只使用长期稳定事实，不把当前轮短期对话误当成“历史记忆”
 - 对话接近预算时自动做摘要压缩
-- 新增 `/memory` 查看状态、`/save` 手动保存事实
+- 新增 `/memory` 查看状态、`/memory clear` 清空长期记忆、`/save` 手动保存事实
 
 ### 第四期：RAG 检索 + 代码库理解
 
@@ -41,6 +42,14 @@
 - 规划者拆解任务 -> 执行者执行 -> 检查者审查质量
 - 审查未通过时带反馈重试（最多 2 次），冲突自动解决
 - 新增 `/team` CLI 命令，进入多 Agent 协作模式
+
+### 第六期：Human-in-the-Loop + 审批流
+
+- 危险操作静态规则识别：`write_file`、`execute_command`、`create_project`
+- 三级危险等级：高危（`execute_command`）、中危（`write_file` / `create_project`）
+- 审批决策：批准 / 全部放行 / 拒绝 / 跳过 / 修改参数后执行
+- HITL 默认关闭，通过 `/hitl on` 启用
+- 新增 `/hitl` CLI 命令，支持 `/hitl on`、`/hitl off`、`/hitl`（查看状态）
 
 ## 启动界面
 
@@ -103,6 +112,13 @@
 - 🔍 检查者审查质量，未通过自动重试
 - 🛠️ 执行者共享工具集，支持文件操作与代码检索
 
+### 第六期
+
+- 🔒 危险操作静态规则识别（`write_file` / `execute_command` / `create_project`）
+- ⚠️ 三级危险等级展示（高危 / 中危 / 安全）
+- ✅ 审批决策：批准、全部放行、拒绝、跳过、修改参数后执行
+- 🔓 HITL 默认关闭，`/hitl on` 启用、`/hitl off` 关闭
+
 ## 快速开始
 
 ### 1. 配置 API Key
@@ -121,6 +137,7 @@ export GLM_API_KEY=your_api_key_here
 ```
 
 长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
+长期记忆只保存你显式通过 `/save` 写入的稳定事实，不应包含一次性任务请求或临时文件名/目录名。
 代码索引默认保存在 `~/.paicli/rag/codebase.db`。
 调试日志默认滚动写入 `~/.paicli/logs/paicli.log`，旧日志会按保留天数和总容量自动清理。
 
@@ -220,6 +237,7 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
    - 输入 '/search <查询>' 语义检索代码
    - 输入 '/graph <类名>' 查看代码关系图谱
    - 输入 '/memory' 查看记忆状态
+   - 输入 '/memory clear' 清空长期记忆
    - 输入 '/save 事实内容' 手动保存关键事实
    - 未识别的 `/xxx` 命令会直接提示“未知命令”，不会再交给 Agent 当普通对话处理
    - 输入 '/clear' 清空对话历史
@@ -270,7 +288,11 @@ I
 - `/plan <任务>` - 直接用 Plan-and-Execute 模式执行这条任务
 - `/team` - 下一条任务使用 Multi-Agent 协作模式
 - `/team <任务>` - 直接用 Multi-Agent 协作模式执行这条任务
+- `/hitl on` - 启用危险操作人工审批（HITL）
+- `/hitl off` - 关闭 HITL 审批
+- `/hitl` - 查看 HITL 当前状态
 - `/memory` / `/mem` - 查看记忆系统状态
+- `/memory clear` - 清空长期记忆
 - `/save <事实>` - 手动保存关键事实到长期记忆
 - `/index [路径]` - 索引代码库（默认当前目录）
 - `/search <查询>` - 语义检索代码
@@ -330,6 +352,7 @@ I
    - 默认模式是 ReAct
    - 输入 '/clear' 清空对话历史
    - 输入 '/memory' 查看记忆状态
+   - 输入 '/memory clear' 清空长期记忆
    - 输入 '/save 事实内容' 手动保存关键事实
    - 输入 '/exit' 或 '/quit' 退出
 

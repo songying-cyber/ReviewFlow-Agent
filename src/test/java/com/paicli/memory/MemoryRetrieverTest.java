@@ -60,6 +60,17 @@ class MemoryRetrieverTest {
     }
 
     @Test
+    void shouldNotInjectCurrentShortTermConversationAsMemoryContext() {
+        shortTerm.store(new MemoryEntry("u1", "新建一个第六期的文件夹，里面有一个test.tx 文件",
+                MemoryEntry.MemoryType.CONVERSATION, null, 20));
+        longTerm.store(new MemoryEntry("f1", "用户偏好使用中文交流", MemoryEntry.MemoryType.FACT, null, 10));
+
+        String context = retriever.buildContextForQuery("新建一个第六期的文件夹，里面有一个test.tx 文件", 200);
+
+        assertTrue(context.isEmpty(), "当前轮短期对话不应被当作历史记忆注入");
+    }
+
+    @Test
     void shouldReturnEmptyForNoMatch() {
         shortTerm.store(new MemoryEntry("e1", "无关内容", MemoryEntry.MemoryType.CONVERSATION, null, 10));
 

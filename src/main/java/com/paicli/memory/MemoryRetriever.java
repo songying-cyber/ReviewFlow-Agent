@@ -56,14 +56,30 @@ public class MemoryRetriever {
     }
 
     /**
+     * 仅从长期记忆中检索稳定事实，用于 system prompt 注入。
+     *
+     * 当前轮用户输入和短期对话已经在 message history 里，不应再次以"相关记忆"身份
+     * 注入给模型，否则容易让模型把当前请求误读成历史事实。
+     */
+    public List<MemoryEntry> retrieveLongTerm(String query, int limit) {
+        return longTermMemory.getAll().stream()
+                .map(entry -> new ScoredEntry(entry, computeRelevanceScore(entry, query) * 1.2, false))
+                .filter(scoredEntry -> scoredEntry.score() > 0)
+                .sorted(Comparator.comparingDouble(ScoredEntry::score).reversed())
+                .limit(limit)
+                .map(ScoredEntry::entry)
+                .collect(Collectors.toList());
+    }
+
+    /**
      * 构建上下文：将相关记忆组装成文本，用于注入到 LLM 的 system prompt 中
      */
     public String buildContextForQuery(String query, int maxTokens) {
-        List<MemoryEntry> relevant = retrieve(query, 10);
+        List<MemoryEntry> relevant = retrieveLongTerm(query, 10);
         if (relevant.isEmpty()) return "";
 
         StringBuilder context = new StringBuilder();
-        context.append("## 相关记忆\n\n");
+        context.append("## 相关长期记忆\n\n");
 
         int usedTokens = 0;
         for (MemoryEntry entry : relevant) {

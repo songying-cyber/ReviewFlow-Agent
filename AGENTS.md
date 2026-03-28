@@ -25,10 +25,10 @@
 
 - 项目名：`PaiCLI`
 - 定位：一个教学导向的 Java Agent CLI，目标是从简单 Agent CLI 逐步演进到更完整的 Agent 产品
-- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`、第 5 期 `Multi-Agent 协作 + 角色分工`
-- 当前用户可感知版本：CLI Banner 显示 `v5.0.0`
+- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`、第 5 期 `Multi-Agent 协作 + 角色分工`、第 6 期 `HITL 人工审批 + 危险操作拦截`
+- 当前用户可感知版本：CLI Banner 显示 `v6.0.0`
 - 当前 Maven 产物版本：`pom.xml` 仍是 `1.0-SNAPSHOT`
-- 结论：如果你看到运行界面是 `v5.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
+- 结论：如果你看到运行界面是 `v6.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
 
 ## 运行前提
 
@@ -110,8 +110,8 @@ mvn test -Dtest=ExecutionPlanTest
 - 维护对话历史
 - 最多迭代 10 轮
 - 支持工具调用后继续思考
-- 用户默认看到的是流式输出的模型 `reasoning_content`（如果接口返回）和最终结果；ReAct 与用户可见的 Plan 阶段都走流式展示；终端会先渲染常见 Markdown 再输出；工具参数、工具返回片段、Token 使用量不再作为默认用户输出
-- 会写入短期记忆，并在清空时提取关键事实到长期记忆
+- 用户默认看到的是流式输出的模型 `reasoning_content`（如果接口返回）和回复内容；ReAct 流式头标签使用 `🤖 回复`（而非 `最终结果`，避免在模型调用工具前先 narrate 时误导用户）；Plan 阶段同样走流式展示；终端会先渲染常见 Markdown 再输出；工具参数、工具返回片段、Token 使用量不再作为默认用户输出
+- 会写入短期记忆
 
 ### 2. Plan-and-Execute 模式
 
@@ -141,8 +141,12 @@ mvn test -Dtest=ExecutionPlanTest
 
 - 主模块在 `src/main/java/com/paicli/memory/`
 - 默认包含：短期记忆、长期记忆、摘要压缩、事实提取、Token 预算、相关记忆检索
+- 注入到 system prompt 的“相关记忆”应只来自长期记忆；当前轮用户输入和短期对话已经在消息历史里，不应再被当成“历史记忆”重复注入
+- 长期记忆默认只通过显式命令 `/save <事实>` 写入；不要在每轮对话结束或 `/clear` 时自动提取事实
+- 长期记忆只应保存跨会话仍成立的稳定事实；一次性任务请求、临时文件名/目录名、模型猜测或“用户想要你做什么”这类指令，不应落入长期记忆
 - CLI 命令：
   - `/memory` 或 `/mem`：查看当前记忆状态
+  - `/memory clear`：清空长期记忆
   - `/save <事实>`：手动保存关键事实
 - `ReAct` 和 `Plan-and-Execute` 两条主路径都应写回记忆；改动其中一条时，另一条也要检查
 
@@ -175,6 +179,29 @@ mvn test -Dtest=ExecutionPlanTest
 - 所有子代理共享同一个 ToolRegistry 与 MemoryManager（与 ReAct 模式共享项目路径与记忆上下文，避免重复加载长期记忆）
 - 任务执行完后回到默认 `ReAct`
 - `ReAct`、`Plan-and-Execute` 和 `Multi-Agent` 三条路径都应写回记忆
+
+### 7. HITL 审批系统
+
+- 主模块在 `src/main/java/com/paicli/hitl/`
+- 通过 `/hitl on` 启用、`/hitl off` 关闭，默认关闭
+- 通过 `/hitl` 查看当前状态
+- 危险工具：`write_file`（中危）、`execute_command`（高危）、`create_project`（中危）
+- 非危险工具（`read_file`、`list_dir`、`search_code`）不受影响，直接执行
+- 审批决策选项：
+  - `y` / Enter：批准本次操作
+  - `a`：本次会话全部放行同类操作（`APPROVED_ALL`，省去重复确认）
+  - `n`：拒绝，可附拒绝原因
+  - `s`：跳过本步骤
+  - `m`：修改参数后执行
+- 关键设计：`HitlToolRegistry` 继承 `ToolRegistry`，通过覆写 `executeTool()` 实现透明拦截；HITL 关闭时与普通 `ToolRegistry` 行为完全一致
+- `/clear` 命令同时清除本次会话中积累的"全部放行"记录
+- fail-safe：无法识别的输入会重新提示，**不会**默认批准；连续 5 次无效输入则保守判为 REJECTED
+- 修改参数（`m`）输入的 JSON 会先用 Jackson 校验语法，非法则提示并回到主菜单重选
+- 并发安全：`TerminalHitlHandler.requestApproval` 整体 `synchronized`，多 Agent 并行场景下审批提示会串行展示、避免 stdout / stdin 互相打架；`approvedAllTools` 使用 `ConcurrentHashMap.newKeySet()`
+- 审批框展示采用"显示列宽"算法（CJK / 全角 / emoji 按 2 列计算），保证中文和表情符号下边框仍然对齐
+- 参数展示按 JSON 结构解析逐字段展示；长字符串（> 120 字符）显示前 120 字符预览 + 总长度，换行替换为 `⏎` 以便肉眼可读
+- 审批框上方会打印 `────────── ⚠️ HITL 审批请求 ──────────` 作为视觉分隔符，与上游 `🤖 回复` / `执行输出` 区视觉分离
+- 流式渲染器在进入 tool-call 迭代前会调用 `resetBetweenIterations()`：`TerminalMarkdownRenderer` 按换行才 flush，没做这一步 HITL 提示会"跨过"还在 pending 缓冲区里的 reasoning/content 文本，造成标题与内容错位。Agent / SubAgent / PlanExecuteAgent 三条路径都做了相同处理
 
 ## 仓库结构
 
@@ -216,6 +243,13 @@ src/main/java/com/paicli
 │   └── CodeRetriever.java
 └── tool/
     └── ToolRegistry.java
+├── hitl/
+│   ├── ApprovalPolicy.java
+│   ├── ApprovalRequest.java
+│   ├── ApprovalResult.java
+│   ├── HitlHandler.java
+│   ├── TerminalHitlHandler.java
+│   └── HitlToolRegistry.java
 ```
 
 测试目前主要覆盖：
@@ -238,8 +272,12 @@ src/main/java/com/paicli
 - `CodeChunkerTest`
 - `CodeAnalyzerTest`
 - `CodeIndexTest`
+- `ApprovalPolicyTest`
+- `ApprovalResultTest`
+- `HitlToolRegistryTest`
+- `TerminalHitlHandlerTest`
 
-这意味着当前自动化测试更偏解析、计划结构、RAG 核心模块、Multi-Agent 编排逻辑，不覆盖真实 LLM 联调、真实 Embedding API 联调，也不覆盖终端交互的完整手工体验。
+这意味着当前自动化测试更偏解析、计划结构、RAG 核心模块、Multi-Agent 编排逻辑和 HITL 审批策略，不覆盖真实 LLM 联调、真实 Embedding API 联调，也不覆盖终端交互的完整手工体验。
 
 ## 核心文件说明
 
@@ -334,7 +372,6 @@ src/main/java/com/paicli
 
 下面这些内容在路线图里出现了，但当前仓库还没有真正交付：
 
-- HITL 审批流
 - 异步长任务调度
 - 沙箱与权限控制
 - MCP 接入
@@ -354,7 +391,7 @@ src/main/java/com/paicli
 
 ### 2. 改命令入口，要联动这几处
 
-如果修改 `/plan`、`/team`、`/clear`、`/memory`、`/save`、`/index`、`/search`、`/graph`、`/exit` 或输入解析：
+如果修改 `/plan`、`/team`、`/hitl`、`/clear`、`/memory`、`/save`、`/index`、`/search`、`/graph`、`/exit` 或输入解析：
 
 - `Main.java`
 - `CliCommandParser.java`

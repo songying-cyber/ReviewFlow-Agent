@@ -158,6 +158,10 @@ public class SubAgent {
                             response.toolCalls()
                     ));
 
+                    // 在工具执行前 flush 并重置流式渲染器：TerminalMarkdownRenderer 按换行 flush，
+                    // 没有换行的 pending 内容会被 HITL 提示"跨过"导致标题错位。
+                    streamRenderer.resetBetweenIterations();
+
                     for (GLMClient.ToolCall toolCall : response.toolCalls()) {
                         String toolName = toolCall.function().name();
                         String toolArgs = toolCall.function().arguments();
@@ -332,11 +336,44 @@ public class SubAgent {
         }
 
         private String contentLabel() {
+            // 故意区分：PLANNER/REVIEWER 不调用工具，content 一定是最终输出，用"结果"；
+            // WORKER 可能在 tool_calls 前先 narrate，用"输出"避免"结果"暗示已经完成。
             return switch (role) {
                 case PLANNER -> "规划结果";
-                case WORKER -> "执行结果";
+                case WORKER -> "执行输出";
                 case REVIEWER -> "审查结果";
             };
+        }
+
+        /**
+         * 在两次迭代（通常是 tool-call 分支）之间调用：收尾当前渲染器并重置状态，
+         * 让下一轮迭代的 reasoning/content 能重新打印各自的标题。
+         */
+        private void resetBetweenIterations() {
+            if (reasoningRenderer != null) {
+                reasoningRenderer.finish();
+                reasoningRenderer = null;
+            }
+            if (contentRenderer != null) {
+                contentRenderer.finish();
+                contentRenderer = null;
+            }
+            String late = lateReasoning.toString().trim();
+            if (!late.isEmpty()) {
+                out.println();
+                out.println(AnsiStyle.heading("🧠 补充思考 [" + agentName + "]"));
+                TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(out);
+                r.append(late);
+                r.finish();
+                lateReasoning.setLength(0);
+                streamedOutput = true;
+            }
+            pendingReasoning.setLength(0);
+            reasoningStarted = false;
+            contentStarted = false;
+            if (streamedOutput) {
+                out.println();
+            }
         }
 
         private void finish() {

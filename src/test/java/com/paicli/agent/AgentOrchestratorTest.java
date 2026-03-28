@@ -401,10 +401,6 @@ class AgentOrchestratorTest {
         private NoOpMemoryManager(File storageDir) {
             super(new GLMClient("test-key"), 32768, 200000, new LongTermMemory(storageDir));
         }
-
-        @Override
-        public void extractAndSaveFacts() {
-        }
     }
 
     private static final class StubGLMClient extends GLMClient {

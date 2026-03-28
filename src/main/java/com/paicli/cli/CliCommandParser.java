@@ -9,7 +9,9 @@ final class CliCommandParser {
         CLEAR,
         SWITCH_PLAN,
         SWITCH_TEAM,
+        SWITCH_HITL,
         MEMORY_STATUS,
+        MEMORY_CLEAR,
         MEMORY_SAVE,
         INDEX_CODE,
         SEARCH_CODE,
@@ -62,8 +64,24 @@ final class CliCommandParser {
             return new ParsedCommand(CommandType.SWITCH_TEAM, trimmed.substring(6).trim());
         }
 
+        if (trimmed.equalsIgnoreCase("/hitl on")) {
+            return new ParsedCommand(CommandType.SWITCH_HITL, "on");
+        }
+
+        if (trimmed.equalsIgnoreCase("/hitl off")) {
+            return new ParsedCommand(CommandType.SWITCH_HITL, "off");
+        }
+
+        if (trimmed.equalsIgnoreCase("/hitl")) {
+            return new ParsedCommand(CommandType.SWITCH_HITL, null);
+        }
+
         if (trimmed.equalsIgnoreCase("/memory") || trimmed.equalsIgnoreCase("/mem")) {
             return new ParsedCommand(CommandType.MEMORY_STATUS, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/memory clear") || trimmed.equalsIgnoreCase("/mem clear")) {
+            return new ParsedCommand(CommandType.MEMORY_CLEAR, null);
         }
 
         if (trimmed.equalsIgnoreCase("/save")) {

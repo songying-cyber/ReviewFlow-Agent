@@ -10,6 +10,7 @@ import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MemoryManagerTest {
@@ -37,6 +38,20 @@ class MemoryManagerTest {
 
         assertTrue(memoryManager.getShortTermMemory().getAll().stream()
                 .anyMatch(entry -> entry.getType() == MemoryEntry.MemoryType.SUMMARY));
+    }
+
+    @Test
+    void shouldClearLongTermMemoryOnlyWhenExplicitlyRequested() {
+        LongTermMemory longTermMemory = new LongTermMemory(tempDir.toFile());
+        MemoryManager memoryManager = new MemoryManager(new StubGLMClient(List.of()), 32768, 128000, longTermMemory);
+
+        memoryManager.storeFact("用户偏好使用中文交流");
+        memoryManager.storeFact("项目路径: /tmp/demo");
+        assertEquals(2, longTermMemory.size());
+
+        memoryManager.clearLongTerm();
+
+        assertEquals(0, longTermMemory.size());
     }
 
     private static final class StubGLMClient extends GLMClient {

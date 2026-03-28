@@ -5,6 +5,7 @@ import com.paicli.llm.GLMClient;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -42,16 +43,37 @@ public class ContextCompressor {
             """;
 
     private static final String EXTRACT_FACTS_PROMPT = """
-            请从以下对话中提取关键事实，格式为每行一条：
+            请从以下对话中提取“跨会话仍然成立、未来复用仍有价值”的稳定事实，格式为每行一条：
             - 用户偏好和习惯
             - 项目信息（名称、路径、技术栈）
             - 重要决策和约定
+
+            只保留用户明确说明、或工具/代码库可验证的信息。
+            绝对不要提取以下内容：
+            - 当前这一轮让你执行的临时任务、步骤、todo
+            - 一次性的文件名、目录名、输出要求
+            - 模型自己的猜测、纠错、提醒、推断
+            - “用户想要/需要/让我/请你...” 这类请求句
 
             对话内容：
             %s
 
             请每行一条事实，不要多余解释。
             """;
+
+    private static final List<String> EPHEMERAL_FACT_PREFIXES = List.of(
+            "用户想", "用户要", "用户需要", "用户请求", "帮我", "让我",
+            "新建", "创建", "删除", "修改", "生成", "补充要求", "当前这一轮", "本次任务"
+    );
+
+    private static final List<String> SPECULATION_CUES = List.of(
+            "可能", "应该", "猜测", "推测", "笔误", "提醒"
+    );
+
+    private static final List<String> DURABLE_FACT_HINTS = List.of(
+            "用户偏好", "用户习惯", "喜欢", "倾向", "项目", "仓库", "路径", "技术栈",
+            "版本", "模型", "接口", "配置", "环境变量", "命令", "约定", "规则", "默认"
+    );
 
     public ContextCompressor(GLMClient llmClient) {
         this(llmClient, 3);
@@ -124,7 +146,8 @@ public class ContextCompressor {
 
         StringBuilder conversation = new StringBuilder();
         for (MemoryEntry entry : entries) {
-            conversation.append(entry.getType()).append(": ")
+            conversation.append(resolveSource(entry).toUpperCase(Locale.ROOT))
+                    .append("(").append(entry.getType()).append("): ")
                     .append(entry.getContent()).append("\n\n");
         }
 
@@ -140,12 +163,8 @@ public class ContextCompressor {
 
             List<String> facts = new ArrayList<>();
             for (String line : factsText.split("\n")) {
-                String fact = line.trim();
-                // 去掉前缀 "- " 或 "• "
-                if (fact.startsWith("- ")) fact = fact.substring(2);
-                else if (fact.startsWith("• ")) fact = fact.substring(2);
-
-                if (!fact.isEmpty() && fact.length() > 5) {
+                String fact = normalizeFactLine(line);
+                if (isPersistentFactCandidate(fact)) {
                     facts.add(fact);
 
                     // 存入长期记忆
@@ -153,7 +172,7 @@ public class ContextCompressor {
                             "fact-" + UUID.randomUUID().toString().substring(0, 8),
                             fact,
                             MemoryEntry.MemoryType.FACT,
-                            null,
+                            java.util.Map.of("source", "fact_extractor"),
                             MemoryEntry.estimateTokens(fact)
                     );
                     longTermMemory.store(factEntry);
@@ -229,5 +248,63 @@ public class ContextCompressor {
             partitions.add(list.subList(i, Math.min(i + size, list.size())));
         }
         return partitions;
+    }
+
+    private String resolveSource(MemoryEntry entry) {
+        String source = entry.getMetadata().get("source");
+        if (source != null && !source.isBlank()) {
+            return source;
+        }
+        if (entry.getId().startsWith("user-")) {
+            return "user";
+        }
+        if (entry.getId().startsWith("assistant-")) {
+            return "assistant";
+        }
+        if (entry.getId().startsWith("tool-")) {
+            return "tool";
+        }
+        return "unknown";
+    }
+
+    private String normalizeFactLine(String line) {
+        String fact = line == null ? "" : line.trim();
+        if (fact.startsWith("- ")) {
+            fact = fact.substring(2);
+        } else if (fact.startsWith("• ")) {
+            fact = fact.substring(2);
+        }
+        return fact.trim();
+    }
+
+    private boolean isPersistentFactCandidate(String fact) {
+        if (fact == null || fact.length() <= 5) {
+            return false;
+        }
+
+        String normalized = fact.toLowerCase(Locale.ROOT);
+        for (String prefix : EPHEMERAL_FACT_PREFIXES) {
+            if (normalized.startsWith(prefix.toLowerCase(Locale.ROOT))) {
+                return false;
+            }
+        }
+
+        for (String cue : SPECULATION_CUES) {
+            if (normalized.contains(cue.toLowerCase(Locale.ROOT))) {
+                return false;
+            }
+        }
+
+        if (normalized.contains("：") || normalized.contains(":")) {
+            return true;
+        }
+
+        for (String hint : DURABLE_FACT_HINTS) {
+            if (normalized.contains(hint.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

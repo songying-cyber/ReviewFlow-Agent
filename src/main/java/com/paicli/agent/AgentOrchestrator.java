@@ -172,7 +172,6 @@ public class AgentOrchestrator {
         // 6. 汇总结果
         String finalResult = buildFinalResult(steps);
         memoryManager.addAssistantMessage("[多Agent结果] " + finalResult);
-        memoryManager.extractAndSaveFacts();
 
         return finalResult;
     }

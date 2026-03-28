@@ -26,7 +26,7 @@ class PlanExecuteAgentTest {
     Path tempDir;
 
     @Test
-    void shouldWritePlanExecutionArtifactsBackToMemory() throws Exception {
+    void shouldWritePlanExecutionArtifactsBackToShortTermMemoryOnly() throws Exception {
         Path sampleFile = Files.createFile(tempDir.resolve("sample.txt"));
         Files.writeString(sampleFile, "plan-memory-content");
 
@@ -44,8 +44,7 @@ class PlanExecuteAgentTest {
                         120,
                         30
                 ),
-                new GLMClient.ChatResponse("assistant", "已读取并确认文件内容", null, 140, 40),
-                new GLMClient.ChatResponse("assistant", "- 用户让系统读取测试文件", null, 80, 20)
+                new GLMClient.ChatResponse("assistant", "已读取并确认文件内容", null, 140, 40)
         ));
 
         MemoryManager memoryManager = new MemoryManager(
@@ -72,7 +71,7 @@ class PlanExecuteAgentTest {
         assertTrue(shortTermContents.stream().anyMatch(content -> content.contains("请读取测试文件并确认内容")));
         assertTrue(shortTermContents.stream().anyMatch(content -> content.contains("plan-memory-content")));
         assertTrue(shortTermContents.stream().anyMatch(content -> content.contains("已读取并确认文件内容")));
-        assertTrue(memoryManager.getLongTermMemory().size() > 0);
+        assertEquals(0, memoryManager.getLongTermMemory().size());
     }
 
     @Test

@@ -48,6 +48,14 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesMemoryClearSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/memory clear");
+
+        assertEquals(CliCommandParser.CommandType.MEMORY_CLEAR, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
     void parsesSaveSlashCommand() {
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("/save 记住这个事实");
 
@@ -109,5 +117,29 @@ class CliCommandParserTest {
 
         assertEquals(CliCommandParser.CommandType.SWITCH_TEAM, command.type());
         assertEquals("创建并验证一个 Java 项目", command.payload());
+    }
+
+    @Test
+    void parsesHitlOnCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/hitl on");
+
+        assertEquals(CliCommandParser.CommandType.SWITCH_HITL, command.type());
+        assertEquals("on", command.payload());
+    }
+
+    @Test
+    void parsesHitlOffCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/hitl off");
+
+        assertEquals(CliCommandParser.CommandType.SWITCH_HITL, command.type());
+        assertEquals("off", command.payload());
+    }
+
+    @Test
+    void parsesHitlStatusCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/hitl");
+
+        assertEquals(CliCommandParser.CommandType.SWITCH_HITL, command.type());
+        assertNull(command.payload());
     }
 }

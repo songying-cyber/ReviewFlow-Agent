@@ -103,16 +103,18 @@
 
 ---
 
-## 第6期：Human-in-the-Loop + 审批流
+## 第6期：Human-in-the-Loop + 审批流 ✅
+
+**已完成**
 
 **目标**：关键操作人工确认，安全可控
 
 **功能迭代**：
-- 危险操作识别
-- 中断-恢复机制
-- 人工审批节点
-- 执行建议生成
-- 批量确认模式
+- 危险操作静态规则识别（`write_file`、`execute_command`、`create_project`）
+- 三级危险等级（高危 / 中危 / 安全）
+- 审批决策：批准 / 全部放行 / 拒绝 / 跳过 / 修改参数后执行
+- HITL 默认关闭，`/hitl on|off` 运行时切换
+- `HitlToolRegistry` 透明拦截层，HITL 关闭时与普通 `ToolRegistry` 行为完全相同
 
 **核心知识点**：
 - HITL（人机协同）
@@ -246,4 +248,4 @@ ReAct    执行     上下文    检索      协作
 
 ---
 
-*已完成第5期 Multi-Agent 协作，下一步进入第6期 Human-in-the-Loop 审批流。*
+*已完成第6期 Human-in-the-Loop 审批流，下一步进入第7期 异步执行 + 并行工具调用。*

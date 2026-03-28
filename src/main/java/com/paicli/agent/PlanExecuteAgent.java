@@ -19,17 +19,17 @@ import java.util.stream.Collectors;
  */
 public class PlanExecuteAgent {
     private static final Logger log = LoggerFactory.getLogger(PlanExecuteAgent.class);
-    private record PlanRunOutcome(String result, boolean persistAssistantMessage, boolean extractFacts) {
+    private record PlanRunOutcome(String result, boolean persistAssistantMessage) {
         static PlanRunOutcome executed(String result) {
-            return new PlanRunOutcome(result, true, true);
+            return new PlanRunOutcome(result, true);
         }
 
         static PlanRunOutcome canceled(String result) {
-            return new PlanRunOutcome(result, false, false);
+            return new PlanRunOutcome(result, false);
         }
 
         static PlanRunOutcome failed(String result) {
-            return new PlanRunOutcome(result, true, false);
+            return new PlanRunOutcome(result, true);
         }
     }
 
@@ -114,6 +114,11 @@ public class PlanExecuteAgent {
         this(new GLMClient(apiKey), new ToolRegistry(), null, null, reviewHandler);
     }
 
+    public PlanExecuteAgent(String apiKey, ToolRegistry toolRegistry,
+                            MemoryManager memoryManager, PlanReviewHandler reviewHandler) {
+        this(new GLMClient(apiKey), toolRegistry, null, memoryManager, reviewHandler);
+    }
+
     PlanExecuteAgent(GLMClient llmClient, ToolRegistry toolRegistry, Planner planner,
                      MemoryManager memoryManager, PlanReviewHandler reviewHandler) {
         this.llmClient = llmClient;
@@ -134,9 +139,6 @@ public class PlanExecuteAgent {
             PlanRunOutcome outcome = runWithPlan(userInput, streamState);
             if (outcome.persistAssistantMessage() && outcome.result() != null && !outcome.result().isBlank()) {
                 memoryManager.addAssistantMessage("[计划结果] " + outcome.result());
-            }
-            if (outcome.extractFacts()) {
-                memoryManager.extractAndSaveFacts();
             }
             if (streamState.hasStreamedOutput() && (outcome.result() == null || outcome.result().isBlank())) {
                 return "";
@@ -386,6 +388,10 @@ public class PlanExecuteAgent {
                     response.toolCalls()
             ));
 
+            // 在工具执行前 flush 并重置流式渲染器：避免 Markdown renderer pending 文本
+            // 被 HITL 提示"跨过"导致 🧠 / 🤖 标题与内容错位
+            streamRenderer.resetBetweenIterations();
+
             for (GLMClient.ToolCall toolCall : response.toolCalls()) {
                 String toolName = toolCall.function().name();
                 String toolArgs = toolCall.function().arguments();
@@ -491,6 +497,26 @@ public class PlanExecuteAgent {
                     contentRenderer.finish();
                 }
                 System.out.println("\n");
+            }
+        }
+
+        /**
+         * 两次 iteration 之间（通常是一次 tool-call 分支完成后）调用：收尾当前渲染器并重置状态，
+         * 让下一轮迭代能重新打印 🧠 / 🤖 标题，避免标题和内容被 HITL / 工具执行中断而错位。
+         */
+        private synchronized void resetBetweenIterations() {
+            if (reasoningRenderer != null) {
+                reasoningRenderer.finish();
+                reasoningRenderer = null;
+            }
+            if (contentRenderer != null) {
+                contentRenderer.finish();
+                contentRenderer = null;
+            }
+            reasoningStarted = false;
+            contentStarted = false;
+            if (streamedOutput) {
+                System.out.println();
             }
         }
 

@@ -42,17 +42,77 @@ class SubAgentTest {
         ps.flush();
 
         String output = baos.toString(StandardCharsets.UTF_8);
-        int contentHeadingIdx = output.indexOf("执行结果");
+        int contentHeadingIdx = output.indexOf("执行输出");
         int contentBodyIdx = output.indexOf("最终答案内容");
         int supplementalHeadingIdx = output.indexOf("补充思考");
         int lateReasoningIdx = output.indexOf("这段思考在答案之后才到");
 
-        assertTrue(contentHeadingIdx >= 0, "执行结果 heading should appear: " + output);
-        assertTrue(contentBodyIdx > contentHeadingIdx, "content body should be under 执行结果");
+        assertTrue(contentHeadingIdx >= 0, "执行输出 heading should appear: " + output);
+        assertTrue(contentBodyIdx > contentHeadingIdx, "content body should be under 执行输出");
         assertTrue(supplementalHeadingIdx > contentBodyIdx,
                 "late reasoning must appear under 补充思考 heading AFTER content, not mixed in");
         assertTrue(lateReasoningIdx > supplementalHeadingIdx,
                 "late reasoning body should follow 补充思考 heading");
+    }
+
+    @Test
+    void shouldPrintFreshHeadingsAcrossToolIterations() {
+        // 两轮迭代：第一轮 content + tool_call（narration），第二轮纯 content（final answer）
+        // resetBetweenIterations 被调用后，第二轮应该重新打印「执行思考」和「执行输出」标题
+        MultiCallStreamClient llm = new MultiCallStreamClient(List.of(
+                // 迭代 1：reasoning + content narration + tool_call
+                new CallScript(
+                        listener -> {
+                            listener.onReasoningDelta("准备调用工具……");
+                            listener.onContentDelta("我来调用 list_dir 工具");
+                        },
+                        new GLMClient.ChatResponse(
+                                "assistant",
+                                "我来调用 list_dir 工具",
+                                "准备调用工具……",
+                                List.of(new GLMClient.ToolCall(
+                                        "call_1",
+                                        new GLMClient.ToolCall.Function("list_dir", "{\"path\":\".\"}")
+                                )),
+                                10, 5
+                        )
+                ),
+                // 迭代 2：reasoning + content（最终答案），无 tool_call
+                new CallScript(
+                        listener -> {
+                            listener.onReasoningDelta("分析完成");
+                            listener.onContentDelta("目录列出完毕");
+                        },
+                        new GLMClient.ChatResponse(
+                                "assistant",
+                                "目录列出完毕",
+                                "分析完成",
+                                null,
+                                8, 3
+                        )
+                )
+        ));
+        SubAgent worker = new SubAgent("w1", AgentRole.WORKER, llm, new ToolRegistry());
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PrintStream ps = new PrintStream(baos, true, StandardCharsets.UTF_8);
+        worker.execute(AgentMessage.task("orchestrator", "任务"), ps);
+        ps.flush();
+
+        String output = baos.toString(StandardCharsets.UTF_8);
+        // 两轮各自打印一次「执行思考」
+        int firstReasoning = output.indexOf("执行思考");
+        int secondReasoning = firstReasoning < 0 ? -1 : output.indexOf("执行思考", firstReasoning + 1);
+        assertTrue(firstReasoning >= 0, "第一轮应打印执行思考标题");
+        assertTrue(secondReasoning > firstReasoning,
+                "工具执行后第二轮应重新打印执行思考标题，实际输出：\n" + output);
+
+        // 「执行输出」同样出现两次
+        int firstContent = output.indexOf("执行输出");
+        int secondContent = firstContent < 0 ? -1 : output.indexOf("执行输出", firstContent + 1);
+        assertTrue(firstContent >= 0, "第一轮应打印执行输出标题");
+        assertTrue(secondContent > firstContent,
+                "工具执行后第二轮应重新打印执行输出标题，实际输出：\n" + output);
     }
 
     @Test
@@ -73,7 +133,7 @@ class SubAgentTest {
         String output = baos.toString(StandardCharsets.UTF_8);
         assertFalse(output.contains("执行思考"),
                 "whitespace-only reasoning should not produce an empty reasoning heading: " + output);
-        assertTrue(output.contains("执行结果"), "content heading should still appear");
+        assertTrue(output.contains("执行输出"), "content heading should still appear");
         assertTrue(output.contains("答案"), "content should still appear");
     }
 
@@ -104,6 +164,35 @@ class SubAgentTest {
             script.accept(listener);
             // 返回空 toolCalls 让 SubAgent 作为最终结果返回
             return new ChatResponse("assistant", "最终答案内容", "这段思考在答案之后才到", null, 10, 5);
+        }
+    }
+
+    /**
+     * 多轮次脚本：每次 chat() 调用按顺序消费一条 CallScript，支持测试 tool-call 分支的后续迭代。
+     */
+    private record CallScript(Consumer<GLMClient.StreamListener> streamScript, GLMClient.ChatResponse response) {}
+
+    private static final class MultiCallStreamClient extends GLMClient {
+        private final java.util.Iterator<CallScript> iter;
+
+        private MultiCallStreamClient(List<CallScript> scripts) {
+            super("test-key");
+            this.iter = scripts.iterator();
+        }
+
+        @Override
+        public ChatResponse chat(List<Message> messages, List<Tool> tools) throws IOException {
+            return chat(messages, tools, StreamListener.NO_OP);
+        }
+
+        @Override
+        public ChatResponse chat(List<Message> messages, List<Tool> tools, StreamListener listener) throws IOException {
+            if (!iter.hasNext()) {
+                throw new IOException("脚本已耗尽，未预设第 N 次调用");
+            }
+            CallScript next = iter.next();
+            next.streamScript().accept(listener);
+            return next.response();
         }
     }
 }

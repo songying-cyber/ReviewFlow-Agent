@@ -3,6 +3,7 @@ package com.paicli.memory;
 import com.paicli.llm.GLMClient;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -47,7 +48,7 @@ public class MemoryManager {
                 "user-" + UUID.randomUUID().toString().substring(0, 8),
                 content,
                 MemoryEntry.MemoryType.CONVERSATION,
-                null,
+                Map.of("source", "user"),
                 MemoryEntry.estimateTokens(content)
         );
         shortTermMemory.store(entry);
@@ -62,7 +63,7 @@ public class MemoryManager {
                 "assistant-" + UUID.randomUUID().toString().substring(0, 8),
                 content,
                 MemoryEntry.MemoryType.CONVERSATION,
-                null,
+                Map.of("source", "assistant"),
                 MemoryEntry.estimateTokens(content)
         );
         shortTermMemory.store(entry);
@@ -84,7 +85,7 @@ public class MemoryManager {
                 "tool-" + UUID.randomUUID().toString().substring(0, 8),
                 content,
                 MemoryEntry.MemoryType.TOOL_RESULT,
-                null,
+                Map.of("source", "tool", "toolName", toolName),
                 MemoryEntry.estimateTokens(content)
         );
         shortTermMemory.store(entry);
@@ -99,7 +100,7 @@ public class MemoryManager {
                 "fact-" + UUID.randomUUID().toString().substring(0, 8),
                 fact,
                 MemoryEntry.MemoryType.FACT,
-                null,
+                Map.of("source", "fact"),
                 MemoryEntry.estimateTokens(fact)
         );
         longTermMemory.store(entry);
@@ -145,26 +146,17 @@ public class MemoryManager {
     }
 
     /**
-     * 在对话结束时，提取关键事实存入长期记忆
-     */
-    public void extractAndSaveFacts() {
-        List<MemoryEntry> conversations = shortTermMemory.getAll();
-        if (conversations.isEmpty()) return;
-
-        System.out.println("🧠 提取关键事实到长期记忆...");
-        List<String> facts = compressor.extractFacts(conversations, longTermMemory);
-        if (!facts.isEmpty()) {
-            System.out.println("   提取了 " + facts.size() + " 条事实");
-        }
-    }
-
-    /**
      * 清空短期记忆（保留长期记忆）
      */
     public void clearShortTerm() {
-        // 先提取事实
-        extractAndSaveFacts();
         shortTermMemory.clear();
+    }
+
+    /**
+     * 清空长期记忆
+     */
+    public void clearLongTerm() {
+        longTermMemory.clear();
     }
 
     /**
