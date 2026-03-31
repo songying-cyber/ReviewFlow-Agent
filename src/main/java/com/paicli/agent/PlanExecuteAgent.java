@@ -1,15 +1,22 @@
 package com.paicli.agent;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.llm.GLMClient;
 import com.paicli.memory.MemoryManager;
 import com.paicli.plan.*;
 import com.paicli.util.AnsiStyle;
 import com.paicli.tool.ToolRegistry;
+import com.paicli.tool.ToolRegistry.ToolExecutionResult;
+import com.paicli.tool.ToolRegistry.ToolInvocation;
 import com.paicli.util.TerminalMarkdownRenderer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
@@ -19,6 +26,7 @@ import java.util.stream.Collectors;
  */
 public class PlanExecuteAgent {
     private static final Logger log = LoggerFactory.getLogger(PlanExecuteAgent.class);
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
     private record PlanRunOutcome(String result, boolean persistAssistantMessage) {
         static PlanRunOutcome executed(String result) {
             return new PlanRunOutcome(result, true);
@@ -101,6 +109,9 @@ public class PlanExecuteAgent {
             如果任务涉及理解代码库（如分析代码结构、查找实现位置），请优先使用 search_code 工具。
             对于当前项目内的文件，请优先使用 read_file 或 list_dir，不要用 execute_command 扫描 /、~ 或整个文件系统。
             execute_command 只适合在当前项目目录执行短时命令。
+            同一轮返回多个工具调用时，系统会并行执行这些工具；如果工具之间有依赖关系，请分多轮调用。
+            如果需要同时检查多个已知且互不依赖的文件或目录（例如同时读取 pom.xml、README.md、ROADMAP.md，
+            或同时列出 src/main/java、src/test/java、src/main/resources），请在同一轮返回多个 read_file/list_dir 工具调用。
             如果是ANALYSIS或VERIFICATION类型任务，请直接输出分析结果，不需要调用工具。
 
             请用中文回复。
@@ -275,7 +286,7 @@ public class PlanExecuteAgent {
             task.markStarted();
 
             try {
-                return List.of(TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState)));
+                return List.of(TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState, System.out)));
             } catch (Exception e) {
                 return List.of(TaskExecutionResult.failure(task, e));
             }
@@ -287,15 +298,23 @@ public class PlanExecuteAgent {
         log.info("Executing parallel batch: {}", parallelTaskIds);
         System.out.println("⚡ 本轮并行执行 " + executableTasks.size() + " 个任务: " + parallelTaskIds);
 
-        ExecutorService executor = Executors.newFixedThreadPool(Math.min(executableTasks.size(), 4));
+        ExecutorService executor = Executors.newFixedThreadPool(Math.min(executableTasks.size(), 4), r -> {
+            Thread t = new Thread(r, "paicli-plan-executor");
+            t.setDaemon(true);
+            return t;
+        });
         try {
+            Map<String, ByteArrayOutputStream> buffers = new LinkedHashMap<>();
             List<Future<TaskExecutionResult>> futures = new ArrayList<>();
             for (Task task : executableTasks) {
                 System.out.println("▶️ 并行任务 [" + task.getId() + "]: " + task.getDescription());
                 task.markStarted();
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                buffers.put(task.getId(), baos);
+                PrintStream taskOut = new PrintStream(baos, true, StandardCharsets.UTF_8);
                 futures.add(executor.submit(() -> {
                     try {
-                        return TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState));
+                        return TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState, taskOut));
                     } catch (Exception e) {
                         return TaskExecutionResult.failure(task, e);
                     }
@@ -317,6 +336,16 @@ public class PlanExecuteAgent {
                     results.add(TaskExecutionResult.failure(executableTasks.get(results.size()), error));
                 }
             }
+
+            // 按任务顺序 flush 各缓冲区到 stdout，避免并行输出交错
+            for (Task task : executableTasks) {
+                ByteArrayOutputStream buf = buffers.get(task.getId());
+                if (buf != null && buf.size() > 0) {
+                    System.out.print(buf.toString(StandardCharsets.UTF_8));
+                    System.out.flush();
+                }
+            }
+
             return results;
         } finally {
             executor.shutdownNow();
@@ -328,7 +357,8 @@ public class PlanExecuteAgent {
     /**
      * 执行单个任务（支持多轮工具调用）
      */
-    private TaskRunResult executeTask(String goal, ExecutionPlan plan, Task task, StreamState streamState) throws IOException {
+    private TaskRunResult executeTask(String goal, ExecutionPlan plan, Task task,
+                                      StreamState streamState, PrintStream out) throws IOException {
         String prompt = String.format(EXECUTION_PROMPT,
                 task.getType(), task.getDescription());
 
@@ -346,7 +376,7 @@ public class PlanExecuteAgent {
 
         StringBuilder allResults = new StringBuilder();
         int iteration = 0;
-        TaskStreamRenderer streamRenderer = new TaskStreamRenderer(task.getId(), streamState);
+        TaskStreamRenderer streamRenderer = new TaskStreamRenderer(task.getId(), streamState, out);
 
         while (iteration < MAX_TASK_ITERATIONS) {
             iteration++;
@@ -382,6 +412,7 @@ public class PlanExecuteAgent {
             }
 
             // 有工具调用：执行工具并将结果回灌到消息历史
+            printToolCalls(out, response.toolCalls());
             messages.add(GLMClient.Message.assistant(
                     response.reasoningContent(),
                     response.content(),
@@ -392,17 +423,11 @@ public class PlanExecuteAgent {
             // 被 HITL 提示"跨过"导致 🧠 / 🤖 标题与内容错位
             streamRenderer.resetBetweenIterations();
 
-            for (GLMClient.ToolCall toolCall : response.toolCalls()) {
-                String toolName = toolCall.function().name();
-                String toolArgs = toolCall.function().arguments();
-                log.info("Task {} calling tool {}", task.getId(), toolName);
-                log.debug("Task {} tool args [{}]: {}", task.getId(), toolName, toolArgs);
-
-                String toolResult = toolRegistry.executeTool(toolName, toolArgs);
-                log.debug("Task {} tool result preview [{}]: {}", task.getId(), toolName, preview(toolResult, 300));
-                memoryManager.addToolResult(toolName, toolResult);
-                allResults.append(toolResult).append("\n");
-                messages.add(GLMClient.Message.tool(toolCall.id(), toolResult));
+            List<ToolExecutionResult> toolResults = executeToolCalls(task.getId(), response.toolCalls());
+            for (ToolExecutionResult toolResult : toolResults) {
+                memoryManager.addToolResult(toolResult.name(), toolResult.result());
+                allResults.append(toolResult.result()).append("\n");
+                messages.add(GLMClient.Message.tool(toolResult.id(), toolResult.result()));
             }
         }
 
@@ -425,6 +450,79 @@ public class PlanExecuteAgent {
         return normalized.substring(0, maxLength) + "...";
     }
 
+    private List<ToolExecutionResult> executeToolCalls(String taskId, List<GLMClient.ToolCall> toolCalls) {
+        List<ToolInvocation> invocations = new ArrayList<>();
+        for (GLMClient.ToolCall toolCall : toolCalls) {
+            String toolName = toolCall.function().name();
+            String toolArgs = toolCall.function().arguments();
+            log.info("Task {} scheduling tool {}", taskId, toolName);
+            log.debug("Task {} tool args [{}]: {}", taskId, toolName, toolArgs);
+            invocations.add(new ToolInvocation(toolCall.id(), toolName, toolArgs));
+        }
+
+        if (invocations.size() > 1) {
+            log.info("Task {} executing {} tool calls in parallel", taskId, invocations.size());
+        }
+        List<ToolExecutionResult> results = toolRegistry.executeTools(invocations);
+        for (ToolExecutionResult result : results) {
+            log.debug("Task {} tool result preview [{}]: {}", taskId, result.name(), preview(result.result(), 300));
+        }
+        return results;
+    }
+
+    private static void printToolCalls(PrintStream out, List<GLMClient.ToolCall> toolCalls) {
+        Map<String, List<GLMClient.ToolCall>> grouped = new LinkedHashMap<>();
+        for (GLMClient.ToolCall tc : toolCalls) {
+            grouped.computeIfAbsent(tc.function().name(), k -> new ArrayList<>()).add(tc);
+        }
+        for (var group : grouped.entrySet()) {
+            String toolName = group.getKey();
+            List<GLMClient.ToolCall> calls = group.getValue();
+            out.println(AnsiStyle.subtle("  " + toolLabel(toolName, calls.size())));
+            for (GLMClient.ToolCall tc : calls) {
+                String detail = extractKeyParam(toolName, tc.function().arguments());
+                if (!detail.isEmpty()) {
+                    out.println(AnsiStyle.subtle("    └ " + detail));
+                }
+            }
+        }
+    }
+
+    private static String toolLabel(String toolName, int count) {
+        return switch (toolName) {
+            case "read_file" -> "📖 读取 " + count + " 个文件";
+            case "write_file" -> "✏️ 写入 " + count + " 个文件";
+            case "list_dir" -> "📂 列出 " + count + " 个目录";
+            case "execute_command" -> "⚡ 执行 " + count + " 条命令";
+            case "create_project" -> "🏗️ 创建 " + count + " 个项目";
+            case "search_code" -> "🔍 搜索代码 " + count + " 次";
+            default -> "🔧 " + toolName + " × " + count;
+        };
+    }
+
+    private static String extractKeyParam(String toolName, String argsJson) {
+        try {
+            JsonNode node = JSON_MAPPER.readTree(argsJson);
+            String key = switch (toolName) {
+                case "read_file", "write_file", "list_dir" -> "path";
+                case "execute_command" -> "command";
+                case "create_project" -> "name";
+                case "search_code" -> "query";
+                default -> null;
+            };
+            if (key == null) {
+                return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
+            }
+            String value = node.path(key).asText("");
+            if (value.length() > 80) {
+                value = value.substring(0, 77) + "...";
+            }
+            return value;
+        } catch (Exception e) {
+            return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
+        }
+    }
+
     private static final class StreamState {
         private volatile boolean streamedOutput;
 
@@ -440,15 +538,19 @@ public class PlanExecuteAgent {
     private static final class TaskStreamRenderer implements GLMClient.StreamListener {
         private final String taskId;
         private final StreamState streamState;
+        private final PrintStream out;
+        private final StringBuilder pendingReasoning = new StringBuilder();
+        private final StringBuilder lateReasoning = new StringBuilder();
         private TerminalMarkdownRenderer reasoningRenderer;
         private TerminalMarkdownRenderer contentRenderer;
         private boolean reasoningStarted;
         private boolean contentStarted;
         private boolean streamedOutput;
 
-        private TaskStreamRenderer(String taskId, StreamState streamState) {
+        private TaskStreamRenderer(String taskId, StreamState streamState, PrintStream out) {
             this.taskId = taskId;
             this.streamState = streamState;
+            this.out = out;
         }
 
         @Override
@@ -456,15 +558,26 @@ public class PlanExecuteAgent {
             if (delta == null || delta.isEmpty()) {
                 return;
             }
+            if (contentStarted) {
+                lateReasoning.append(delta);
+                return;
+            }
             if (!reasoningStarted) {
-                System.out.println(AnsiStyle.heading("🧠 任务思考 [" + taskId + "]"));
-                reasoningRenderer = new TerminalMarkdownRenderer(System.out);
+                pendingReasoning.append(delta);
+                if (pendingReasoning.toString().isBlank()) {
+                    return;
+                }
+                out.println(AnsiStyle.heading("🧠 任务思考 [" + taskId + "]"));
+                reasoningRenderer = new TerminalMarkdownRenderer(out);
+                reasoningRenderer.append(pendingReasoning.toString());
+                pendingReasoning.setLength(0);
                 reasoningStarted = true;
                 streamedOutput = true;
                 streamState.markStreamed();
+            } else {
+                reasoningRenderer.append(delta);
             }
-            reasoningRenderer.append(delta);
-            System.out.flush();
+            out.flush();
         }
 
         @Override
@@ -473,19 +586,27 @@ public class PlanExecuteAgent {
                 return;
             }
             if (!contentStarted) {
-                if (!reasoningStarted) {
-                    System.out.println(AnsiStyle.section("🤖 任务结果 [" + taskId + "]"));
-                } else {
-                    System.out.println();
-                    System.out.println(AnsiStyle.section("🤖 任务结果 [" + taskId + "]"));
+                if (reasoningStarted && reasoningRenderer != null) {
+                    reasoningRenderer.finish();
+                    out.println();
+                } else if (pendingReasoning.length() > 0 && !pendingReasoning.toString().isBlank()) {
+                    out.println(AnsiStyle.heading("🧠 任务思考 [" + taskId + "]"));
+                    TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(out);
+                    r.append(pendingReasoning.toString());
+                    r.finish();
+                    out.println();
+                    pendingReasoning.setLength(0);
+                    reasoningStarted = true;
                 }
-                contentRenderer = new TerminalMarkdownRenderer(System.out);
+                // content 可能只是 tool-call 前的叙述，也可能是最终回答，用"输出"避免误导。
+                out.println(AnsiStyle.section("🤖 任务输出 [" + taskId + "]"));
+                contentRenderer = new TerminalMarkdownRenderer(out);
                 contentStarted = true;
                 streamedOutput = true;
                 streamState.markStreamed();
             }
             contentRenderer.append(delta);
-            System.out.flush();
+            out.flush();
         }
 
         private synchronized void finish() {
@@ -496,7 +617,8 @@ public class PlanExecuteAgent {
                 if (contentRenderer != null) {
                     contentRenderer.finish();
                 }
-                System.out.println("\n");
+                flushLateReasoning();
+                out.println("\n");
             }
         }
 
@@ -513,15 +635,31 @@ public class PlanExecuteAgent {
                 contentRenderer.finish();
                 contentRenderer = null;
             }
+            flushLateReasoning();
+            pendingReasoning.setLength(0);
             reasoningStarted = false;
             contentStarted = false;
             if (streamedOutput) {
-                System.out.println();
+                out.println();
             }
         }
 
         private synchronized boolean hasStreamedOutput() {
             return streamedOutput;
+        }
+
+        private void flushLateReasoning() {
+            String late = lateReasoning.toString().trim();
+            if (late.isEmpty()) {
+                lateReasoning.setLength(0);
+                return;
+            }
+            out.println();
+            out.println(AnsiStyle.heading("🧠 补充思考 [" + taskId + "]"));
+            TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(out);
+            renderer.append(late);
+            renderer.finish();
+            lateReasoning.setLength(0);
         }
     }
 

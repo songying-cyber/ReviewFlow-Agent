@@ -1,7 +1,11 @@
 package com.paicli.agent;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.llm.GLMClient;
 import com.paicli.tool.ToolRegistry;
+import com.paicli.tool.ToolRegistry.ToolExecutionResult;
+import com.paicli.tool.ToolRegistry.ToolInvocation;
 import com.paicli.util.AnsiStyle;
 import com.paicli.util.TerminalMarkdownRenderer;
 import org.slf4j.Logger;
@@ -10,7 +14,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 子代理 - 可配置角色的轻量 Agent
@@ -21,6 +27,7 @@ import java.util.List;
 public class SubAgent {
     private static final Logger log = LoggerFactory.getLogger(SubAgent.class);
     private static final int MAX_ITERATIONS = 10;
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final String name;
     private final AgentRole role;
@@ -52,6 +59,9 @@ public class SubAgent {
             4. 简单任务可以只拆成 1-3 步
             5. 复杂任务拆成 5-10 步
             6. 不要为了凑步数引入无关操作
+            7. 如果多个步骤可以独立完成，不要给它们添加依赖；保持 dependencies 为空，让编排器能并行分配给多个 Worker。
+               例如同时读取 pom.xml、README.md、ROADMAP.md 时，应拆成 3 个无依赖 FILE_READ 步骤。
+            8. 只有后一步确实需要前一步结果时，才写 dependencies。
 
             只输出 JSON，不要有其他内容。
             请用中文回复。
@@ -71,6 +81,9 @@ public class SubAgent {
             如果任务涉及理解代码库，请优先使用 search_code 工具。
             对于当前项目内的文件，请优先使用 read_file 或 list_dir，不要用 execute_command 扫描 /、~ 或整个文件系统。
             execute_command 只适合在当前项目目录执行短时命令。
+            同一轮返回多个工具调用时，系统会并行执行这些工具；如果工具之间有依赖关系，请分多轮调用。
+            如果需要同时检查多个已知且互不依赖的文件或目录（例如同时读取 pom.xml、README.md、ROADMAP.md，
+            或同时列出 src/main/java、src/test/java、src/main/resources），请在同一轮返回多个 read_file/list_dir 工具调用。
             如果是 ANALYSIS 或 VERIFICATION 类型任务，请直接输出分析结果。
 
             请用中文回复。
@@ -151,7 +164,7 @@ public class SubAgent {
                 );
 
                 if (response.hasToolCalls()) {
-                    // 工具调用：执行工具并将结果回灌
+                    printToolCalls(out, response.toolCalls());
                     conversationHistory.add(GLMClient.Message.assistant(
                             response.reasoningContent(),
                             response.content(),
@@ -162,13 +175,9 @@ public class SubAgent {
                     // 没有换行的 pending 内容会被 HITL 提示"跨过"导致标题错位。
                     streamRenderer.resetBetweenIterations();
 
-                    for (GLMClient.ToolCall toolCall : response.toolCalls()) {
-                        String toolName = toolCall.function().name();
-                        String toolArgs = toolCall.function().arguments();
-                        log.info("[{}] calling tool: {}", name, toolName);
-
-                        String toolResult = toolRegistry.executeTool(toolName, toolArgs);
-                        conversationHistory.add(GLMClient.Message.tool(toolCall.id(), toolResult));
+                    List<ToolExecutionResult> toolResults = executeToolCalls(response.toolCalls());
+                    for (ToolExecutionResult toolResult : toolResults) {
+                        conversationHistory.add(GLMClient.Message.tool(toolResult.id(), toolResult.result()));
                     }
                     continue;
                 }
@@ -238,6 +247,75 @@ public class SubAgent {
      */
     private boolean shouldUseTools() {
         return role == AgentRole.WORKER;
+    }
+
+    private List<ToolExecutionResult> executeToolCalls(List<GLMClient.ToolCall> toolCalls) {
+        List<ToolInvocation> invocations = new ArrayList<>();
+        for (GLMClient.ToolCall toolCall : toolCalls) {
+            String toolName = toolCall.function().name();
+            String toolArgs = toolCall.function().arguments();
+            log.info("[{}] scheduling tool: {}", name, toolName);
+            log.debug("[{}] tool args [{}]: {}", name, toolName, toolArgs);
+            invocations.add(new ToolInvocation(toolCall.id(), toolName, toolArgs));
+        }
+
+        if (invocations.size() > 1) {
+            log.info("[{}] executing {} tool calls in parallel", name, invocations.size());
+        }
+        return toolRegistry.executeTools(invocations);
+    }
+
+    private static void printToolCalls(PrintStream out, List<GLMClient.ToolCall> toolCalls) {
+        Map<String, List<GLMClient.ToolCall>> grouped = new LinkedHashMap<>();
+        for (GLMClient.ToolCall tc : toolCalls) {
+            grouped.computeIfAbsent(tc.function().name(), k -> new ArrayList<>()).add(tc);
+        }
+        for (var group : grouped.entrySet()) {
+            String toolName = group.getKey();
+            List<GLMClient.ToolCall> calls = group.getValue();
+            out.println(AnsiStyle.subtle("  " + toolLabel(toolName, calls.size())));
+            for (GLMClient.ToolCall tc : calls) {
+                String detail = extractKeyParam(toolName, tc.function().arguments());
+                if (!detail.isEmpty()) {
+                    out.println(AnsiStyle.subtle("    └ " + detail));
+                }
+            }
+        }
+    }
+
+    private static String toolLabel(String toolName, int count) {
+        return switch (toolName) {
+            case "read_file" -> "📖 读取 " + count + " 个文件";
+            case "write_file" -> "✏️ 写入 " + count + " 个文件";
+            case "list_dir" -> "📂 列出 " + count + " 个目录";
+            case "execute_command" -> "⚡ 执行 " + count + " 条命令";
+            case "create_project" -> "🏗️ 创建 " + count + " 个项目";
+            case "search_code" -> "🔍 搜索代码 " + count + " 次";
+            default -> "🔧 " + toolName + " × " + count;
+        };
+    }
+
+    private static String extractKeyParam(String toolName, String argsJson) {
+        try {
+            JsonNode node = JSON_MAPPER.readTree(argsJson);
+            String key = switch (toolName) {
+                case "read_file", "write_file", "list_dir" -> "path";
+                case "execute_command" -> "command";
+                case "create_project" -> "name";
+                case "search_code" -> "query";
+                default -> null;
+            };
+            if (key == null) {
+                return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
+            }
+            String value = node.path(key).asText("");
+            if (value.length() > 80) {
+                value = value.substring(0, 77) + "...";
+            }
+            return value;
+        } catch (Exception e) {
+            return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
+        }
     }
 
     public String getName() {

@@ -25,10 +25,10 @@
 
 - 项目名：`PaiCLI`
 - 定位：一个教学导向的 Java Agent CLI，目标是从简单 Agent CLI 逐步演进到更完整的 Agent 产品
-- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`、第 5 期 `Multi-Agent 协作 + 角色分工`、第 6 期 `HITL 人工审批 + 危险操作拦截`
-- 当前用户可感知版本：CLI Banner 显示 `v6.0.0`
+- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`、第 5 期 `Multi-Agent 协作 + 角色分工`、第 6 期 `HITL 人工审批 + 危险操作拦截`、第 7 期 `异步执行 + 并行工具调用`
+- 当前用户可感知版本：CLI Banner 显示 `v7.0.0`
 - 当前 Maven 产物版本：`pom.xml` 仍是 `1.0-SNAPSHOT`
-- 结论：如果你看到运行界面是 `v6.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
+- 结论：如果你看到运行界面是 `v7.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
 
 ## 运行前提
 
@@ -110,7 +110,7 @@ mvn test -Dtest=ExecutionPlanTest
 - 维护对话历史
 - 最多迭代 10 轮
 - 支持工具调用后继续思考
-- 用户默认看到的是流式输出的模型 `reasoning_content`（如果接口返回）和回复内容；ReAct 流式头标签使用 `🤖 回复`（而非 `最终结果`，避免在模型调用工具前先 narrate 时误导用户）；Plan 阶段同样走流式展示；终端会先渲染常见 Markdown 再输出；工具参数、工具返回片段、Token 使用量不再作为默认用户输出
+- 用户默认看到的是流式输出的模型 `reasoning_content`（如果接口返回）和回复内容；ReAct 同一次用户输入只打印一次 `🧠 思考过程` 标题，工具调用前后的后续推理继续归在同一块下；ReAct 流式头标签使用 `🤖 回复`（而非 `最终结果`，避免在模型调用工具前先 narrate 时误导用户）；Plan 阶段同样走流式展示；终端会先渲染常见 Markdown 再输出；工具参数、工具返回片段、Token 使用量不再作为默认用户输出
 - 会写入短期记忆
 
 ### 2. Plan-and-Execute 模式
@@ -201,7 +201,21 @@ mvn test -Dtest=ExecutionPlanTest
 - 审批框展示采用"显示列宽"算法（CJK / 全角 / emoji 按 2 列计算），保证中文和表情符号下边框仍然对齐
 - 参数展示按 JSON 结构解析逐字段展示；长字符串（> 120 字符）显示前 120 字符预览 + 总长度，换行替换为 `⏎` 以便肉眼可读
 - 审批框上方会打印 `────────── ⚠️ HITL 审批请求 ──────────` 作为视觉分隔符，与上游 `🤖 回复` / `执行输出` 区视觉分离
-- 流式渲染器在进入 tool-call 迭代前会调用 `resetBetweenIterations()`：`TerminalMarkdownRenderer` 按换行才 flush，没做这一步 HITL 提示会"跨过"还在 pending 缓冲区里的 reasoning/content 文本，造成标题与内容错位。Agent / SubAgent / PlanExecuteAgent 三条路径都做了相同处理
+- 流式渲染器在进入 tool-call 迭代前会调用 `resetBetweenIterations()`：`TerminalMarkdownRenderer` 按换行才 flush，没做这一步 HITL 提示会"跨过"还在 pending 缓冲区里的 reasoning/content 文本，造成标题与内容错位。Agent / SubAgent / PlanExecuteAgent 三条路径都做了相同处理；其中 ReAct 会重建渲染器但不会重复打印同一次用户输入的 `🧠 思考过程` 标题
+
+### 8. 异步执行与并行工具调用
+
+- 主入口在 `src/main/java/com/paicli/tool/ToolRegistry.java`
+- `ToolRegistry.executeTools()` 负责批量执行同一轮 LLM 返回的多个工具调用
+- 批量工具调用内部使用固定上限线程池并行执行，默认最多 4 个工具并发
+- 返回结果保持原始 `tool_call` 顺序，调用方按这个顺序回灌 `tool` 消息，避免破坏 LLM 消息协议
+- 批量工具调用有统一超时兜底，超时工具会返回 `工具执行超时（xx秒），已取消`
+- `execute_command` 仍有独立的命令级超时，默认 60 秒
+- `Agent`、`PlanExecuteAgent`、`SubAgent` 三条工具调用路径都应走 `executeTools()`，不要再各自手写逐个同步执行工具的 for-loop
+- 系统提示词明确告知模型：同一轮多个工具调用会并行执行；如果工具之间有依赖关系，应分多轮调用
+- `PlanExecuteAgent` 已支持同一 DAG 依赖批次内并行执行可执行任务
+- `AgentOrchestrator` 已支持 Multi-Agent 同一依赖批次内部并行执行，默认最多 2 个 Worker 并发
+- HITL 场景下危险工具仍会通过 `HitlToolRegistry.executeTool()` 透明拦截；终端审批由 `TerminalHitlHandler.requestApproval` 串行化，避免多线程同时抢 stdin/stdout
 
 ## 仓库结构
 
@@ -276,6 +290,7 @@ src/main/java/com/paicli
 - `ApprovalResultTest`
 - `HitlToolRegistryTest`
 - `TerminalHitlHandlerTest`
+- `ToolRegistryTest`
 
 这意味着当前自动化测试更偏解析、计划结构、RAG 核心模块、Multi-Agent 编排逻辑和 HITL 审批策略，不覆盖真实 LLM 联调、真实 Embedding API 联调，也不覆盖终端交互的完整手工体验。
 
@@ -356,6 +371,12 @@ src/main/java/com/paicli
 - `create_project`
 - `search_code`
 
+第七期新增的并行执行入口也在这里：
+
+- `ToolInvocation`：封装一次工具调用的 id、工具名与 JSON 参数
+- `ToolExecutionResult`：封装工具结果、耗时与是否超时
+- `executeTools(List<ToolInvocation>)`：并行执行同一批工具调用，并按输入顺序返回结果
+
 ### `src/main/java/com/paicli/llm/GLMClient.java`
 
 - 当前固定模型：`glm-5.1`
@@ -372,7 +393,7 @@ src/main/java/com/paicli
 
 下面这些内容在路线图里出现了，但当前仓库还没有真正交付：
 
-- 异步长任务调度
+- 持久化后台任务队列 / 跨会话异步长任务调度
 - 沙箱与权限控制
 - MCP 接入
 - TUI 产品化界面

@@ -4,13 +4,20 @@ import com.paicli.llm.GLMClient;
 import com.paicli.memory.MemoryManager;
 import com.paicli.util.AnsiStyle;
 import com.paicli.tool.ToolRegistry;
+import com.paicli.tool.ToolRegistry.ToolExecutionResult;
+import com.paicli.tool.ToolRegistry.ToolInvocation;
 import com.paicli.util.TerminalMarkdownRenderer;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Agent 核心类 - 实现 ReAct 循环
@@ -22,6 +29,7 @@ public class Agent {
     private final List<GLMClient.Message> conversationHistory;
     private final MemoryManager memoryManager;
     private static final int MAX_ITERATIONS = 10;
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     // 系统提示词
     private static final String SYSTEM_PROMPT = """
@@ -39,6 +47,9 @@ public class Agent {
             使用工具后，根据工具返回的结果继续思考下一步行动。
             对于当前项目内的文件和代码，请优先使用 read_file、list_dir、search_code。
             execute_command 只适合在当前项目目录执行短时命令（如 git status、mvn test），不要用它扫描 /、~ 或整个文件系统。
+            同一轮返回多个工具调用时，系统会并行执行这些工具；如果工具之间有依赖关系，请分多轮调用。
+            如果需要同时检查多个已知且互不依赖的文件或目录（例如同时读取 pom.xml、README.md、ROADMAP.md，
+            或同时列出 src/main/java、src/test/java、src/main/resources），请在同一轮返回多个 read_file/list_dir 工具调用。
 
             如果用户询问与代码库相关的问题（如"这个类是干什么的"、"哪里用了某个功能"），
             请优先使用 search_code 工具检索相关代码，再基于检索结果回答。
@@ -104,6 +115,7 @@ public class Agent {
                 if (response.hasToolCalls()) {
                     appendReasoning(reasoningTranscript, response.reasoningContent());
                     log.info("LLM requested {} tool call(s) in iteration {}", response.toolCalls().size(), iteration);
+                    printToolCalls(System.out, response.toolCalls());
                     // 添加助手消息（包含工具调用）
                     conversationHistory.add(GLMClient.Message.assistant(
                             response.reasoningContent(),
@@ -116,22 +128,10 @@ public class Agent {
                     // 造成标题和内容错位。重置后下一轮迭代的 reasoning/content 会重新打印标题。
                     streamRenderer.resetBetweenIterations();
 
-                    // 执行每个工具调用
-                    for (GLMClient.ToolCall toolCall : response.toolCalls()) {
-                        log.info("Executing tool: {} (iteration={})", toolCall.function().name(), iteration);
-                        log.debug("Tool args [{}]: {}", toolCall.function().name(), toolCall.function().arguments());
-                        String toolArgs = toolCall.function().arguments();
-
-                        // 执行工具
-                        String toolResult = toolRegistry.executeTool(toolCall.function().name(), toolArgs);
-                        log.debug("Tool result preview [{}]: {}", toolCall.function().name(),
-                                preview(toolResult, 300));
-
-                        // 存入记忆
-                        memoryManager.addToolResult(toolCall.function().name(), toolResult);
-
-                        // 添加工具结果到历史
-                        conversationHistory.add(GLMClient.Message.tool(toolCall.id(), toolResult));
+                    List<ToolExecutionResult> toolResults = executeToolCalls(response.toolCalls(), iteration);
+                    for (ToolExecutionResult toolResult : toolResults) {
+                        memoryManager.addToolResult(toolResult.name(), toolResult.result());
+                        conversationHistory.add(GLMClient.Message.tool(toolResult.id(), toolResult.result()));
                     }
 
                     // 继续循环，让 LLM 根据工具结果继续思考
@@ -232,6 +232,26 @@ public class Agent {
         reasoningTranscript.append(reasoningContent.trim());
     }
 
+    private List<ToolExecutionResult> executeToolCalls(List<GLMClient.ToolCall> toolCalls, int iteration) {
+        List<ToolInvocation> invocations = new ArrayList<>();
+        for (GLMClient.ToolCall toolCall : toolCalls) {
+            String toolName = toolCall.function().name();
+            String toolArgs = toolCall.function().arguments();
+            log.info("Scheduling tool: {} (iteration={})", toolName, iteration);
+            log.debug("Tool args [{}]: {}", toolName, toolArgs);
+            invocations.add(new ToolInvocation(toolCall.id(), toolName, toolArgs));
+        }
+
+        if (invocations.size() > 1) {
+            log.info("Executing {} tool calls in parallel (iteration={})", invocations.size(), iteration);
+        }
+        List<ToolExecutionResult> results = toolRegistry.executeTools(invocations);
+        for (ToolExecutionResult result : results) {
+            log.debug("Tool result preview [{}]: {}", result.name(), preview(result.result(), 300));
+        }
+        return results;
+    }
+
     private String formatUserFacingResponse(String reasoningContent, String answer) {
         String normalizedReasoning = reasoningContent == null ? "" : reasoningContent.trim();
         String normalizedAnswer = answer == null ? "" : answer.trim();
@@ -256,6 +276,59 @@ public class Agent {
         return normalized.substring(0, maxLength) + "...";
     }
 
+    private static void printToolCalls(PrintStream out, List<GLMClient.ToolCall> toolCalls) {
+        Map<String, List<GLMClient.ToolCall>> grouped = new LinkedHashMap<>();
+        for (GLMClient.ToolCall tc : toolCalls) {
+            grouped.computeIfAbsent(tc.function().name(), k -> new ArrayList<>()).add(tc);
+        }
+        for (var group : grouped.entrySet()) {
+            String toolName = group.getKey();
+            List<GLMClient.ToolCall> calls = group.getValue();
+            out.println(AnsiStyle.subtle("  " + toolLabel(toolName, calls.size())));
+            for (GLMClient.ToolCall tc : calls) {
+                String detail = extractKeyParam(toolName, tc.function().arguments());
+                if (!detail.isEmpty()) {
+                    out.println(AnsiStyle.subtle("    └ " + detail));
+                }
+            }
+        }
+    }
+
+    private static String toolLabel(String toolName, int count) {
+        return switch (toolName) {
+            case "read_file" -> "📖 读取 " + count + " 个文件";
+            case "write_file" -> "✏️ 写入 " + count + " 个文件";
+            case "list_dir" -> "📂 列出 " + count + " 个目录";
+            case "execute_command" -> "⚡ 执行 " + count + " 条命令";
+            case "create_project" -> "🏗️ 创建 " + count + " 个项目";
+            case "search_code" -> "🔍 搜索代码 " + count + " 次";
+            default -> "🔧 " + toolName + " × " + count;
+        };
+    }
+
+    private static String extractKeyParam(String toolName, String argsJson) {
+        try {
+            JsonNode node = JSON_MAPPER.readTree(argsJson);
+            String key = switch (toolName) {
+                case "read_file", "write_file", "list_dir" -> "path";
+                case "execute_command" -> "command";
+                case "create_project" -> "name";
+                case "search_code" -> "query";
+                default -> null;
+            };
+            if (key == null) {
+                return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
+            }
+            String value = node.path(key).asText("");
+            if (value.length() > 80) {
+                value = value.substring(0, 77) + "...";
+            }
+            return value;
+        } catch (Exception e) {
+            return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
+        }
+    }
+
     /**
      * 流式输出渲染器，将 reasoning_content 与 content 分区展示。
      *
@@ -263,6 +336,7 @@ public class Agent {
      * 终端是线性的，无法回头修改已写出的文字。渲染策略：
      *
      * 1. 在 content 出现之前，只要 reasoning 有实质内容（非空白），就立刻流式打印在"🧠 思考过程"下
+     *    同一次用户输入只打印一次"🧠 思考过程"标题；工具调用后的后续推理继续归在同一块下
      * 2. 仅空白的 reasoning delta 会先暂存，不触发标题——避免出现"空的思考过程"
      * 3. content 一出现就收尾 reasoning 区，打印"🤖 回复"标题并流式输出 content
      *    （故意使用"回复"而不是"最终结果"：当模型在调用工具前先 narrate 一段时，"最终结果"会误导用户
@@ -275,6 +349,7 @@ public class Agent {
         private final StringBuilder lateReasoning = new StringBuilder();
         private TerminalMarkdownRenderer reasoningRenderer;
         private TerminalMarkdownRenderer contentRenderer;
+        private boolean reasoningHeadingPrinted;
         private boolean reasoningStarted;
         private boolean contentStarted;
         private boolean streamedOutput;
@@ -294,7 +369,10 @@ public class Agent {
                 if (pendingReasoning.toString().isBlank()) {
                     return;  // 还没攒出实质内容，等
                 }
-                System.out.println(AnsiStyle.heading("🧠 思考过程"));
+                if (!containsLineBreak(pendingReasoning)) {
+                    return;  // 避免先打印一个空标题，等有完整行或迭代切换时再 flush
+                }
+                printReasoningHeadingIfNeeded();
                 reasoningRenderer = new TerminalMarkdownRenderer(System.out);
                 reasoningRenderer.append(pendingReasoning.toString());
                 pendingReasoning.setLength(0);
@@ -317,7 +395,7 @@ public class Agent {
                     System.out.println();
                 } else if (pendingReasoning.length() > 0 && !pendingReasoning.toString().isBlank()) {
                     // 有实质 reasoning 但之前没攒够阈值就被 content 打断：先补打思考过程
-                    System.out.println(AnsiStyle.heading("🧠 思考过程"));
+                    printReasoningHeadingIfNeeded();
                     TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(System.out);
                     r.append(pendingReasoning.toString());
                     r.finish();
@@ -342,13 +420,15 @@ public class Agent {
          * 在一次迭代（通常是一次 tool-call 分支执行完后）和下一次迭代之间调用，
          * 收尾当前的 reasoning/content 渲染器并重置所有状态。
          *
-         * 这样下一轮迭代的 reasoning/content 到达时会重新打印 🧠 / 🤖 标题，
+         * 这样下一轮迭代的 reasoning/content 到达时会重新初始化渲染器，
          * 避免出现"上一轮的标题在屏幕高处、下一轮的内容出现在 HITL 块下方"的错位。
          */
         private void resetBetweenIterations() {
             if (reasoningRenderer != null) {
                 reasoningRenderer.finish();
                 reasoningRenderer = null;
+            } else {
+                flushPendingReasoning();
             }
             if (contentRenderer != null) {
                 contentRenderer.finish();
@@ -376,6 +456,8 @@ public class Agent {
         private void finish() {
             if (reasoningRenderer != null) {
                 reasoningRenderer.finish();
+            } else {
+                flushPendingReasoning();
             }
             if (contentRenderer != null) {
                 contentRenderer.finish();
@@ -392,6 +474,37 @@ public class Agent {
             }
             if (streamedOutput) {
                 System.out.println();
+            }
+        }
+
+        private boolean containsLineBreak(CharSequence content) {
+            for (int i = 0; i < content.length(); i++) {
+                char ch = content.charAt(i);
+                if (ch == '\n' || ch == '\r') {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void flushPendingReasoning() {
+            String pending = pendingReasoning.toString();
+            if (pending.isBlank()) {
+                pendingReasoning.setLength(0);
+                return;
+            }
+            printReasoningHeadingIfNeeded();
+            TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(System.out);
+            renderer.append(pending);
+            renderer.finish();
+            pendingReasoning.setLength(0);
+            streamedOutput = true;
+        }
+
+        private void printReasoningHeadingIfNeeded() {
+            if (!reasoningHeadingPrinted) {
+                System.out.println(AnsiStyle.heading("🧠 思考过程"));
+                reasoningHeadingPrinted = true;
             }
         }
     }

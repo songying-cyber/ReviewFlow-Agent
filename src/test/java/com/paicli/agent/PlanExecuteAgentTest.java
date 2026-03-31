@@ -10,14 +10,18 @@ import com.paicli.tool.ToolRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanExecuteAgentTest {
@@ -123,13 +127,63 @@ class PlanExecuteAgentTest {
         assertEquals("✅ 计划执行完成！", result);
     }
 
-    private record StubResponse(GLMClient.ChatResponse response, boolean streamContent) {
+    @Test
+    void shouldNotPrintEmptyTaskReasoningHeadingAndShouldUseOutputLabel() throws Exception {
+        StubGLMClient llmClient = StubGLMClient.streaming(List.of(
+                StubResponse.scripted(
+                        listener -> {
+                            listener.onReasoningDelta("  \n");
+                            listener.onContentDelta("我来读取 pom.xml 文件。");
+                        },
+                        new GLMClient.ChatResponse(
+                                "assistant",
+                                "我来读取 pom.xml 文件。",
+                                "  \n",
+                                null,
+                                60,
+                                20
+                        )
+                )
+        ));
+
+        PlanExecuteAgent agent = new PlanExecuteAgent(
+                llmClient,
+                new ToolRegistry(),
+                new StubPlanner(llmClient),
+                null,
+                (goal, plan) -> PlanExecuteAgent.PlanReviewDecision.execute()
+        );
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        try {
+            System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+            agent.run("读取 pom.xml");
+        } finally {
+            System.setOut(originalOut);
+        }
+
+        String rendered = output.toString(StandardCharsets.UTF_8);
+        assertFalse(rendered.contains("任务思考 [task_1]"),
+                "空白 reasoning 不应打印空的任务思考标题: " + rendered);
+        assertTrue(rendered.contains("任务输出 [task_1]"));
+        assertFalse(rendered.contains("任务结果 [task_1]"),
+                "tool-call 前后的流式 content 不应被误标成任务结果: " + rendered);
+    }
+
+    private record StubResponse(GLMClient.ChatResponse response, boolean streamContent,
+                                java.util.function.Consumer<GLMClient.StreamListener> streamScript) {
         private static StubResponse plain(GLMClient.ChatResponse response) {
-            return new StubResponse(response, false);
+            return new StubResponse(response, false, null);
         }
 
         private static StubResponse streamed(GLMClient.ChatResponse response) {
-            return new StubResponse(response, true);
+            return new StubResponse(response, true, null);
+        }
+
+        private static StubResponse scripted(java.util.function.Consumer<GLMClient.StreamListener> streamScript,
+                                             GLMClient.ChatResponse response) {
+            return new StubResponse(response, false, streamScript);
         }
     }
 
@@ -175,7 +229,9 @@ class PlanExecuteAgentTest {
             if (stubResponse == null) {
                 throw new IOException("缺少预设响应");
             }
-            if (stubResponse.streamContent() && stubResponse.response().content() != null) {
+            if (stubResponse.streamScript() != null) {
+                stubResponse.streamScript().accept(listener);
+            } else if (stubResponse.streamContent() && stubResponse.response().content() != null) {
                 listener.onContentDelta(stubResponse.response().content());
             }
             return stubResponse.response();
