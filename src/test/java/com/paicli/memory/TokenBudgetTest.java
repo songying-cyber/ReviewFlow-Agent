@@ -1,6 +1,6 @@
 package com.paicli.memory;
 
-import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -30,9 +30,9 @@ class TokenBudgetTest {
 
     @Test
     void shouldEstimateMessageTokens() {
-        List<GLMClient.Message> messages = List.of(
-                GLMClient.Message.system("系统提示"),
-                GLMClient.Message.user("用户消息")
+        List<LlmClient.Message> messages = List.of(
+                LlmClient.Message.system("系统提示"),
+                LlmClient.Message.user("用户消息")
         );
 
         int tokens = TokenBudget.estimateMessagesTokens(messages);

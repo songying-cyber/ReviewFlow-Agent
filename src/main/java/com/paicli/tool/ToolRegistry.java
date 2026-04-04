@@ -260,9 +260,9 @@ public class ToolRegistry {
     /**
      * 获取所有工具定义（用于LLM）
      */
-    public List<com.paicli.llm.GLMClient.Tool> getToolDefinitions() {
+    public List<com.paicli.llm.LlmClient.Tool> getToolDefinitions() {
         return tools.values().stream()
-                .map(t -> new com.paicli.llm.GLMClient.Tool(t.name(), t.description(), t.parameters()))
+                .map(t -> new com.paicli.llm.LlmClient.Tool(t.name(), t.description(), t.parameters()))
                 .toList();
     }
 

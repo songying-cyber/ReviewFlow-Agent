@@ -1,6 +1,7 @@
 package com.paicli.agent;
 
 import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 import com.paicli.memory.LongTermMemory;
 import com.paicli.memory.MemoryManager;
 import com.paicli.plan.ExecutionPlan;
@@ -35,12 +36,12 @@ class PlanExecuteAgentTest {
         Files.writeString(sampleFile, "plan-memory-content");
 
         StubGLMClient llmClient = new StubGLMClient(List.of(
-                new GLMClient.ChatResponse(
+                new LlmClient.ChatResponse(
                         "assistant",
                         "",
-                        List.of(new GLMClient.ToolCall(
+                        List.of(new LlmClient.ToolCall(
                                 "call_1",
-                                new GLMClient.ToolCall.Function(
+                                new LlmClient.ToolCall.Function(
                                         "read_file",
                                         "{\"path\":\"" + sampleFile.toString().replace("\\", "\\\\") + "\"}"
                                 )
@@ -48,7 +49,7 @@ class PlanExecuteAgentTest {
                         120,
                         30
                 ),
-                new GLMClient.ChatResponse("assistant", "已读取并确认文件内容", null, 140, 40)
+                new LlmClient.ChatResponse("assistant", "已读取并确认文件内容", null, 140, 40)
         ));
 
         MemoryManager memoryManager = new MemoryManager(
@@ -105,7 +106,7 @@ class PlanExecuteAgentTest {
     @Test
     void shouldNotRepeatStreamedTaskOutputInFinalPlanSummary() throws Exception {
         StubGLMClient llmClient = StubGLMClient.streaming(List.of(
-                StubResponse.streamed(new GLMClient.ChatResponse(
+                StubResponse.streamed(new LlmClient.ChatResponse(
                         "assistant",
                         "当前目录包含 8 个目录和 8 个文件。",
                         null,
@@ -135,7 +136,7 @@ class PlanExecuteAgentTest {
                             listener.onReasoningDelta("  \n");
                             listener.onContentDelta("我来读取 pom.xml 文件。");
                         },
-                        new GLMClient.ChatResponse(
+                        new LlmClient.ChatResponse(
                                 "assistant",
                                 "我来读取 pom.xml 文件。",
                                 "  \n",
@@ -171,24 +172,24 @@ class PlanExecuteAgentTest {
                 "tool-call 前后的流式 content 不应被误标成任务结果: " + rendered);
     }
 
-    private record StubResponse(GLMClient.ChatResponse response, boolean streamContent,
-                                java.util.function.Consumer<GLMClient.StreamListener> streamScript) {
-        private static StubResponse plain(GLMClient.ChatResponse response) {
+    private record StubResponse(LlmClient.ChatResponse response, boolean streamContent,
+                                java.util.function.Consumer<LlmClient.StreamListener> streamScript) {
+        private static StubResponse plain(LlmClient.ChatResponse response) {
             return new StubResponse(response, false, null);
         }
 
-        private static StubResponse streamed(GLMClient.ChatResponse response) {
+        private static StubResponse streamed(LlmClient.ChatResponse response) {
             return new StubResponse(response, true, null);
         }
 
-        private static StubResponse scripted(java.util.function.Consumer<GLMClient.StreamListener> streamScript,
-                                             GLMClient.ChatResponse response) {
+        private static StubResponse scripted(java.util.function.Consumer<LlmClient.StreamListener> streamScript,
+                                             LlmClient.ChatResponse response) {
             return new StubResponse(response, false, streamScript);
         }
     }
 
     private static final class StubPlanner extends Planner {
-        private StubPlanner(GLMClient llmClient) {
+        private StubPlanner(LlmClient llmClient) {
             super(llmClient);
         }
 

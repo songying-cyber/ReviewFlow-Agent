@@ -1,6 +1,6 @@
 package com.paicli.memory;
 
-import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 
 import java.util.List;
 import java.util.Map;
@@ -19,7 +19,7 @@ public class MemoryManager {
     private final MemoryRetriever retriever;
     private final TokenBudget tokenBudget;
 
-    public MemoryManager(GLMClient llmClient) {
+    public MemoryManager(LlmClient llmClient) {
         this(llmClient, 32768, 200000, null);
     }
 
@@ -28,16 +28,20 @@ public class MemoryManager {
      * @param shortTermBudget 短期记忆 token 预算
      * @param contextWindow  模型上下文窗口大小
      */
-    public MemoryManager(GLMClient llmClient, int shortTermBudget, int contextWindow) {
+    public MemoryManager(LlmClient llmClient, int shortTermBudget, int contextWindow) {
         this(llmClient, shortTermBudget, contextWindow, null);
     }
 
-    public MemoryManager(GLMClient llmClient, int shortTermBudget, int contextWindow, LongTermMemory longTermMemory) {
+    public MemoryManager(LlmClient llmClient, int shortTermBudget, int contextWindow, LongTermMemory longTermMemory) {
         this.shortTermMemory = new ConversationMemory(shortTermBudget);
         this.longTermMemory = longTermMemory != null ? longTermMemory : new LongTermMemory();
         this.compressor = new ContextCompressor(llmClient);
         this.retriever = new MemoryRetriever(shortTermMemory, this.longTermMemory);
         this.tokenBudget = new TokenBudget(contextWindow);
+    }
+
+    public void setLlmClient(LlmClient llmClient) {
+        this.compressor.setLlmClient(llmClient);
     }
 
     /**

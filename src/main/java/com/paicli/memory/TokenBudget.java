@@ -1,6 +1,6 @@
 package com.paicli.memory;
 
-import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 
 import java.util.List;
 
@@ -53,7 +53,7 @@ public class TokenBudget {
     /**
      * 检查给定的消息列表是否在预算内
      */
-    public boolean isWithinBudget(List<GLMClient.Message> messages) {
+    public boolean isWithinBudget(List<LlmClient.Message> messages) {
         int estimatedTokens = estimateMessagesTokens(messages);
         return estimatedTokens <= getAvailableForConversation();
     }
@@ -95,14 +95,14 @@ public class TokenBudget {
     /**
      * 估算消息列表的 token 总数
      */
-    public static int estimateMessagesTokens(List<GLMClient.Message> messages) {
+    public static int estimateMessagesTokens(List<LlmClient.Message> messages) {
         if (messages == null) return 0;
         int total = 0;
-        for (GLMClient.Message msg : messages) {
+        for (LlmClient.Message msg : messages) {
             total += MemoryEntry.estimateTokens(msg.content());
             // 工具调用的 arguments 也计算
             if (msg.toolCalls() != null) {
-                for (GLMClient.ToolCall tc : msg.toolCalls()) {
+                for (LlmClient.ToolCall tc : msg.toolCalls()) {
                     total += MemoryEntry.estimateTokens(tc.function().arguments());
                 }
             }

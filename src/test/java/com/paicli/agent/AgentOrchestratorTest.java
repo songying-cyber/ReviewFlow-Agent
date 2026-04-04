@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 import com.paicli.memory.LongTermMemory;
 import com.paicli.memory.MemoryManager;
 import com.paicli.tool.ToolRegistry;
@@ -26,7 +27,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldParseSimplePlan() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
         String planJson = """
                 {
                     "summary": "读取文件",
@@ -49,7 +50,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldParseMultiStepPlanWithDependencies() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
         String planJson = """
                 {
                     "summary": "创建并验证项目",
@@ -92,7 +93,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldParsePlanWithMarkdownCodeBlock() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
         String planJson = """
                 ```json
                 {
@@ -116,7 +117,7 @@ class AgentOrchestratorTest {
     @Test
     void shouldParsePlanWithTasksField() {
         // 兼容 "tasks" 字段（Plan-and-Execute 的格式）
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
         String planJson = """
                 {
                     "summary": "用 tasks 字段",
@@ -138,7 +139,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldReturnEmptyListForInvalidJson() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
 
         assertTrue(orchestrator.parsePlan("").isEmpty());
         assertTrue(orchestrator.parsePlan("not json").isEmpty());
@@ -148,7 +149,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldGetExecutableSteps() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
 
         // step_1 无依赖，step_2 依赖 step_1
         List<AgentOrchestrator.ExecutionStep> steps = new ArrayList<>(List.of(
@@ -170,7 +171,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldGetMultipleExecutableStepsForParallelTasks() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
 
         List<AgentOrchestrator.ExecutionStep> steps = List.of(
                 AgentOrchestrator.ExecutionStep.pending("step_1", "任务A", "COMMAND", List.of()),
@@ -184,7 +185,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldParseReviewApproval() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
 
         // 正常通过的 JSON
         assertTrue(orchestrator.parseReviewApproval(
@@ -214,7 +215,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldParseReviewIssues() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
 
         String reviewJson = """
                 {
@@ -232,7 +233,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldFallbackToSummaryForIssues() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
 
         String reviewJson = "{\"approved\": false, \"summary\": \"质量不达标\", \"issues\": []}";
         String issues = orchestrator.parseReviewIssues(reviewJson);
@@ -241,7 +242,7 @@ class AgentOrchestratorTest {
 
     @Test
     void shouldHandleInvalidReviewJson() {
-        AgentOrchestrator orchestrator = new AgentOrchestrator("test-key");
+        AgentOrchestrator orchestrator = new AgentOrchestrator(new GLMClient("test-key"));
         String issues = orchestrator.parseReviewIssues("not valid json");
         assertEquals("审查未通过，请改进执行结果", issues);
     }
@@ -295,7 +296,7 @@ class AgentOrchestratorTest {
         AtomicInteger peakConcurrency = new AtomicInteger();
         AtomicInteger currentConcurrency = new AtomicInteger();
 
-        Function<String, GLMClient.ChatResponse> dispatcher = body -> {
+        Function<String, LlmClient.ChatResponse> dispatcher = body -> {
             if (body.contains("请为以下任务制定执行计划")) {
                 return response("""
                         {
@@ -338,10 +339,10 @@ class AgentOrchestratorTest {
         assertEquals(2, peakConcurrency.get(), "Expected two workers to run concurrently");
     }
 
-    private static GLMClient.ChatResponse awaitBarrierThenReturn(CountDownLatch latch,
+    private static LlmClient.ChatResponse awaitBarrierThenReturn(CountDownLatch latch,
                                                                   AtomicInteger current,
                                                                   AtomicInteger peak,
-                                                                  GLMClient.ChatResponse response) {
+                                                                  LlmClient.ChatResponse response) {
         int now = current.incrementAndGet();
         peak.updateAndGet(prev -> Math.max(prev, now));
         latch.countDown();
@@ -393,8 +394,8 @@ class AgentOrchestratorTest {
         assertTrue(finalResult.contains("[step_2] ⏳ 第二步"));
     }
 
-    private static GLMClient.ChatResponse response(String content) {
-        return new GLMClient.ChatResponse("assistant", content, null, 100, 20);
+    private static LlmClient.ChatResponse response(String content) {
+        return new LlmClient.ChatResponse("assistant", content, null, 100, 20);
     }
 
     private static final class NoOpMemoryManager extends MemoryManager {

@@ -7,6 +7,7 @@ final class CliCommandParser {
         UNKNOWN_COMMAND,
         EXIT,
         CLEAR,
+        SWITCH_MODEL,
         SWITCH_PLAN,
         SWITCH_TEAM,
         SWITCH_HITL,
@@ -15,7 +16,8 @@ final class CliCommandParser {
         MEMORY_SAVE,
         INDEX_CODE,
         SEARCH_CODE,
-        GRAPH_QUERY
+        GRAPH_QUERY,
+        CONTEXT_STATUS
     }
 
     record ParsedCommand(CommandType type, String payload) {
@@ -46,6 +48,14 @@ final class CliCommandParser {
 
         if (trimmed.equalsIgnoreCase("/clear") || trimmed.equalsIgnoreCase("clear")) {
             return new ParsedCommand(CommandType.CLEAR, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/model")) {
+            return new ParsedCommand(CommandType.SWITCH_MODEL, null);
+        }
+
+        if (trimmed.regionMatches(true, 0, "/model ", 0, 7)) {
+            return new ParsedCommand(CommandType.SWITCH_MODEL, trimmed.substring(7).trim());
         }
 
         if (trimmed.equalsIgnoreCase("/plan")) {
@@ -114,6 +124,10 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/graph ", 0, 7)) {
             return new ParsedCommand(CommandType.GRAPH_QUERY, trimmed.substring(7).trim());
+        }
+
+        if (trimmed.equalsIgnoreCase("/context") || trimmed.equalsIgnoreCase("/ctx")) {
+            return new ParsedCommand(CommandType.CONTEXT_STATUS, null);
         }
 
         if (trimmed.startsWith("/")) {

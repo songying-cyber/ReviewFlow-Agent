@@ -1,6 +1,7 @@
 package com.paicli.agent;
 
 import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 import com.paicli.tool.ToolRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -66,13 +67,13 @@ class SubAgentTest {
                             listener.onReasoningDelta("准备调用工具……");
                             listener.onContentDelta("我来调用 list_dir 工具");
                         },
-                        new GLMClient.ChatResponse(
+                        new LlmClient.ChatResponse(
                                 "assistant",
                                 "我来调用 list_dir 工具",
                                 "准备调用工具……",
-                                List.of(new GLMClient.ToolCall(
+                                List.of(new LlmClient.ToolCall(
                                         "call_1",
-                                        new GLMClient.ToolCall.Function("list_dir", "{\"path\":\".\"}")
+                                        new LlmClient.ToolCall.Function("list_dir", "{\"path\":\".\"}")
                                 )),
                                 10, 5
                         )
@@ -83,7 +84,7 @@ class SubAgentTest {
                             listener.onReasoningDelta("分析完成");
                             listener.onContentDelta("目录列出完毕");
                         },
-                        new GLMClient.ChatResponse(
+                        new LlmClient.ChatResponse(
                                 "assistant",
                                 "目录列出完毕",
                                 "分析完成",
@@ -170,7 +171,7 @@ class SubAgentTest {
     /**
      * 多轮次脚本：每次 chat() 调用按顺序消费一条 CallScript，支持测试 tool-call 分支的后续迭代。
      */
-    private record CallScript(Consumer<GLMClient.StreamListener> streamScript, GLMClient.ChatResponse response) {}
+    private record CallScript(Consumer<LlmClient.StreamListener> streamScript, LlmClient.ChatResponse response) {}
 
     private static final class MultiCallStreamClient extends GLMClient {
         private final java.util.Iterator<CallScript> iter;

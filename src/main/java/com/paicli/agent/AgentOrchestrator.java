@@ -2,7 +2,7 @@ package com.paicli.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 import com.paicli.memory.MemoryManager;
 import com.paicli.tool.ToolRegistry;
 import com.paicli.util.AnsiStyle;
@@ -42,7 +42,7 @@ public class AgentOrchestrator {
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final int MAX_RETRIES_PER_STEP = 2;
 
-    private final GLMClient llmClient;
+    private final LlmClient llmClient;
     private final SubAgent planner;
     private final List<SubAgent> workers;
     private final SubAgent reviewer;
@@ -74,22 +74,15 @@ public class AgentOrchestrator {
         PENDING, RUNNING, COMPLETED, FAILED
     }
 
-    public AgentOrchestrator(String apiKey) {
-        this(new GLMClient(apiKey), new ToolRegistry(), new MemoryManager(new GLMClient(apiKey)));
+    public AgentOrchestrator(LlmClient llmClient) {
+        this(llmClient, new ToolRegistry(), new MemoryManager(llmClient));
     }
 
-    public AgentOrchestrator(String apiKey, ToolRegistry toolRegistry) {
-        this(new GLMClient(apiKey), toolRegistry, new MemoryManager(new GLMClient(apiKey)));
+    public AgentOrchestrator(LlmClient llmClient, ToolRegistry toolRegistry) {
+        this(llmClient, toolRegistry, new MemoryManager(llmClient));
     }
 
-    /**
-     * 复用外部已有的 LLM、工具与记忆管理器，避免为 Multi-Agent 单独再实例化一份记忆。
-     */
-    public AgentOrchestrator(String apiKey, ToolRegistry toolRegistry, MemoryManager memoryManager) {
-        this(new GLMClient(apiKey), toolRegistry, memoryManager);
-    }
-
-    public AgentOrchestrator(GLMClient llmClient, ToolRegistry toolRegistry, MemoryManager memoryManager) {
+    public AgentOrchestrator(LlmClient llmClient, ToolRegistry toolRegistry, MemoryManager memoryManager) {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
         this.planner = new SubAgent("planner", AgentRole.PLANNER, llmClient, toolRegistry);

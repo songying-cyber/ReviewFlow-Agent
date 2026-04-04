@@ -3,8 +3,11 @@ package com.paicli.cli;
 import com.paicli.agent.Agent;
 import com.paicli.agent.AgentOrchestrator;
 import com.paicli.agent.PlanExecuteAgent;
+import com.paicli.config.PaiCliConfig;
 import com.paicli.hitl.HitlToolRegistry;
 import com.paicli.hitl.TerminalHitlHandler;
+import com.paicli.llm.LlmClient;
+import com.paicli.llm.LlmClientFactory;
 import com.paicli.plan.ExecutionPlan;
 import com.paicli.rag.CodeIndex;
 import com.paicli.rag.CodeRetriever;
@@ -34,7 +37,7 @@ import java.util.List;
  * 支持 ReAct、Plan-and-Execute、Memory、RAG、Multi-Agent、HITL 与并行工具调用能力
  */
 public class Main {
-    private static final String VERSION = "7.0.0";
+    private static final String VERSION = "8.0.0";
     private static final String ENV_FILE = ".env";
     private static final String LOG_DIR_PROPERTY = "paicli.log.dir";
     private static final String LOG_LEVEL_PROPERTY = "paicli.log.level";
@@ -98,28 +101,26 @@ public class Main {
         printBanner();
         configureLogging();
 
-        // 加载 API Key
-        String apiKey = loadApiKey();
-        if (apiKey == null || apiKey.isEmpty()) {
-            System.err.println("❌ 错误: 未找到 GLM_API_KEY");
-            System.err.println("请在 .env 文件中添加: GLM_API_KEY=your_api_key_here");
+        PaiCliConfig config = PaiCliConfig.load();
+        LlmClient llmClient = LlmClientFactory.createFromConfig(config);
+        if (llmClient == null) {
+            System.err.println("❌ 错误: 未找到可用的 API Key");
+            System.err.println("请在 .env 文件中添加 GLM_API_KEY 或 DEEPSEEK_API_KEY");
             System.exit(1);
         }
 
-        System.out.println("✅ API Key 已加载\n");
+        System.out.println("✅ 已加载模型: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")\n");
 
-        // 使用 try-with-resources 确保 Terminal 正确关闭
         try (Terminal terminal = TerminalBuilder.builder().system(true).build()) {
             LineReader lineReader = LineReaderBuilder.builder()
                     .terminal(terminal)
                     .build();
             lineReader.option(LineReader.Option.BRACKETED_PASTE, true);
 
-            // 创建 HITL 处理器（默认关闭）
             TerminalHitlHandler hitlHandler = new TerminalHitlHandler(false);
             HitlToolRegistry hitlToolRegistry = new HitlToolRegistry(hitlHandler);
 
-            Agent reactAgent = new Agent(apiKey, hitlToolRegistry);
+            Agent reactAgent = new Agent(llmClient, hitlToolRegistry);
             System.out.println("🔄 使用 ReAct 模式\n");
             boolean nextTaskUsePlanMode = false;
             boolean nextTaskUseTeamMode = false;
@@ -158,7 +159,7 @@ public class Main {
                 switch (command.type()) {
                     case UNKNOWN_COMMAND -> {
                         System.out.println("❌ 未知命令: " + command.payload());
-                        System.out.println("可用命令：/plan /team /hitl /clear /memory /memory clear /save /index /search /graph /exit\n");
+                        System.out.println("可用命令：/model /plan /team /hitl /clear /context /memory /memory clear /save /index /search /graph /exit\n");
                         continue;
                     }
                     case EXIT -> {
@@ -169,6 +170,12 @@ public class Main {
                         reactAgent.clearHistory();
                         hitlHandler.clearApprovedAll();
                         System.out.println("🗑️ 当前对话历史已清空，长期记忆保持不变\n");
+                        continue;
+                    }
+                    case CONTEXT_STATUS -> {
+                        System.out.println("📋 上下文状态：");
+                        System.out.println(reactAgent.getContextStatus());
+                        System.out.println();
                         continue;
                     }
                     case MEMORY_STATUS -> {
@@ -210,6 +217,28 @@ public class Main {
                             continue;
                         }
                         input = command.payload();
+                    }
+                    case SWITCH_MODEL -> {
+                        String provider = command.payload();
+                        if (provider == null || provider.isEmpty()) {
+                            System.out.println("🤖 当前模型: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")");
+                            System.out.println("   可用模型：glm, deepseek");
+                            System.out.println("   /model glm     - 切换到 GLM-5.1");
+                            System.out.println("   /model deepseek - 切换到 DeepSeek V4\n");
+                        } else {
+                            LlmClient newClient = LlmClientFactory.create(provider, config);
+                            if (newClient == null) {
+                                System.out.println("❌ 切换失败：未配置 " + provider + " 的 API Key\n");
+                            } else {
+                                llmClient = newClient;
+                                config.setDefaultProvider(provider);
+                                config.save();
+                                reactAgent.setLlmClient(llmClient);
+                                System.out.println("✅ 已切换到: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")");
+                                System.out.println("   对话上下文已保留，使用 /clear 可清空\n");
+                            }
+                        }
+                        continue;
                     }
                     case SWITCH_HITL -> {
                         String payload = command.payload();
@@ -306,11 +335,11 @@ public class Main {
                 System.out.println();
                 String response;
                 if (nextTaskUsePlanMode || command.type() == CliCommandParser.CommandType.SWITCH_PLAN) {
-                    PlanExecuteAgent planAgent = createPlanAgent(apiKey, reactAgent, terminal, lineReader);
+                    PlanExecuteAgent planAgent = createPlanAgent(llmClient, reactAgent, terminal, lineReader);
                     response = planAgent.run(input);
                     nextTaskUsePlanMode = false;
                 } else if (nextTaskUseTeamMode || command.type() == CliCommandParser.CommandType.SWITCH_TEAM) {
-                    AgentOrchestrator orchestrator = createTeamAgent(apiKey, reactAgent);
+                    AgentOrchestrator orchestrator = createTeamAgent(llmClient, reactAgent);
                     response = orchestrator.run(input);
                     nextTaskUseTeamMode = false;
                 } else {
@@ -330,28 +359,25 @@ public class Main {
         System.out.println("\n👋 再见!");
     }
 
-    static PlanExecuteAgent createPlanAgent(String apiKey, Agent reactAgent,
+    static PlanExecuteAgent createPlanAgent(LlmClient llmClient, Agent reactAgent,
                                             PlanExecuteAgent.PlanReviewHandler reviewHandler) {
         return new PlanExecuteAgent(
-                apiKey,
+                llmClient,
                 reactAgent.getToolRegistry(),
                 reactAgent.getMemoryManager(),
                 reviewHandler
         );
     }
 
-    private static PlanExecuteAgent createPlanAgent(String apiKey, Agent reactAgent,
+    private static PlanExecuteAgent createPlanAgent(LlmClient llmClient, Agent reactAgent,
                                                     Terminal terminal, LineReader lineReader) {
         System.out.println("📋 使用 Plan-and-Execute 模式\n");
-        return createPlanAgent(apiKey, reactAgent, createPlanReviewHandler(terminal, lineReader));
+        return createPlanAgent(llmClient, reactAgent, createPlanReviewHandler(terminal, lineReader));
     }
 
-    private static AgentOrchestrator createTeamAgent(String apiKey, Agent reactAgent) {
+    private static AgentOrchestrator createTeamAgent(LlmClient llmClient, Agent reactAgent) {
         System.out.println("👥 使用 Multi-Agent 协作模式\n");
-        // 复用 reactAgent 的 ToolRegistry 和 MemoryManager：
-        // - ToolRegistry 共享意味着 /index 设置的项目路径同步到 Multi-Agent
-        // - MemoryManager 共享避免重复加载长期记忆，且 /team 结果会进入同一会话上下文
-        return new AgentOrchestrator(apiKey, reactAgent.getToolRegistry(), reactAgent.getMemoryManager());
+        return new AgentOrchestrator(llmClient, reactAgent.getToolRegistry(), reactAgent.getMemoryManager());
     }
 
     private static PromptInput readPromptInput(Terminal terminal, LineReader lineReader, boolean allowEscCancel)
@@ -577,6 +603,7 @@ public class Main {
     static List<String> startupHints() {
         return List.of(
                 "输入你的问题或任务",
+                "输入 '/model' 查看当前模型，'/model glm' 或 '/model deepseek' 切换模型",
                 "输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式",
                 "输入 '/plan 任务内容' 直接用计划模式执行这条任务",
                 "输入 '/team' 后，下一条任务使用 Multi-Agent 协作模式",
@@ -589,6 +616,7 @@ public class Main {
                 "输入 '/graph <类名>' 查看代码关系图谱",
                 "默认模式是 ReAct",
                 "输入 '/clear' 清空对话历史",
+                "输入 '/context' 查看上下文和记忆状态",
                 "输入 '/memory' 查看记忆状态",
                 "输入 '/memory clear' 清空长期记忆",
                 "输入 '/save 事实内容' 手动保存关键事实",

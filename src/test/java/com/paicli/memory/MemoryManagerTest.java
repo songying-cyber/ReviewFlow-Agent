@@ -1,6 +1,7 @@
 package com.paicli.memory;
 
 import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,7 +22,7 @@ class MemoryManagerTest {
     @Test
     void shouldCompressBeforeShortTermMemoryEvictsOldEntries() {
         StubGLMClient llmClient = new StubGLMClient(List.of(
-                new GLMClient.ChatResponse("assistant", "压缩摘要", null, 100, 20)
+                new LlmClient.ChatResponse("assistant", "压缩摘要", null, 100, 20)
         ));
         MemoryManager memoryManager = new MemoryManager(
                 llmClient,

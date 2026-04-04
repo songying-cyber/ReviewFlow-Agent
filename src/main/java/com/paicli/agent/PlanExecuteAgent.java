@@ -2,7 +2,7 @@ package com.paicli.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 import com.paicli.memory.MemoryManager;
 import com.paicli.plan.*;
 import com.paicli.util.AnsiStyle;
@@ -85,7 +85,7 @@ public class PlanExecuteAgent {
         }
     }
 
-    private final GLMClient llmClient;
+    private final LlmClient llmClient;
     private final ToolRegistry toolRegistry;
     private final Planner planner;
     private final PlanReviewHandler reviewHandler;
@@ -117,20 +117,20 @@ public class PlanExecuteAgent {
             请用中文回复。
             """;
 
-    public PlanExecuteAgent(String apiKey) {
-        this(apiKey, (goal, plan) -> PlanReviewDecision.execute());
+    public PlanExecuteAgent(LlmClient llmClient) {
+        this(llmClient, (goal, plan) -> PlanReviewDecision.execute());
     }
 
-    public PlanExecuteAgent(String apiKey, PlanReviewHandler reviewHandler) {
-        this(new GLMClient(apiKey), new ToolRegistry(), null, null, reviewHandler);
+    public PlanExecuteAgent(LlmClient llmClient, PlanReviewHandler reviewHandler) {
+        this(llmClient, new ToolRegistry(), null, null, reviewHandler);
     }
 
-    public PlanExecuteAgent(String apiKey, ToolRegistry toolRegistry,
+    public PlanExecuteAgent(LlmClient llmClient, ToolRegistry toolRegistry,
                             MemoryManager memoryManager, PlanReviewHandler reviewHandler) {
-        this(new GLMClient(apiKey), toolRegistry, null, memoryManager, reviewHandler);
+        this(llmClient, toolRegistry, null, memoryManager, reviewHandler);
     }
 
-    PlanExecuteAgent(GLMClient llmClient, ToolRegistry toolRegistry, Planner planner,
+    PlanExecuteAgent(LlmClient llmClient, ToolRegistry toolRegistry, Planner planner,
                      MemoryManager memoryManager, PlanReviewHandler reviewHandler) {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry != null ? toolRegistry : new ToolRegistry();
@@ -369,23 +369,31 @@ public class PlanExecuteAgent {
             taskInput = taskInput + "\n\n" + memoryContext;
         }
 
-        List<GLMClient.Message> messages = new ArrayList<>(Arrays.asList(
-                GLMClient.Message.system(prompt),
-                GLMClient.Message.user(taskInput)
+        List<LlmClient.Message> messages = new ArrayList<>(Arrays.asList(
+                LlmClient.Message.system(prompt),
+                LlmClient.Message.user(taskInput)
         ));
 
         StringBuilder allResults = new StringBuilder();
         int iteration = 0;
         TaskStreamRenderer streamRenderer = new TaskStreamRenderer(task.getId(), streamState, out);
 
+        long startNanos = System.nanoTime();
+        int totalInputTokens = 0;
+        int totalOutputTokens = 0;
+
         while (iteration < MAX_TASK_ITERATIONS) {
             iteration++;
 
-            GLMClient.ChatResponse response = llmClient.chat(
+            LlmClient.ChatResponse response = llmClient.chat(
                     messages,
                     toolRegistry.getToolDefinitions(),
                     streamRenderer
             );
+
+            totalInputTokens += response.inputTokens();
+            totalOutputTokens += response.outputTokens();
+
             log.info("Task {} iteration {} response: toolCalls={}, reasoningChars={}, contentChars={}",
                     task.getId(),
                     iteration,
@@ -394,26 +402,27 @@ public class PlanExecuteAgent {
                     response.content() == null ? 0 : response.content().length());
 
             if (!response.hasToolCalls()) {
-                // 没有工具调用，返回最终结果
-                memoryManager.recordTokenUsage(response.inputTokens(), response.outputTokens());
+                memoryManager.recordTokenUsage(totalInputTokens, totalOutputTokens);
                 if (!allResults.isEmpty() && (response.content() == null || response.content().isBlank())) {
                     String toolOnlyResult = allResults.toString().trim();
                     if (!toolOnlyResult.isBlank()) {
                         memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + toolOnlyResult);
                     }
                     streamRenderer.finish();
+                    out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
                     return TaskRunResult.of(toolOnlyResult, streamRenderer.hasStreamedOutput());
                 }
                 if (response.content() != null && !response.content().isBlank()) {
                     memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + response.content());
                 }
                 streamRenderer.finish();
+                out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
                 return TaskRunResult.of(response.content(), streamRenderer.hasStreamedOutput());
             }
 
             // 有工具调用：执行工具并将结果回灌到消息历史
             printToolCalls(out, response.toolCalls());
-            messages.add(GLMClient.Message.assistant(
+            messages.add(LlmClient.Message.assistant(
                     response.reasoningContent(),
                     response.content(),
                     response.toolCalls()
@@ -427,7 +436,7 @@ public class PlanExecuteAgent {
             for (ToolExecutionResult toolResult : toolResults) {
                 memoryManager.addToolResult(toolResult.name(), toolResult.result());
                 allResults.append(toolResult.result()).append("\n");
-                messages.add(GLMClient.Message.tool(toolResult.id(), toolResult.result()));
+                messages.add(LlmClient.Message.tool(toolResult.id(), toolResult.result()));
             }
         }
 
@@ -436,6 +445,7 @@ public class PlanExecuteAgent {
             memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + fallbackResult);
         }
         streamRenderer.finish();
+        out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
         return TaskRunResult.of(fallbackResult, streamRenderer.hasStreamedOutput());
     }
 
@@ -450,9 +460,9 @@ public class PlanExecuteAgent {
         return normalized.substring(0, maxLength) + "...";
     }
 
-    private List<ToolExecutionResult> executeToolCalls(String taskId, List<GLMClient.ToolCall> toolCalls) {
+    private List<ToolExecutionResult> executeToolCalls(String taskId, List<LlmClient.ToolCall> toolCalls) {
         List<ToolInvocation> invocations = new ArrayList<>();
-        for (GLMClient.ToolCall toolCall : toolCalls) {
+        for (LlmClient.ToolCall toolCall : toolCalls) {
             String toolName = toolCall.function().name();
             String toolArgs = toolCall.function().arguments();
             log.info("Task {} scheduling tool {}", taskId, toolName);
@@ -470,16 +480,16 @@ public class PlanExecuteAgent {
         return results;
     }
 
-    private static void printToolCalls(PrintStream out, List<GLMClient.ToolCall> toolCalls) {
-        Map<String, List<GLMClient.ToolCall>> grouped = new LinkedHashMap<>();
-        for (GLMClient.ToolCall tc : toolCalls) {
+    private static void printToolCalls(PrintStream out, List<LlmClient.ToolCall> toolCalls) {
+        Map<String, List<LlmClient.ToolCall>> grouped = new LinkedHashMap<>();
+        for (LlmClient.ToolCall tc : toolCalls) {
             grouped.computeIfAbsent(tc.function().name(), k -> new ArrayList<>()).add(tc);
         }
         for (var group : grouped.entrySet()) {
             String toolName = group.getKey();
-            List<GLMClient.ToolCall> calls = group.getValue();
+            List<LlmClient.ToolCall> calls = group.getValue();
             out.println(AnsiStyle.subtle("  " + toolLabel(toolName, calls.size())));
-            for (GLMClient.ToolCall tc : calls) {
+            for (LlmClient.ToolCall tc : calls) {
                 String detail = extractKeyParam(toolName, tc.function().arguments());
                 if (!detail.isEmpty()) {
                     out.println(AnsiStyle.subtle("    └ " + detail));
@@ -523,6 +533,13 @@ public class PlanExecuteAgent {
         }
     }
 
+    private static String formatTokenStats(int inputTokens, int outputTokens, long startNanos) {
+        double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
+        return AnsiStyle.subtle(String.format(
+                "📊 Token: %d 输入 / %d 输出 / %d 合计 | ⏱ %.1fs",
+                inputTokens, outputTokens, inputTokens + outputTokens, elapsedSeconds));
+    }
+
     private static final class StreamState {
         private volatile boolean streamedOutput;
 
@@ -535,7 +552,7 @@ public class PlanExecuteAgent {
         }
     }
 
-    private static final class TaskStreamRenderer implements GLMClient.StreamListener {
+    private static final class TaskStreamRenderer implements LlmClient.StreamListener {
         private final String taskId;
         private final StreamState streamState;
         private final PrintStream out;

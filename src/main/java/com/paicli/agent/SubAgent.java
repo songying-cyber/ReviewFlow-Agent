@@ -2,7 +2,7 @@ package com.paicli.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.paicli.llm.GLMClient;
+import com.paicli.llm.LlmClient;
 import com.paicli.tool.ToolRegistry;
 import com.paicli.tool.ToolRegistry.ToolExecutionResult;
 import com.paicli.tool.ToolRegistry.ToolInvocation;
@@ -31,9 +31,9 @@ public class SubAgent {
 
     private final String name;
     private final AgentRole role;
-    private final GLMClient llmClient;
+    private final LlmClient llmClient;
     private final ToolRegistry toolRegistry;
-    private final List<GLMClient.Message> conversationHistory;
+    private final List<LlmClient.Message> conversationHistory;
 
     // 各角色的系统提示词
     private static final String PLANNER_PROMPT = """
@@ -112,13 +112,13 @@ public class SubAgent {
             请用中文回复。
             """;
 
-    public SubAgent(String name, AgentRole role, GLMClient llmClient, ToolRegistry toolRegistry) {
+    public SubAgent(String name, AgentRole role, LlmClient llmClient, ToolRegistry toolRegistry) {
         this.name = name;
         this.role = role;
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
         this.conversationHistory = new ArrayList<>();
-        this.conversationHistory.add(GLMClient.Message.system(getSystemPrompt()));
+        this.conversationHistory.add(LlmClient.Message.system(getSystemPrompt()));
     }
 
     /**
@@ -148,24 +148,31 @@ public class SubAgent {
         String taskContent = task.content();
 
         // 将任务注入对话
-        conversationHistory.add(GLMClient.Message.user(taskContent));
+        conversationHistory.add(LlmClient.Message.user(taskContent));
 
         SubAgentStreamRenderer streamRenderer = new SubAgentStreamRenderer(name, role, out);
+
+        long startNanos = System.nanoTime();
+        int totalInputTokens = 0;
+        int totalOutputTokens = 0;
 
         int iteration = 0;
         while (iteration < MAX_ITERATIONS) {
             iteration++;
 
             try {
-                GLMClient.ChatResponse response = llmClient.chat(
+                LlmClient.ChatResponse response = llmClient.chat(
                         conversationHistory,
                         shouldUseTools() ? toolRegistry.getToolDefinitions() : null,
                         streamRenderer
                 );
 
+                totalInputTokens += response.inputTokens();
+                totalOutputTokens += response.outputTokens();
+
                 if (response.hasToolCalls()) {
                     printToolCalls(out, response.toolCalls());
-                    conversationHistory.add(GLMClient.Message.assistant(
+                    conversationHistory.add(LlmClient.Message.assistant(
                             response.reasoningContent(),
                             response.content(),
                             response.toolCalls()
@@ -177,18 +184,19 @@ public class SubAgent {
 
                     List<ToolExecutionResult> toolResults = executeToolCalls(response.toolCalls());
                     for (ToolExecutionResult toolResult : toolResults) {
-                        conversationHistory.add(GLMClient.Message.tool(toolResult.id(), toolResult.result()));
+                        conversationHistory.add(LlmClient.Message.tool(toolResult.id(), toolResult.result()));
                     }
                     continue;
                 }
 
                 // 没有工具调用，返回最终结果
-                conversationHistory.add(GLMClient.Message.assistant(
+                conversationHistory.add(LlmClient.Message.assistant(
                         response.reasoningContent(),
                         response.content()
                 ));
 
                 streamRenderer.finish();
+                out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
 
                 return AgentMessage.result(name, role, response.content());
 
@@ -200,6 +208,7 @@ public class SubAgent {
         }
 
         streamRenderer.finish();
+        out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
         return AgentMessage.error(name, role, "达到最大迭代次数限制，任务未完成");
     }
 
@@ -237,7 +246,7 @@ public class SubAgent {
      * 清空对话历史（保留系统提示词），用于处理下一个独立任务
      */
     public void clearHistory() {
-        GLMClient.Message systemMsg = conversationHistory.get(0);
+        LlmClient.Message systemMsg = conversationHistory.get(0);
         conversationHistory.clear();
         conversationHistory.add(systemMsg);
     }
@@ -249,9 +258,9 @@ public class SubAgent {
         return role == AgentRole.WORKER;
     }
 
-    private List<ToolExecutionResult> executeToolCalls(List<GLMClient.ToolCall> toolCalls) {
+    private List<ToolExecutionResult> executeToolCalls(List<LlmClient.ToolCall> toolCalls) {
         List<ToolInvocation> invocations = new ArrayList<>();
-        for (GLMClient.ToolCall toolCall : toolCalls) {
+        for (LlmClient.ToolCall toolCall : toolCalls) {
             String toolName = toolCall.function().name();
             String toolArgs = toolCall.function().arguments();
             log.info("[{}] scheduling tool: {}", name, toolName);
@@ -265,16 +274,16 @@ public class SubAgent {
         return toolRegistry.executeTools(invocations);
     }
 
-    private static void printToolCalls(PrintStream out, List<GLMClient.ToolCall> toolCalls) {
-        Map<String, List<GLMClient.ToolCall>> grouped = new LinkedHashMap<>();
-        for (GLMClient.ToolCall tc : toolCalls) {
+    private static void printToolCalls(PrintStream out, List<LlmClient.ToolCall> toolCalls) {
+        Map<String, List<LlmClient.ToolCall>> grouped = new LinkedHashMap<>();
+        for (LlmClient.ToolCall tc : toolCalls) {
             grouped.computeIfAbsent(tc.function().name(), k -> new ArrayList<>()).add(tc);
         }
         for (var group : grouped.entrySet()) {
             String toolName = group.getKey();
-            List<GLMClient.ToolCall> calls = group.getValue();
+            List<LlmClient.ToolCall> calls = group.getValue();
             out.println(AnsiStyle.subtle("  " + toolLabel(toolName, calls.size())));
-            for (GLMClient.ToolCall tc : calls) {
+            for (LlmClient.ToolCall tc : calls) {
                 String detail = extractKeyParam(toolName, tc.function().arguments());
                 if (!detail.isEmpty()) {
                     out.println(AnsiStyle.subtle("    └ " + detail));
@@ -318,6 +327,13 @@ public class SubAgent {
         }
     }
 
+    private static String formatTokenStats(int inputTokens, int outputTokens, long startNanos) {
+        double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
+        return AnsiStyle.subtle(String.format(
+                "📊 Token: %d 输入 / %d 输出 / %d 合计 | ⏱ %.1fs",
+                inputTokens, outputTokens, inputTokens + outputTokens, elapsedSeconds));
+    }
+
     public String getName() {
         return name;
     }
@@ -333,7 +349,7 @@ public class SubAgent {
      * "content 开始后又追加 reasoning"的场景：迟到的 reasoning 会被累积到 lateReasoning，
      * 在 finish() 时以"🧠 补充思考"独立展示，避免混入结果区。
      */
-    private static final class SubAgentStreamRenderer implements GLMClient.StreamListener {
+    private static final class SubAgentStreamRenderer implements LlmClient.StreamListener {
         private final String agentName;
         private final AgentRole role;
         private final PrintStream out;
