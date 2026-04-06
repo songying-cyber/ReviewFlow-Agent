@@ -28,7 +28,6 @@ public class Agent {
     private final ToolRegistry toolRegistry;
     private final List<LlmClient.Message> conversationHistory;
     private final MemoryManager memoryManager;
-    private static final int MAX_ITERATIONS = 10;
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     // 系统提示词
@@ -94,12 +93,22 @@ public class Agent {
         StreamRenderer streamRenderer = new StreamRenderer();
 
         long startNanos = System.nanoTime();
-        int totalInputTokens = 0;
-        int totalOutputTokens = 0;
+        AgentBudget budget = AgentBudget.fromSystemProperties();
 
-        int iteration = 0;
-        while (iteration < MAX_ITERATIONS) {
-            iteration++;
+        // 主退出条件 = LLM 自己决定（不再调用工具就返回）；
+        // budget 仅在 token 用尽 / 检测到死循环 / 超出硬轮数时兜底。
+        while (true) {
+            AgentBudget.ExitReason exitReason = budget.check();
+            if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
+                String statsLine = formatTokenStats(budget.totalInputTokens(), budget.totalOutputTokens(), startNanos);
+                String description = budget.describeExit(exitReason);
+                log.warn("ReAct run exhausted budget: reason={}, iteration={}, tokens={}/{}",
+                        exitReason, budget.iteration(),
+                        budget.totalInputTokens() + budget.totalOutputTokens(), budget.tokenBudget());
+                return "❌ " + description + "\n\n" + statsLine;
+            }
+
+            int iteration = budget.beginIteration();
 
             try {
                 // 调用 LLM
@@ -109,13 +118,13 @@ public class Agent {
                         streamRenderer
                 );
 
-                totalInputTokens += response.inputTokens();
-                totalOutputTokens += response.outputTokens();
+                budget.recordTokens(response.inputTokens(), response.outputTokens());
 
                 // 如果有工具调用
                 if (response.hasToolCalls()) {
                     appendReasoning(reasoningTranscript, response.reasoningContent());
                     log.info("LLM requested {} tool call(s) in iteration {}", response.toolCalls().size(), iteration);
+                    budget.recordToolCalls(response.toolCalls());
                     printToolCalls(System.out, response.toolCalls());
                     // 添加助手消息（包含工具调用）
                     conversationHistory.add(LlmClient.Message.assistant(
@@ -137,49 +146,44 @@ public class Agent {
 
                     // 继续循环，让 LLM 根据工具结果继续思考
                     continue;
-
-                } else {
-                    // 没有工具调用，直接返回结果
-                    appendReasoning(reasoningTranscript, response.reasoningContent());
-                    conversationHistory.add(LlmClient.Message.assistant(
-                            response.reasoningContent(),
-                            response.content()
-                    ));
-
-                    // 存入记忆
-                    memoryManager.addAssistantMessage(response.content());
-
-                    // 记录 token 使用
-                    memoryManager.recordTokenUsage(totalInputTokens, totalOutputTokens);
-                    log.info("ReAct run finished: inputTokens={}, outputTokens={}, reasoningChars={}, answerChars={}",
-                            totalInputTokens,
-                            totalOutputTokens,
-                            response.reasoningContent() == null ? 0 : response.reasoningContent().length(),
-                            response.content() == null ? 0 : response.content().length());
-                    if (log.isDebugEnabled()) {
-                        log.debug("Assistant answer preview: {}", preview(response.content(), 500));
-                    }
-
-                    String statsLine = formatTokenStats(totalInputTokens, totalOutputTokens, startNanos);
-
-                    if (streamRenderer.hasStreamedOutput()) {
-                        streamRenderer.finish();
-                        System.out.println(statsLine);
-                        return "";
-                    }
-                    return formatUserFacingResponse(reasoningTranscript.toString(), response.content())
-                            + "\n\n" + statsLine;
                 }
+
+                // 没有工具调用，直接返回结果
+                appendReasoning(reasoningTranscript, response.reasoningContent());
+                conversationHistory.add(LlmClient.Message.assistant(
+                        response.reasoningContent(),
+                        response.content()
+                ));
+
+                // 存入记忆
+                memoryManager.addAssistantMessage(response.content());
+
+                // 记录 token 使用
+                memoryManager.recordTokenUsage(budget.totalInputTokens(), budget.totalOutputTokens());
+                log.info("ReAct run finished: inputTokens={}, outputTokens={}, reasoningChars={}, answerChars={}",
+                        budget.totalInputTokens(),
+                        budget.totalOutputTokens(),
+                        response.reasoningContent() == null ? 0 : response.reasoningContent().length(),
+                        response.content() == null ? 0 : response.content().length());
+                if (log.isDebugEnabled()) {
+                    log.debug("Assistant answer preview: {}", preview(response.content(), 500));
+                }
+
+                String statsLine = formatTokenStats(budget.totalInputTokens(), budget.totalOutputTokens(), startNanos);
+
+                if (streamRenderer.hasStreamedOutput()) {
+                    streamRenderer.finish();
+                    System.out.println(statsLine);
+                    return "";
+                }
+                return formatUserFacingResponse(reasoningTranscript.toString(), response.content())
+                        + "\n\n" + statsLine;
 
             } catch (IOException e) {
                 log.error("LLM call failed in ReAct loop", e);
                 return "❌ 调用 LLM 失败: " + e.getMessage();
             }
         }
-
-        String statsLine = formatTokenStats(totalInputTokens, totalOutputTokens, startNanos);
-        log.warn("ReAct run reached max iterations: {}", MAX_ITERATIONS);
-        return "❌ 达到最大迭代次数限制，任务未完成\n\n" + statsLine;
     }
 
     /**

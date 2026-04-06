@@ -26,7 +26,6 @@ import java.util.Map;
  */
 public class SubAgent {
     private static final Logger log = LoggerFactory.getLogger(SubAgent.class);
-    private static final int MAX_ITERATIONS = 10;
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final String name;
@@ -153,12 +152,22 @@ public class SubAgent {
         SubAgentStreamRenderer streamRenderer = new SubAgentStreamRenderer(name, role, out);
 
         long startNanos = System.nanoTime();
-        int totalInputTokens = 0;
-        int totalOutputTokens = 0;
+        AgentBudget budget = AgentBudget.fromSystemProperties();
 
-        int iteration = 0;
-        while (iteration < MAX_ITERATIONS) {
-            iteration++;
+        // 与 Agent.java 对称：主退出条件 = LLM 自决，budget 仅在 token / 停滞 / 硬轮数兜底。
+        while (true) {
+            AgentBudget.ExitReason exitReason = budget.check();
+            if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
+                streamRenderer.finish();
+                out.println(formatTokenStats(budget.totalInputTokens(), budget.totalOutputTokens(), startNanos));
+                String description = budget.describeExit(exitReason);
+                log.warn("[{}] run exhausted budget: reason={}, iteration={}, tokens={}/{}",
+                        name, exitReason, budget.iteration(),
+                        budget.totalInputTokens() + budget.totalOutputTokens(), budget.tokenBudget());
+                return AgentMessage.error(name, role, description);
+            }
+
+            budget.beginIteration();
 
             try {
                 LlmClient.ChatResponse response = llmClient.chat(
@@ -167,10 +176,10 @@ public class SubAgent {
                         streamRenderer
                 );
 
-                totalInputTokens += response.inputTokens();
-                totalOutputTokens += response.outputTokens();
+                budget.recordTokens(response.inputTokens(), response.outputTokens());
 
                 if (response.hasToolCalls()) {
+                    budget.recordToolCalls(response.toolCalls());
                     printToolCalls(out, response.toolCalls());
                     conversationHistory.add(LlmClient.Message.assistant(
                             response.reasoningContent(),
@@ -196,7 +205,7 @@ public class SubAgent {
                 ));
 
                 streamRenderer.finish();
-                out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
+                out.println(formatTokenStats(budget.totalInputTokens(), budget.totalOutputTokens(), startNanos));
 
                 return AgentMessage.result(name, role, response.content());
 
@@ -206,10 +215,6 @@ public class SubAgent {
                 return AgentMessage.error(name, role, "LLM 调用失败: " + e.getMessage());
             }
         }
-
-        streamRenderer.finish();
-        out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
-        return AgentMessage.error(name, role, "达到最大迭代次数限制，任务未完成");
     }
 
     /**

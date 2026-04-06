@@ -79,6 +79,11 @@ Embedding 配置读取顺序（以代码实际行为为准）：
 2. 环境变量或 `.env`：`PAICLI_LOG_DIR`、`PAICLI_LOG_LEVEL`、`PAICLI_LOG_MAX_HISTORY`、`PAICLI_LOG_MAX_FILE_SIZE`、`PAICLI_LOG_TOTAL_SIZE_CAP`
 3. 默认值：`~/.paicli/logs` / `INFO` / `7` / `10MB` / `100MB`
 
+ReAct / SubAgent 预算配置读取顺序（以代码实际行为为准）：
+
+1. 系统属性：`paicli.react.token.budget`、`paicli.react.stagnation.window`、`paicli.react.hard.max.iterations`
+2. 默认值：`300000` / `3` / `50`
+
 ## 常用命令
 
 ```bash
@@ -108,7 +113,12 @@ mvn test -Dtest=ExecutionPlanTest
 - 默认模式
 - 主入口在 `src/main/java/com/paicli/agent/Agent.java`
 - 维护对话历史
-- 最多迭代 10 轮
+- 退出条件由 LLM 自决：只要它不再返回 `tool_calls`、直接给出 `content`，循环就结束
+- `AgentBudget`（`src/main/java/com/paicli/agent/AgentBudget.java`）只承担保险阀职责，三种兜底任一命中即收尾：
+  - 累计 `inputTokens + outputTokens` 超过 token 预算（默认 300_000）
+  - 连续 N 轮（默认 3）出现完全相同的工具名 + 参数，判定为死循环
+  - 累计轮数超过硬上限（默认 50），最终防御
+- 不再使用"固定最多 10 轮"的策略；新代码改动前阅读 `AgentBudget` 的注释比读老 README 更可靠
 - 支持工具调用后继续思考
 - 用户默认看到的是流式输出的模型 `reasoning_content`（如果接口返回）和回复内容；ReAct 同一次用户输入只打印一次 `🧠 思考过程` 标题，工具调用前后的后续推理继续归在同一块下；ReAct 流式头标签使用 `🤖 回复`（而非 `最终结果`，避免在模型调用工具前先 narrate 时误导用户）；Plan 阶段同样走流式展示；终端会先渲染常见 Markdown 再输出；工具参数、工具返回片段、Token 使用量不再作为默认用户输出
 - 会写入短期记忆

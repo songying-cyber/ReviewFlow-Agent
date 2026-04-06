@@ -30,6 +30,7 @@ public class ToolRegistry {
     private final long commandTimeoutSeconds;
     private final long toolBatchTimeoutSeconds;
     private String projectPath = System.getProperty("user.dir");
+    private WebSearchTool webSearchTool;
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -47,6 +48,7 @@ public class ToolRegistry {
         registerShellTools();
         registerCodeTools();
         registerRagTools();
+        registerWebTools();
     }
 
     /**
@@ -234,6 +236,79 @@ public class ToolRegistry {
                     }
                 }
         ));
+    }
+
+    /**
+     * 注册联网工具
+     */
+    private void registerWebTools() {
+        // 懒初始化 WebSearchTool，从 .env 读取 API Key
+        tools.put("web_search", new Tool(
+                "web_search",
+                "搜索互联网，获取实时信息（最新版本、官方文档、技术资讯等）",
+                createParameters(
+                        new Param("query", "string", "搜索关键词，例如'Java 21 新特性'、'Spring Boot 3.3 release notes'", true),
+                        new Param("top_k", "integer", "返回结果数量（默认5）", false)
+                ),
+                args -> {
+                    String query = args.get("query");
+                    int topK = 5;
+                    try {
+                        if (args.containsKey("top_k")) {
+                            topK = Integer.parseInt(args.get("top_k"));
+                        }
+                    } catch (NumberFormatException ignored) {
+                    }
+
+                    // 懒初始化
+                    if (webSearchTool == null) {
+                        String apiKey = loadWebSearchApiKey();
+                        webSearchTool = new WebSearchTool(apiKey);
+                    }
+
+                    return webSearchTool.search(query, topK);
+                }
+        ));
+    }
+
+    /**
+     * 从环境变量或 .env 文件读取 SerpAPI Key
+     */
+    private String loadWebSearchApiKey() {
+        // 优先系统环境变量
+        String apiKey = System.getenv("SERPAPI_KEY");
+        if (apiKey != null && !apiKey.isBlank()) {
+            return apiKey.trim();
+        }
+
+        // 降级读 .env 文件
+        String dotEnvValue = readFromDotEnv("SERPAPI_KEY");
+        if (dotEnvValue != null && !dotEnvValue.isBlank()) {
+            return dotEnvValue.trim();
+        }
+
+        return null;
+    }
+
+    /**
+     * 从 .env 文件读取指定 key
+     */
+    private static String readFromDotEnv(String key) {
+        File[] envFiles = { new File(".env"), new File(System.getProperty("user.home"), ".env") };
+        for (File envFile : envFiles) {
+            if (!envFile.exists()) continue;
+            try (BufferedReader reader = new BufferedReader(new java.io.FileReader(envFile))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("#")) continue;
+                    if (line.startsWith(key + "=")) {
+                        return line.substring((key + "=").length()).trim();
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
     /**
