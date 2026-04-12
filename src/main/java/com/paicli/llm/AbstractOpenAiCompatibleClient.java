@@ -15,11 +15,30 @@ import java.util.concurrent.TimeUnit;
 public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
 
     protected static final ObjectMapper mapper = new ObjectMapper();
+
+    // SSE 流式接口下，OkHttp 的 readTimeout 是"两次 read 之间的最大间隔"，不是请求总时长。
+    // GLM-5.1 在生成大段 reasoning_content 时服务端可能长时间静默，所以默认值放宽到 300s；
+    // callTimeout 作为整体兜底，覆盖极端情况下的连接半死状态。
+    // 三项均可通过系统属性覆盖，便于不同模型 / 网络环境调优。
     protected static final OkHttpClient SHARED_HTTP_CLIENT = new OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
+            .connectTimeout(readTimeoutSeconds("paicli.llm.connect.timeout.seconds", 60), TimeUnit.SECONDS)
+            .readTimeout(readTimeoutSeconds("paicli.llm.read.timeout.seconds", 300), TimeUnit.SECONDS)
+            .writeTimeout(readTimeoutSeconds("paicli.llm.write.timeout.seconds", 60), TimeUnit.SECONDS)
+            .callTimeout(readTimeoutSeconds("paicli.llm.call.timeout.seconds", 600), TimeUnit.SECONDS)
             .build();
+
+    private static long readTimeoutSeconds(String key, long defaultValue) {
+        String raw = System.getProperty(key);
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            long parsed = Long.parseLong(raw.trim());
+            return parsed > 0 ? parsed : defaultValue;
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
 
     protected abstract String getApiUrl();
 

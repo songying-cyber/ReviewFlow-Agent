@@ -7,10 +7,17 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.paicli.rag.CodeRetriever;
 import com.paicli.rag.SearchResultFormatter;
 import com.paicli.rag.VectorStore;
+import com.paicli.web.FetchResult;
+import com.paicli.web.HtmlExtractor;
+import com.paicli.web.NetworkPolicy;
+import com.paicli.web.SearchProvider;
+import com.paicli.web.SearchProviderFactory;
+import com.paicli.web.SearchResult;
+import com.paicli.web.WebFetcher;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
+import java.io.BufferedReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -29,8 +36,12 @@ public class ToolRegistry {
     private final Map<String, Tool> tools = new HashMap<>();
     private final long commandTimeoutSeconds;
     private final long toolBatchTimeoutSeconds;
+    private static final int DEFAULT_FETCH_MAX_CHARS = 8_000;
     private String projectPath = System.getProperty("user.dir");
-    private WebSearchTool webSearchTool;
+    private SearchProvider searchProvider;
+    private WebFetcher webFetcher;
+    private HtmlExtractor htmlExtractor;
+    private NetworkPolicy networkPolicy;
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -239,76 +250,160 @@ public class ToolRegistry {
     }
 
     /**
-     * 注册联网工具
+     * 注册联网工具：web_search（多 provider 抽象）+ web_fetch（HTTP + readability）
      */
     private void registerWebTools() {
-        // 懒初始化 WebSearchTool，从 .env 读取 API Key
         tools.put("web_search", new Tool(
                 "web_search",
-                "搜索互联网，获取实时信息（最新版本、官方文档、技术资讯等）",
+                "搜索互联网，获取实时信息（最新版本、官方文档、技术资讯等）。" +
+                        "支持 SerpAPI（默认）和 SearXNG（自托管）两种 provider，由 SEARCH_PROVIDER 环境变量切换。",
                 createParameters(
                         new Param("query", "string", "搜索关键词，例如'Java 21 新特性'、'Spring Boot 3.3 release notes'", true),
                         new Param("top_k", "integer", "返回结果数量（默认5）", false)
                 ),
-                args -> {
-                    String query = args.get("query");
-                    int topK = 5;
-                    try {
-                        if (args.containsKey("top_k")) {
-                            topK = Integer.parseInt(args.get("top_k"));
-                        }
-                    } catch (NumberFormatException ignored) {
-                    }
+                args -> webSearch(args.get("query"), parseInt(args.get("top_k"), 5))
+        ));
 
-                    // 懒初始化
-                    if (webSearchTool == null) {
-                        String apiKey = loadWebSearchApiKey();
-                        webSearchTool = new WebSearchTool(apiKey);
-                    }
-
-                    return webSearchTool.search(query, topK);
-                }
+        tools.put("web_fetch", new Tool(
+                "web_fetch",
+                "抓取指定 URL，提取正文转 Markdown。" +
+                        "适用静态 / SSR 页面（博客、文档、官网）；JS 渲染或防爬站会返回空正文，本期不重试。",
+                createParameters(
+                        new Param("url", "string", "完整 URL，需 http 或 https 协议", true),
+                        new Param("max_chars", "integer", "返回 Markdown 最大字符数（默认 8000，超出截断）", false)
+                ),
+                args -> webFetch(args.get("url"), parseInt(args.get("max_chars"), DEFAULT_FETCH_MAX_CHARS))
         ));
     }
 
-    /**
-     * 从环境变量或 .env 文件读取 SerpAPI Key
-     */
-    private String loadWebSearchApiKey() {
-        // 优先系统环境变量
-        String apiKey = System.getenv("SERPAPI_KEY");
-        if (apiKey != null && !apiKey.isBlank()) {
-            return apiKey.trim();
+    private static int parseInt(String value, int fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
         }
-
-        // 降级读 .env 文件
-        String dotEnvValue = readFromDotEnv("SERPAPI_KEY");
-        if (dotEnvValue != null && !dotEnvValue.isBlank()) {
-            return dotEnvValue.trim();
-        }
-
-        return null;
     }
 
-    /**
-     * 从 .env 文件读取指定 key
-     */
-    private static String readFromDotEnv(String key) {
-        File[] envFiles = { new File(".env"), new File(System.getProperty("user.home"), ".env") };
-        for (File envFile : envFiles) {
-            if (!envFile.exists()) continue;
-            try (BufferedReader reader = new BufferedReader(new java.io.FileReader(envFile))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    line = line.trim();
-                    if (line.isEmpty() || line.startsWith("#")) continue;
-                    if (line.startsWith(key + "=")) {
-                        return line.substring((key + "=").length()).trim();
-                    }
-                }
-            } catch (Exception ignored) {}
+    private synchronized SearchProvider searchProvider() {
+        if (searchProvider == null) {
+            searchProvider = SearchProviderFactory.create();
         }
-        return null;
+        return searchProvider;
+    }
+
+    private synchronized WebFetcher webFetcher() {
+        if (webFetcher == null) {
+            webFetcher = new WebFetcher();
+        }
+        return webFetcher;
+    }
+
+    private synchronized HtmlExtractor htmlExtractor() {
+        if (htmlExtractor == null) {
+            htmlExtractor = new HtmlExtractor();
+        }
+        return htmlExtractor;
+    }
+
+    private synchronized NetworkPolicy networkPolicy() {
+        if (networkPolicy == null) {
+            networkPolicy = new NetworkPolicy();
+        }
+        return networkPolicy;
+    }
+
+    String webSearch(String query, int topK) {
+        if (query == null || query.isBlank()) {
+            return "搜索关键词不能为空";
+        }
+        SearchProvider provider = searchProvider();
+        if (!provider.isReady()) {
+            return "⚠️ " + provider.unavailableHint();
+        }
+        try {
+            List<SearchResult> results = provider.search(query.trim(), topK);
+            return formatSearchResults(provider.name(), query, results);
+        } catch (Exception e) {
+            return "搜索失败 (" + provider.name() + "): " + e.getMessage();
+        }
+    }
+
+    private String formatSearchResults(String providerName, String query, List<SearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return "🔍 [" + providerName + "] " + query + "\n\n未找到相关结果。";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("🔍 [").append(providerName).append("] ").append(query).append("\n\n");
+        for (SearchResult r : results) {
+            sb.append(r.position()).append(". ").append(r.title()).append("\n");
+            if (!r.snippet().isBlank()) {
+                String snippet = r.snippet();
+                if (snippet.length() > 200) {
+                    snippet = snippet.substring(0, 200) + "...";
+                }
+                sb.append("   ").append(snippet).append("\n");
+            }
+            if (!r.url().isBlank()) {
+                sb.append("   🔗 ").append(r.url());
+                if (!r.source().isBlank()) {
+                    sb.append("  (").append(r.source()).append(")");
+                }
+                sb.append("\n");
+            }
+            sb.append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    String webFetch(String url, int maxChars) {
+        if (url == null || url.isBlank()) {
+            return "URL 不能为空";
+        }
+        NetworkPolicy policy = networkPolicy();
+        String denyReason = policy.checkUrl(url);
+        if (denyReason != null) {
+            return "❌ 网络访问被拒绝: " + denyReason;
+        }
+        String rateReason = policy.acquire();
+        if (rateReason != null) {
+            return "❌ " + rateReason;
+        }
+
+        try {
+            WebFetcher.RawResponse raw = webFetcher().fetch(url.trim());
+            HtmlExtractor.Extracted extracted = htmlExtractor().extract(raw.body(), raw.url());
+            String markdown = extracted.markdown();
+            int originalLength = markdown.length();
+            boolean truncated = false;
+            if (maxChars > 0 && markdown.length() > maxChars) {
+                markdown = markdown.substring(0, maxChars);
+                truncated = true;
+            }
+            FetchResult result = FetchResult.ok(raw.url(), extracted.title(), markdown, originalLength, truncated);
+            return formatFetchResult(result);
+        } catch (Exception e) {
+            return "抓取失败: " + e.getMessage();
+        }
+    }
+
+    private String formatFetchResult(FetchResult result) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("🌐 抓取: ").append(result.url()).append("\n");
+        if (!result.title().isBlank()) {
+            sb.append("📄 标题: ").append(result.title()).append("\n");
+        }
+        if (result.bodyEmpty()) {
+            sb.append("\n⚠️ ").append(result.hint()).append("\n");
+            return sb.toString();
+        }
+        sb.append("📏 正文 ").append(result.contentLength()).append(" 字符");
+        if (result.truncated()) {
+            sb.append("（已截断）");
+        }
+        sb.append("\n\n---\n\n");
+        sb.append(result.markdown());
+        return sb.toString();
     }
 
     /**

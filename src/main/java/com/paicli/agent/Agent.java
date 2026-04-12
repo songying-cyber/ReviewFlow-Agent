@@ -41,6 +41,8 @@ public class Agent {
             4. execute_command - 执行Shell命令
             5. create_project - 创建新项目结构
             6. search_code - 语义检索代码库，参数：{"query": "自然语言描述", "top_k": 5}
+            7. web_search - 搜索互联网获取实时信息（最新版本、官方文档、技术资讯等），参数：{"query": "搜索关键词", "top_k": 5}
+            8. web_fetch - 抓取已知 URL 并返回正文 Markdown，参数：{"url": "https://...", "max_chars": 8000}
 
             当需要操作文件、执行命令或创建项目时，请使用工具调用。
             使用工具后，根据工具返回的结果继续思考下一步行动。
@@ -50,8 +52,12 @@ public class Agent {
             如果需要同时检查多个已知且互不依赖的文件或目录（例如同时读取 pom.xml、README.md、ROADMAP.md，
             或同时列出 src/main/java、src/test/java、src/main/resources），请在同一轮返回多个 read_file/list_dir 工具调用。
 
-            如果用户询问与代码库相关的问题（如"这个类是干什么的"、"哪里用了某个功能"），
-            请优先使用 search_code 工具检索相关代码，再基于检索结果回答。
+            工具选择优先级：
+            - 代码库相关问题（"这个类是干什么的"、"哪里用了某个功能"）→ search_code，不要走 web_search
+            - 训练数据已知的稳定知识（语法、稳定 API、基础概念）→ 直接回答，不要联网
+            - 时效性 / 最新信息 / 不确定的事实 → web_search 找入口，找到 URL 后再 web_fetch 拿全文
+            - 已经有具体 URL → 直接 web_fetch，不要再 web_search 一次
+            - web_fetch 拿到空正文（提示 SPA / 防爬墙）→ 这是已知边界，告知用户即可，不要反复重试
 
             如果提供了相关记忆，请参考其中的信息来辅助决策。
 
@@ -341,6 +347,8 @@ public class Agent {
             case "execute_command" -> "⚡ 执行 " + count + " 条命令";
             case "create_project" -> "🏗️ 创建 " + count + " 个项目";
             case "search_code" -> "🔍 搜索代码 " + count + " 次";
+            case "web_search" -> "🌐 联网搜索 " + count + " 次";
+            case "web_fetch" -> "📰 抓取 " + count + " 个网页";
             default -> "🔧 " + toolName + " × " + count;
         };
     }
@@ -352,7 +360,8 @@ public class Agent {
                 case "read_file", "write_file", "list_dir" -> "path";
                 case "execute_command" -> "command";
                 case "create_project" -> "name";
-                case "search_code" -> "query";
+                case "search_code", "web_search" -> "query";
+                case "web_fetch" -> "url";
                 default -> null;
             };
             if (key == null) {

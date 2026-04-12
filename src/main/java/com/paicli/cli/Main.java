@@ -33,11 +33,12 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * PaiCLI v7.0.0 - Async Tool CLI
- * 支持 ReAct、Plan-and-Execute、Memory、RAG、Multi-Agent、HITL 与并行工具调用能力
+ * PaiCLI v9.0.0 - Web-aware Tool CLI
+ * 支持 ReAct、Plan-and-Execute、Memory、RAG、Multi-Agent、HITL、并行工具调用、多模型切换
+ * 第 9 期新增：web_search（SerpAPI/SearXNG 双 provider）、web_fetch（HTTP + readability）
  */
 public class Main {
-    private static final String VERSION = "8.0.0";
+    private static final String VERSION = "9.0.0";
     private static final String ENV_FILE = ".env";
     private static final String LOG_DIR_PROPERTY = "paicli.log.dir";
     private static final String LOG_LEVEL_PROPERTY = "paicli.log.level";
@@ -815,7 +816,7 @@ public class Main {
         System.out.println("║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║");
         System.out.println("║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║");
         System.out.println("║                                                          ║");
-        System.out.printf("║      Async Tool CLI %-37s║%n", "v" + VERSION);
+        System.out.printf("║      Web-aware Tool CLI %-33s║%n", "v" + VERSION);
         System.out.println("║                                                          ║");
         System.out.println("╚══════════════════════════════════════════════════════════╝");
         System.out.println();

@@ -1,13 +1,13 @@
 # PaiCLI
 
-一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第七期的 `异步执行 + 并行工具调用`。
+一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第九期的 `联网能力 + Web 工具`。
 
 ## 演进历程
 
 ### 第一期：ReAct Agent CLI
 
 - 单轮对话驱动的 `ReAct` 循环
-- 支持工具调用：读文件、写文件、列目录、执行命令、创建项目
+- 支持工具调用：读文件、写文件、列目录、执行命令、创建项目、代码语义检索、联网搜索
 - 更适合简单任务或单步操作
 
 ### 第二期：Plan-and-Execute + DAG
@@ -59,6 +59,20 @@
 - 批量工具调用有统一超时与取消兜底，单个 `execute_command` 仍保留 60 秒命令级超时
 - Plan-and-Execute 与 Multi-Agent 已支持按依赖批次并行执行独立任务
 
+### 第八期：多模型适配 + 运行时切换
+
+- `LlmClient` 接口抽象 + `AbstractOpenAiCompatibleClient` 模板基类
+- 内置 `GLMClient`、`DeepSeekClient` 两个瘦实现，各约 20 行
+- `/model glm` / `/model deepseek` 运行时切换当前对话模型
+- 配置持久化到 `~/.paicli/config.json`，API Key 从 `.env` 回退读取
+
+### 第九期：联网能力 + Web 工具
+
+- `web_search` 抽象成 `SearchProvider` 接口，内置三个实现：智谱 Web Search（默认，与 GLM 共用 Key，0.01–0.05 元/次）、SerpAPI（国际通用付费）、SearXNG（开源自托管免费）
+- `web_fetch` 新工具：URL → OkHttp 抓取 → Jsoup 解析 → 简易 readability → Markdown 正文
+- 默认安全策略：屏蔽 `file://` / 内网 / loopback；30 秒超时；5MB 响应上限；每分钟 30 次限流
+- 边界明确：SPA / 防爬墙站点会返回空正文 + 已知边界提示，不反复重试，留给后续 CDP 路线
+
 ## 启动界面
 
 ### 当前启动界面
@@ -75,7 +89,7 @@
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      Async Tool CLI v7.0.0                            ║
+║      Web-aware Tool CLI v9.0.0                        ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -88,7 +102,7 @@
 
 - 🤖 基于 GLM-5.1 的智能对话
 - 🔄 ReAct Agent 循环（思考-行动-观察）
-- 🛠️ 工具调用（文件操作、Shell命令、项目创建）
+- 🛠️ 工具调用（文件操作、Shell命令、项目创建、代码语义检索、联网搜索）
 - 💬 交互式命令行界面
 - 🧠 默认通过流式接口获取模型输出；ReAct 与用户可见的 Plan 阶段都会按流式展示思考过程与最终回复；ReAct 同一次用户输入只打印一次 `🧠 思考过程` 标题，工具调用前后的后续推理继续归在同一块下
 - 🖥️ 终端会对常见 Markdown（标题、列表、表格、代码块）做渲染后再显示，避免直接暴露原始标记符号
@@ -133,6 +147,19 @@
 - 🧵 ReAct、Plan-and-Execute、Multi-Agent Worker 共用同一套并行工具执行机制
 - ⏱️ 工具批次有统一超时，超时工具会被取消并把超时结果回灌给模型
 - 📋 Plan-and-Execute 与 Multi-Agent 会按 DAG 依赖批次并行推进独立任务
+
+### 第八期
+
+- 🔄 GLM-5.1 与 DeepSeek V4 双模型，`/model glm` / `/model deepseek` 运行时切换
+- 🧱 `LlmClient` 接口 + 模板方法基类，新增 provider 只需 ~20 行
+- 💾 默认模型持久化到 `~/.paicli/config.json`
+
+### 第九期
+
+- 🌐 `web_search` 工具支持三条路：智谱 Web Search（与 GLM 共用 Key 默认推荐）、SerpAPI（国际通用付费）、SearXNG（开源自托管免费）
+- 📰 `web_fetch` 工具：抓 URL → readability 提取 → 返回 Markdown 正文
+- 🛡️ 内置网络访问策略：屏蔽内网、loopback、`file://`；5MB 响应上限；每分钟 30 次限流
+- 🚧 边界明确：SPA / 防爬墙返回空正文 + 已知边界提示，不重试
 
 ## 快速开始
 

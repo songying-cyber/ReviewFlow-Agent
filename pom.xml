@@ -75,6 +75,21 @@
             <artifactId>javaparser-core</artifactId>
             <version>3.28.0</version>
         </dependency>
+
+        <!-- HTML 解析（用于 web_fetch 正文提取） -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.18.1</version>
+        </dependency>
+
+        <!-- OkHttp MockWebServer（仅测试） -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>mockwebserver</artifactId>
+            <version>4.12.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

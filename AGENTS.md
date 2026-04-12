@@ -25,8 +25,8 @@
 
 - 项目名：`PaiCLI`
 - 定位：一个教学导向的 Java Agent CLI，目标是从简单 Agent CLI 逐步演进到更完整的 Agent 产品
-- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`、第 5 期 `Multi-Agent 协作 + 角色分工`、第 6 期 `HITL 人工审批 + 危险操作拦截`、第 7 期 `异步执行 + 并行工具调用`
-- 当前用户可感知版本：CLI Banner 显示 `v7.0.0`
+- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`、第 5 期 `Multi-Agent 协作 + 角色分工`、第 6 期 `HITL 人工审批 + 危险操作拦截`、第 7 期 `异步执行 + 并行工具调用`、第 8 期 `多模型适配 + 运行时切换`、第 9 期 `联网能力 + Web 工具`
+- 当前用户可感知版本：CLI Banner 显示 `v9.0.0`
 - 当前 Maven 产物版本：`pom.xml` 仍是 `1.0-SNAPSHOT`
 - 结论：如果你看到运行界面是 `v7.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
 
@@ -83,6 +83,35 @@ ReAct / SubAgent 预算配置读取顺序（以代码实际行为为准）：
 
 1. 系统属性：`paicli.react.token.budget`、`paicli.react.stagnation.window`、`paicli.react.hard.max.iterations`
 2. 默认值：`300000` / `3` / `50`
+
+LLM HTTP 超时配置读取顺序（以代码实际行为为准）：
+
+1. 系统属性：`paicli.llm.connect.timeout.seconds`、`paicli.llm.read.timeout.seconds`、`paicli.llm.write.timeout.seconds`、`paicli.llm.call.timeout.seconds`
+2. 默认值：`60` / `300` / `60` / `600`（单位：秒）
+
+注意：SSE 流式接口下，OkHttp 的 `readTimeout` 是"两次 read 之间最大间隔"而非请求总时长；GLM-5.1 在生成大段 reasoning_content 时服务端可能长时间静默，所以默认值放宽到 300 秒，再用 `callTimeout` 兜底整个请求。
+
+Web 搜索 provider 配置读取顺序（以代码实际行为为准）：
+
+1. 环境变量 / 系统属性 / `.env` 中的 `SEARCH_PROVIDER`：显式指定 `zhipu` / `serpapi` / `searxng`
+2. 未指定时按 Key/URL 自动判断（优先级从高到低）：
+   - `GLM_API_KEY` 存在 → `zhipu`（智谱 Web Search，与 GLM 推理共用 Key，国内首选）
+   - `SERPAPI_KEY` 存在 → `serpapi`
+   - `SEARXNG_URL` 存在 → `searxng`
+3. 都没有时返回 `zhipu` 占位 provider，`web_search` 工具会提示用户配置
+
+各 provider 配置读取顺序（环境变量 / 系统属性 / `.env`）：
+- `zhipu`：`GLM_API_KEY`（必填，与 LLM 推理共用）+ `ZHIPU_SEARCH_ENGINE`（可选，默认 `search_std`，可选 `search_pro` / `search_pro_sogou` / `search_pro_quark`）
+- `serpapi`：`SERPAPI_KEY`
+- `searxng`：`SEARXNG_URL`（推荐本地 `docker run --rm -p 8888:8888 searxng/searxng`）
+
+Web 抓取（`web_fetch`）安全策略（实现位于 `src/main/java/com/paicli/web/NetworkPolicy.java`）：
+
+- scheme 白名单：仅允许 `http` / `https`
+- 主机黑名单：屏蔽 `localhost`、`0.0.0.0`、loopback / link-local / site-local 地址（基础 SSRF 围栏，不防 DNS rebinding）
+- 响应体上限：5MB（流式截断，避免 OOM）
+- 整体超时：30 秒（OkHttp `callTimeout`）
+- 限流：默认每 60 秒最多 30 次请求
 
 ## 常用命令
 
@@ -168,8 +197,14 @@ mvn test -Dtest=ExecutionPlanTest
   - `/index [路径]`：索引代码库
   - `/search <查询>`：语义检索代码
   - `/graph <类名>`：查看代码关系图谱
-- Agent 工具：`search_code`（语义检索代码库）
+- Agent 工具：`search_code`（语义检索代码库）、`web_search`（联网搜索）、`web_fetch`（抓取已知 URL）
 - 在 ReAct 和 Plan 模式下，Agent 会自动检索代码上下文辅助回答
+- `web_search` 通过 `SearchProvider` 抽象接入，当前内置三个实现：
+  - `zhipu`（默认，与 GLM 推理共用 `GLM_API_KEY`，0.01–0.05 元/次，中文搜索质量高，国内首选）
+  - `serpapi`（国际通用，需 `SERPAPI_KEY`，付费即开即用）
+  - `searxng`（开源自托管，需 `SEARXNG_URL`，免费但需本地 docker 实例）
+  - Provider 不可用时工具返回引导提示，不会让整轮 Agent 失败
+- `web_fetch` 走「OkHttp + Jsoup + 简易 readability」本地链路，对静态/SSR 页面有效；遇到 SPA / 防爬墙会返回空正文 + `已知边界` 提示，不会反复重试。JS 渲染 / 登录态访问留给第 13/14 期 CDP 路线
 
 ### 6. Multi-Agent 协作模式
 
@@ -227,6 +262,16 @@ mvn test -Dtest=ExecutionPlanTest
 - `AgentOrchestrator` 已支持 Multi-Agent 同一依赖批次内部并行执行，默认最多 2 个 Worker 并发
 - HITL 场景下危险工具仍会通过 `HitlToolRegistry.executeTool()` 透明拦截；终端审批由 `TerminalHitlHandler.requestApproval` 串行化，避免多线程同时抢 stdin/stdout
 
+### 9. 联网能力（web_search + web_fetch）
+
+- 主模块在 `src/main/java/com/paicli/web/`
+- `SearchProvider` 接口 + 工厂：默认 `ZhipuSearchProvider`（与 GLM 推理共用 Key，国内首选），可切 `SerpApiSearchProvider` 或 `SearxngSearchProvider`，未来加 Brave / Tavily 只需实现接口
+- `web_search` 工具不再返回拼接字符串，而是 provider 返回 `SearchResult` 列表（带 position / title / url / snippet / source），由 ToolRegistry 统一格式化
+- `web_fetch` 工具链路：`NetworkPolicy.checkUrl()` → `acquire()`（限流）→ `WebFetcher.fetch()` → `HtmlExtractor.extract()`，全部本地，无第三方服务依赖
+- `HtmlExtractor` 是简化版 readability：先按 `<article>` / `<main>` / `[role=main]` 选语义容器，否则按文本长度 - 链接占比惩罚 给 div/section 打分；最后递归转 Markdown（保留 h1-h6、列表、链接、代码块、表格）
+- 边界明确：SPA / 防爬墙会返回 `body_empty: true` + `已知边界`提示，调用方不重试。JS 渲染 / 登录态留给第 13/14 期 CDP 路线
+- 教学取舍：不做 LLM 二次摘要工具（混淆"工具 = 副作用"边界）；不引入 Jina（路线重叠，留到第 15 期 Skill 章节里作为 fallback）
+
 ## 仓库结构
 
 ```text
@@ -274,6 +319,17 @@ src/main/java/com/paicli
 │   ├── HitlHandler.java
 │   ├── TerminalHitlHandler.java
 │   └── HitlToolRegistry.java
+└── web/
+    ├── SearchProvider.java
+    ├── ZhipuSearchProvider.java
+    ├── SerpApiSearchProvider.java
+    ├── SearxngSearchProvider.java
+    ├── SearchProviderFactory.java
+    ├── SearchResult.java
+    ├── WebFetcher.java
+    ├── HtmlExtractor.java
+    ├── NetworkPolicy.java
+    └── FetchResult.java
 ```
 
 测试目前主要覆盖：
@@ -292,6 +348,7 @@ src/main/java/com/paicli
 - `AgentMessageTest`
 - `AgentOrchestratorTest`
 - `EmbeddingClientTest`
+- `SearchResultTest`、`NetworkPolicyTest`、`HtmlExtractorTest`、`WebFetcherTest`、`SearchProviderFactoryTest`、`ZhipuSearchProviderTest`
 - `VectorStoreTest`
 - `CodeChunkerTest`
 - `CodeAnalyzerTest`
@@ -372,7 +429,7 @@ src/main/java/com/paicli
 
 ### `src/main/java/com/paicli/tool/ToolRegistry.java`
 
-当前内置工具只有 6 个：
+当前内置工具有 8 个：
 
 - `read_file`
 - `write_file`
@@ -380,6 +437,8 @@ src/main/java/com/paicli
 - `execute_command`（在当前项目目录执行短时命令，默认 60 秒超时，不允许扫描 `/`、`~` 或整个文件系统）
 - `create_project`
 - `search_code`
+- `web_search`（通过 `SearchProvider` 抽象，支持 SerpAPI 与 SearXNG 两种实现；provider 未就绪时返回引导提示而非抛错）
+- `web_fetch`（抓取 URL → 提取正文 → Markdown，本地实现；遇 SPA/防爬墙返回空正文 + 边界提示）
 
 第七期新增的并行执行入口也在这里：
 
@@ -481,7 +540,18 @@ src/main/java/com/paicli
 - `README.md`
 - `AGENTS.md`
 
-### 5.2 改 Memory 持久化或预算策略，要联动这几处
+### 5.2 改搜索 / 抓取或网络策略，要联动这几处
+
+如果新增 SearchProvider 实现，或调整 NetworkPolicy / WebFetcher 行为：
+
+- `src/main/java/com/paicli/web/` 下相关文件
+- `ToolRegistry.java` 的 `webSearch` / `webFetch` 实现
+- `SearchProviderFactory.pickProvider` 的环境变量优先级
+- `.env.example`：补充新的环境变量示例
+- `README.md` 与 `AGENTS.md`：工具列表 / 安全策略段落
+- 至少补一个相应的单元测试
+
+### 5.3 改 Memory 持久化或预算策略，要联动这几处
 
 - `MemoryManager.java`
 - `LongTermMemory.java`
