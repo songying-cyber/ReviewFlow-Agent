@@ -58,9 +58,11 @@ class PlanExecuteAgentTest {
                 128000,
                 new LongTermMemory(tempDir.resolve("memory-store").toFile())
         );
+        ToolRegistry toolRegistry = new ToolRegistry();
+        toolRegistry.setProjectPath(tempDir.toString());
         PlanExecuteAgent agent = new PlanExecuteAgent(
                 llmClient,
-                new ToolRegistry(),
+                toolRegistry,
                 new StubPlanner(llmClient),
                 memoryManager,
                 (goal, plan) -> PlanExecuteAgent.PlanReviewDecision.execute()

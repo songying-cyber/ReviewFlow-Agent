@@ -17,7 +17,9 @@ final class CliCommandParser {
         INDEX_CODE,
         SEARCH_CODE,
         GRAPH_QUERY,
-        CONTEXT_STATUS
+        CONTEXT_STATUS,
+        POLICY_STATUS,
+        AUDIT_TAIL
     }
 
     record ParsedCommand(CommandType type, String payload) {
@@ -128,6 +130,18 @@ final class CliCommandParser {
 
         if (trimmed.equalsIgnoreCase("/context") || trimmed.equalsIgnoreCase("/ctx")) {
             return new ParsedCommand(CommandType.CONTEXT_STATUS, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/policy")) {
+            return new ParsedCommand(CommandType.POLICY_STATUS, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/audit")) {
+            return new ParsedCommand(CommandType.AUDIT_TAIL, null);
+        }
+
+        if (trimmed.regionMatches(true, 0, "/audit ", 0, 7)) {
+            return new ParsedCommand(CommandType.AUDIT_TAIL, trimmed.substring(7).trim());
         }
 
         if (trimmed.startsWith("/")) {

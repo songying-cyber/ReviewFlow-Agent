@@ -25,10 +25,10 @@
 
 - 项目名：`PaiCLI`
 - 定位：一个教学导向的 Java Agent CLI，目标是从简单 Agent CLI 逐步演进到更完整的 Agent 产品
-- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`、第 5 期 `Multi-Agent 协作 + 角色分工`、第 6 期 `HITL 人工审批 + 危险操作拦截`、第 7 期 `异步执行 + 并行工具调用`、第 8 期 `多模型适配 + 运行时切换`、第 9 期 `联网能力 + Web 工具`
+- 当前主线：已完成第 1 期 `ReAct`、第 2 期 `Plan-and-Execute + DAG`、第 3 期 `Memory + 上下文工程`、第 4 期 `RAG 检索 + 代码库理解`、第 5 期 `Multi-Agent 协作 + 角色分工`、第 6 期 `HITL 人工审批 + 危险操作拦截`（含 HITL 增强：路径围栏 / 命令快速拒绝 / 操作审计）、第 7 期 `异步执行 + 并行工具调用`、第 8 期 `多模型适配 + 运行时切换`、第 9 期 `联网能力 + Web 工具`
 - 当前用户可感知版本：CLI Banner 显示 `v9.0.0`
 - 当前 Maven 产物版本：`pom.xml` 仍是 `1.0-SNAPSHOT`
-- 结论：如果你看到运行界面是 `v7.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
+- 结论：如果你看到运行界面是 `v9.0.0`，但 Jar 名仍是 `paicli-1.0-SNAPSHOT.jar`，这是当前仓库的真实状态，不是你看错
 
 ## 运行前提
 
@@ -66,6 +66,12 @@ EMBEDDING_BASE_URL=http://localhost:11434
 
 1. `~/.paicli/rag/codebase.db`
 2. 如果传入 `-Dpaicli.rag.dir=/path/to/dir`，则优先使用该目录
+
+操作审计日志默认持久化位置（以代码实际行为为准）：
+
+1. 系统属性：`-Dpaicli.audit.dir=/path/to/dir`
+2. 环境变量：`PAICLI_AUDIT_DIR`
+3. 默认值：`~/.paicli/audit/audit-YYYY-MM-DD.jsonl`（按天分文件，JSONL 格式）
 
 Embedding 配置读取顺序（以代码实际行为为准）：
 
@@ -248,6 +254,22 @@ mvn test -Dtest=ExecutionPlanTest
 - 审批框上方会打印 `────────── ⚠️ HITL 审批请求 ──────────` 作为视觉分隔符，与上游 `🤖 回复` / `执行输出` 区视觉分离
 - 流式渲染器在进入 tool-call 迭代前会调用 `resetBetweenIterations()`：`TerminalMarkdownRenderer` 按换行才 flush，没做这一步 HITL 提示会"跨过"还在 pending 缓冲区里的 reasoning/content 文本，造成标题与内容错位。Agent / SubAgent / PlanExecuteAgent 三条路径都做了相同处理；其中 ReAct 会重建渲染器但不会重复打印同一次用户输入的 `🧠 思考过程` 标题
 
+#### 7.1 HITL 增强：路径围栏 / 命令快速拒绝 / 操作审计
+
+HITL 是"用户在场时确认"，本子段是 HITL 之外的辅助层，不是沙箱、不提供进程隔离。主模块在 `src/main/java/com/paicli/policy/`：
+
+- `PathGuard`：`read_file` / `write_file` / `list_dir` / `create_project` 在执行前必须经过它，强制把路径限定在项目根之内。处理三类越界——绝对路径外逃、`..` 穿越、符号链接逃逸（向上找最近存在祖先做 `Files.toRealPath`，再把剩余段接回）
+- `CommandGuard`：`execute_command` 进入 HITL 之前的 fast-fail 黑名单（sudo / rm -rf 全盘 / mkfs / dd of=/dev / fork bomb / curl|sh / find / / chmod 777 / / shutdown）。**定位是辅助 HITL，不是主防线**——黑名单永远列不全（base64 解码后执行、`eval`、写 `~/.bashrc` 持久化等都漏），它只是减少 HITL 弹窗骚扰。真正的安全责任在 HITL 审批
+- `ResourceLimit` 类约束：`write_file` 单文件 5MB；`execute_command` 60 秒超时 + 8KB 输出截断（与第 7 期共用）
+- `AuditLog`：危险工具（`write_file` / `execute_command` / `create_project`）调用一律落一行 JSONL 到 `~/.paicli/audit/audit-YYYY-MM-DD.jsonl`，字段：`timestamp / tool / args / outcome (allow|deny|error) / reason / approver (hitl|policy|none) / durationMs`。审计写入失败仅 stderr 提示，不影响主流程
+- 拦截出口：`PathGuard` / `CommandGuard` / 文件大小限制 都抛 `PolicyException`（`RuntimeException` 子类），由 `ToolRegistry.executeTool` 统一 catch、写 deny 审计、返回 `🛡️ 策略拒绝: ...`
+- 与 HITL 协同顺序：`HitlToolRegistry` → `ToolRegistry` → 策略层。HITL 拒绝/跳过写 `approver=hitl` 审计；HITL 通过后策略层仍校验，**用户无法批准策略拒绝的请求**
+- CLI 命令：
+  - `/policy`：查看安全策略状态（项目根 / 危险工具 / 黑名单 / 审计目录）
+  - `/audit [N]`：看今日最近 N 条审计（默认 10，最大 100）
+- 提示词联动：`Agent` / `PlanExecuteAgent` / `SubAgent` 三处都告知 LLM 安全策略硬规则与 `🛡️ 策略拒绝` 输出格式，避免 LLM 原样重试同一条违规请求
+- **不做沙箱的取舍**：本地 Agent CLI（参考 Claude Code / Cursor / Aider）默认都不做容器/VM 沙箱——沙箱削弱 Agent 能力（不能装依赖、不能跑全局命令）、给虚假安全感（容器逃逸真实存在）、体验更差。生产级 Agent 沙箱实际是 microVM-level（Devin / Modal / Anthropic Computer Use 用 Firecracker / gVisor），不是 Docker-level。想做隔离请参考 ROADMAP 末尾「Pro 升级版本」
+
 ### 8. 异步执行与并行工具调用
 
 - 主入口在 `src/main/java/com/paicli/tool/ToolRegistry.java`
@@ -270,7 +292,7 @@ mvn test -Dtest=ExecutionPlanTest
 - `web_fetch` 工具链路：`NetworkPolicy.checkUrl()` → `acquire()`（限流）→ `WebFetcher.fetch()` → `HtmlExtractor.extract()`，全部本地，无第三方服务依赖
 - `HtmlExtractor` 是简化版 readability：先按 `<article>` / `<main>` / `[role=main]` 选语义容器，否则按文本长度 - 链接占比惩罚 给 div/section 打分；最后递归转 Markdown（保留 h1-h6、列表、链接、代码块、表格）
 - 边界明确：SPA / 防爬墙会返回 `body_empty: true` + `已知边界`提示，调用方不重试。JS 渲染 / 登录态留给第 13/14 期 CDP 路线
-- 教学取舍：不做 LLM 二次摘要工具（混淆"工具 = 副作用"边界）；不引入 Jina（路线重叠，留到第 15 期 Skill 章节里作为 fallback）
+- 教学取舍：不做 LLM 二次摘要工具（混淆"工具 = 副作用"边界）；不引入 Jina（路线重叠，留到第 13 期 Skill 章节里作为 fallback）
 
 ## 仓库结构
 
@@ -319,17 +341,22 @@ src/main/java/com/paicli
 │   ├── HitlHandler.java
 │   ├── TerminalHitlHandler.java
 │   └── HitlToolRegistry.java
-└── web/
-    ├── SearchProvider.java
-    ├── ZhipuSearchProvider.java
-    ├── SerpApiSearchProvider.java
-    ├── SearxngSearchProvider.java
-    ├── SearchProviderFactory.java
-    ├── SearchResult.java
-    ├── WebFetcher.java
-    ├── HtmlExtractor.java
-    ├── NetworkPolicy.java
-    └── FetchResult.java
+├── web/
+│   ├── SearchProvider.java
+│   ├── ZhipuSearchProvider.java
+│   ├── SerpApiSearchProvider.java
+│   ├── SearxngSearchProvider.java
+│   ├── SearchProviderFactory.java
+│   ├── SearchResult.java
+│   ├── WebFetcher.java
+│   ├── HtmlExtractor.java
+│   ├── NetworkPolicy.java
+│   └── FetchResult.java
+└── policy/
+    ├── PolicyException.java
+    ├── PathGuard.java
+    ├── CommandGuard.java
+    └── AuditLog.java
 ```
 
 测试目前主要覆盖：
@@ -358,8 +385,9 @@ src/main/java/com/paicli
 - `HitlToolRegistryTest`
 - `TerminalHitlHandlerTest`
 - `ToolRegistryTest`
+- `PathGuardTest`、`CommandGuardTest`、`AuditLogTest`
 
-这意味着当前自动化测试更偏解析、计划结构、RAG 核心模块、Multi-Agent 编排逻辑和 HITL 审批策略，不覆盖真实 LLM 联调、真实 Embedding API 联调，也不覆盖终端交互的完整手工体验。
+这意味着当前自动化测试更偏解析、计划结构、RAG 核心模块、Multi-Agent 编排逻辑、HITL 审批策略和策略层拦截规则，不覆盖真实 LLM 联调、真实 Embedding API 联调，也不覆盖终端交互的完整手工体验。
 
 ## 核心文件说明
 
@@ -463,7 +491,7 @@ src/main/java/com/paicli
 下面这些内容在路线图里出现了，但当前仓库还没有真正交付：
 
 - 持久化后台任务队列 / 跨会话异步长任务调度
-- 沙箱与权限控制
+- 容器 / VM 沙箱：本地 Agent CLI 默认不做容器隔离（参考 Claude Code / Cursor / Aider）；想做隔离请参考 ROADMAP 末尾「Pro 升级版本」或自行实现 `SandboxDriver` 接口
 - MCP 接入
 - TUI 产品化界面
 
@@ -481,7 +509,7 @@ src/main/java/com/paicli
 
 ### 2. 改命令入口，要联动这几处
 
-如果修改 `/plan`、`/team`、`/hitl`、`/clear`、`/memory`、`/save`、`/index`、`/search`、`/graph`、`/exit` 或输入解析：
+如果修改 `/plan`、`/team`、`/hitl`、`/policy`、`/audit`、`/clear`、`/memory`、`/save`、`/index`、`/search`、`/graph`、`/exit` 或输入解析：
 
 - `Main.java`
 - `CliCommandParser.java`
@@ -559,6 +587,19 @@ src/main/java/com/paicli
 - 至少一个 memory 测试
 - `README.md`
 - `AGENTS.md`
+
+### 5.4 改 HITL 增强（路径围栏 / 命令黑名单 / 审计 / 资源上限），要联动这几处
+
+如果新增黑名单规则、调整 PathGuard 行为、改 AuditLog 字段、或加新的资源上限：
+
+- `src/main/java/com/paicli/policy/` 下相关文件
+- `ToolRegistry.java`：执行入口与拦截路径
+- `HitlToolRegistry.java`：HITL 审批与策略层审计的协同
+- `Agent.java` / `PlanExecuteAgent.java` / `SubAgent.java` 的系统提示词：让 LLM 知道新增规则与 `🛡️ 策略拒绝` 输出格式
+- `Main.java`：如果新增 `/policy` 子命令或 `/audit` 行为变化
+- `.env.example`：新增的环境变量示例（如 `PAICLI_AUDIT_DIR`）
+- `README.md` 与 `AGENTS.md`：HITL 增强子段 + 命令列表
+- 至少补一个对应的单元测试（`PathGuardTest` / `CommandGuardTest` / `AuditLogTest`）
 
 ### 6. 不要提交敏感信息或产物垃圾
 

@@ -1,4 +1,4 @@
-# PaiCLI 迭代路线图（16期教程）
+# PaiCLI 迭代路线图（14期教程）
 
 从零开始，逐步构建生产级 Java Agent CLI
 
@@ -116,10 +116,24 @@
 - HITL 默认关闭，`/hitl on|off` 运行时切换
 - `HitlToolRegistry` 透明拦截层，HITL 关闭时与普通 `ToolRegistry` 行为完全相同
 
+**HITL 增强（后续补丁，归在本期叙事下）**：
+- `PathGuard` 路径围栏：`read_file` / `write_file` / `list_dir` / `create_project` 强制限定在项目根之内，拦截绝对路径越界、`..` 穿越、符号链接逃逸
+- `CommandGuard` 命令快速拒绝：HITL 之前的 fast-fail 黑名单（sudo / rm -rf 全盘 / mkfs / dd 写裸设备 / fork bomb / curl|sh / find / / chmod 777 / / shutdown），减少 HITL 弹窗骚扰
+- `AuditLog` 操作审计链：危险工具调用按天写 JSONL 到 `~/.paicli/audit/`，含 `outcome (allow|deny|error)` 与 `approver (hitl|policy|none)`
+- `write_file` 单文件 5MB 上限
+- CLI 命令：`/policy` 看安全策略状态、`/audit [N]` 看最近审计
+
+**为什么不叫沙箱**：
+- 真正的沙箱是隔离的执行环境（Docker / microVM / chroot），本地 Agent CLI（参考 Claude Code / Cursor / Aider）默认都不做沙箱——沙箱削弱 Agent 能力、给虚假安全感、体验更差
+- PaiCLI 的安全模型是 **HITL + 路径校验 + 命令快速拒绝 + 审计**，不是隔离
+- 想做容器隔离的请参考 Pro 升级版本章节，或自行实现 `SandboxDriver` 接口
+
 **核心知识点**：
 - HITL（人机协同）
 - 中断处理
 - 安全策略
+- 路径解析与符号链接安全（`Files.toRealPath` 防逃逸）
+- 结构化审计（JSONL、按天分文件、并发安全）
 
 **教程标题候选**：《Agent权限太大怕搞砸？加上人工审批，安全又放心》
 
@@ -192,46 +206,7 @@
 
 ---
 
-## 第10期：Spring AI + 框架升级
-
-**目标**：引入 Spring AI 框架，用框架替代手写实现
-
-**功能迭代**：
-- Spring Boot 化：项目整体迁移到 Spring Boot，CLI 入口改为 CommandLineRunner
-- Spring AI 接入：引入 spring-ai-openai-spring-boot-starter，用 ChatModel 适配
-- SpringAiLlmClient：作为第三个 LlmClient 实现，内部使用 ChatModel / StreamingChatModel
-- 依赖注入：用 Spring DI 替代手动 new，统一管理 Bean 生命周期
-
-**核心知识点**：
-- Spring AI 框架（ChatModel / StreamingChatModel / ToolCallback）
-- Spring Boot 自动配置
-- 依赖注入与 Bean 管理
-
-**教程标题候选**：《手写够了？上 Spring AI，框架帮你管模型、管工具、管配置》
-
----
-
-## 第11期：沙箱安全 + 权限控制
-
-**目标**：生产环境安全运行
-
-**功能迭代**：
-- Docker沙箱执行
-- 文件系统隔离
-- 网络访问控制
-- 资源限额（CPU/内存/时间）
-- 操作审计日志
-
-**核心知识点**：
-- 容器化隔离
-- 安全沙箱
-- 权限模型
-
-**教程标题候选**：《Agent乱执行命令很危险？关进Docker沙箱，想搞破坏也没门》
-
----
-
-## 第12期：MCP协议 + 生态接入
+## 第10期：MCP协议 + 生态接入
 
 **目标**：接入丰富的外部工具生态
 
@@ -251,9 +226,9 @@
 
 ---
 
-## 第13期：Chrome DevTools MCP
+## 第11期：Chrome DevTools MCP
 
-**前置依赖**：第12期已完成 MCP 客户端
+**前置依赖**：第10期已完成 MCP 客户端
 
 **目标**：让 Agent 能操控浏览器，处理需要 JS 渲染或 UI 交互的页面
 
@@ -272,9 +247,9 @@
 
 ---
 
-## 第14期：CDP 会话复用 + 登录态访问
+## 第12期：CDP 会话复用 + 登录态访问
 
-**前置依赖**：第13期 Chrome DevTools MCP 已能驱动浏览器
+**前置依赖**：第11期 Chrome DevTools MCP 已能驱动浏览器
 
 **目标**：让 Agent 复用用户已登录的 Chrome 实例，访问需要认证的页面
 
@@ -293,9 +268,9 @@
 
 ---
 
-## 第15期：Skill 系统 + web-access Skill
+## 第13期：Skill 系统 + web-access Skill
 
-**前置依赖**：第 9 期 web 工具、第 13 期 Chrome DevTools MCP、第 14 期 CDP 会话复用全部就绪
+**前置依赖**：第 9 期 web 工具、第 11 期 Chrome DevTools MCP、第 12 期 CDP 会话复用全部就绪
 
 **目标**：做出 PaiCLI 自己的 Skill 加载机制，把零散的工具与决策指引打包成可复用单元，并以 web-access 作为首个落地 Skill
 
@@ -318,7 +293,7 @@
 
 ---
 
-## 第16期：TUI界面 + 产品化
+## 第14期：TUI界面 + 产品化
 
 **目标**：从CLI到完整产品体验
 
@@ -346,16 +321,16 @@
 基础      规划      记忆      RAG       多Agent   人机      异步      多模型
 ReAct    执行     上下文    检索       协作      协同      并行      切换
 
-第9期 ──► 第10期 ──► 第11期 ──► 第12期 ──► 第13期 ──► 第14期 ──► 第15期 ──► 第16期
-联网     Spring AI   安全       MCP        Chrome     CDP        Skill      TUI
-能力     框架升级     沙箱       生态       DevTools   会话复用    系统       产品化
+第9期 ──► 第10期 ──► 第11期 ──► 第12期 ──► 第13期 ──► 第14期
+联网     MCP        Chrome     CDP        Skill      TUI
+能力     生态       DevTools   会话复用    系统       产品化
 ```
 
 ## 学习路径建议
 
-**初学者**：按顺序 1 → 2 → 3 → 6 → 16，掌握核心即可
-**进阶者**：1 → 2 → 3 → 4 → 7 → 8 → 9 → 10 → 15，深入技术细节
-**全面掌握**：全部 16 期，完整技术栈
+**初学者**：按顺序 1 → 2 → 3 → 6 → 14，掌握核心即可
+**进阶者**：1 → 2 → 3 → 4 → 7 → 8 → 9 → 10 → 13，深入技术细节
+**全面掌握**：全部 14 期，完整技术栈
 
 ## 参考项目
 
@@ -367,4 +342,19 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ---
 
-*已完成第8期 多模型适配 + 运行时切换，下一步进入第9期 联网能力 + Web工具。*
+## Pro 升级版本（独立分支）
+
+主线 15 期完成后，将开启独立分支做框架重构，作为「手写版 → 框架版」的对照教程。不并入主分支，主线手写版保持稳定基线。
+
+**触发时机**：主线 1–15 期全部交付后启动
+
+**候选实现**：
+
+- **Spring AI 版本**：用 `ChatModel` / `StreamingChatModel` / `ToolCallback` / Spring Boot DI 重写主流程；`Agent` / `PlanExecuteAgent` / `AgentOrchestrator` / `ToolRegistry` / `MemoryManager` 全面 Bean 化；HITL 通过 AOP 拦截
+- **LangGraph4J 版本**：用图状态机模型重构 Agent 流程，把 ReAct / Plan-and-Execute / Multi-Agent 三种模式统一到 graph 抽象下，节点 = 角色/工具调用，边 = 状态转移条件
+
+**教学价值**：完整呈现「自己造轮子 → 用社区轮子」的取舍——什么场景手写更清晰、什么场景框架更省心，让学习者既能看懂底层、又能驾驭主流框架。
+
+---
+
+*已完成第9期 联网能力 + Web 工具（含 HITL 增强：路径围栏 / 命令快速拒绝 / 操作审计），下一步进入第10期 MCP 协议 + 生态接入。*

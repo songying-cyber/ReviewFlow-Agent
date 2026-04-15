@@ -30,7 +30,7 @@ class ToolRegistryTest {
 
         String result = registry.executeTool("execute_command", "{\"command\":\"find / -name \\\"pom.xml\\\" -type f | head -20\"}");
 
-        assertTrue(result.contains("拒绝执行命令"));
+        assertTrue(result.contains("策略拒绝"));
     }
 
     @Test

@@ -7,6 +7,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.paicli.rag.CodeRetriever;
 import com.paicli.rag.SearchResultFormatter;
 import com.paicli.rag.VectorStore;
+import com.paicli.policy.AuditLog;
+import com.paicli.policy.CommandGuard;
+import com.paicli.policy.PathGuard;
+import com.paicli.policy.PolicyException;
 import com.paicli.web.FetchResult;
 import com.paicli.web.HtmlExtractor;
 import com.paicli.web.NetworkPolicy;
@@ -18,9 +22,9 @@ import com.paicli.web.WebFetcher;
 import java.io.File;
 import java.io.InputStreamReader;
 import java.io.BufferedReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -33,11 +37,18 @@ public class ToolRegistry {
     private static final int DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS = 90;
     private static final int MAX_PARALLEL_TOOLS = 4;
     private static final int MAX_COMMAND_OUTPUT_CHARS = 8_000;
+    // write_file 单次写入字节数上限。LLM 想塞超大内容时通常是误生成（重复粘贴 / hallucinate 大段日志），
+    // 5MB 对教学项目完全够用，超过即拒，避免磁盘灌满与误覆盖。
+    private static final int MAX_WRITE_FILE_BYTES = 5 * 1024 * 1024;
+    // 需要审计的工具（与 ApprovalPolicy 的 DANGEROUS_TOOLS 保持一致）。
+    private static final Set<String> AUDIT_TOOLS = Set.of("write_file", "execute_command", "create_project");
     private final Map<String, Tool> tools = new HashMap<>();
     private final long commandTimeoutSeconds;
     private final long toolBatchTimeoutSeconds;
     private static final int DEFAULT_FETCH_MAX_CHARS = 8_000;
     private String projectPath = System.getProperty("user.dir");
+    private PathGuard pathGuard = new PathGuard(projectPath);
+    private final AuditLog auditLog = new AuditLog();
     private SearchProvider searchProvider;
     private WebFetcher webFetcher;
     private HtmlExtractor htmlExtractor;
@@ -67,6 +78,7 @@ public class ToolRegistry {
      */
     public void setProjectPath(String projectPath) {
         this.projectPath = projectPath;
+        this.pathGuard = new PathGuard(projectPath);
     }
 
     /**
@@ -83,13 +95,12 @@ public class ToolRegistry {
         // read_file 工具
         tools.put("read_file", new Tool(
                 "read_file",
-                "读取文件内容",
+                "读取文件内容（仅限项目根目录之内）",
                 createParameters(new Param("path", "string", "文件路径", true)),
                 args -> {
-                    String path = args.get("path");
+                    Path safe = pathGuard.resolveSafe(args.get("path"));
                     try {
-                        String content = Files.readString(Path.of(path));
-                        return "文件内容:\n" + content;
+                        return "文件内容:\n" + Files.readString(safe);
                     } catch (Exception e) {
                         return "读取文件失败: " + e.getMessage();
                     }
@@ -99,21 +110,26 @@ public class ToolRegistry {
         // write_file 工具
         tools.put("write_file", new Tool(
                 "write_file",
-                "写入文件内容",
+                "写入文件内容（仅限项目根目录之内，单文件 5MB 上限）",
                 createParameters(
                         new Param("path", "string", "文件路径", true),
                         new Param("content", "string", "文件内容", true)
                 ),
                 args -> {
                     String path = args.get("path");
-                    String content = args.get("content");
+                    String content = args.get("content") == null ? "" : args.get("content");
+                    int contentBytes = content.getBytes(StandardCharsets.UTF_8).length;
+                    if (contentBytes > MAX_WRITE_FILE_BYTES) {
+                        throw new PolicyException("写入内容 " + contentBytes + " 字节超过 "
+                                + (MAX_WRITE_FILE_BYTES / 1024 / 1024) + "MB 上限");
+                    }
+                    Path safe = pathGuard.resolveSafe(path);
                     try {
-                        // 确保父目录存在
-                        Path parent = Path.of(path).getParent();
+                        Path parent = safe.getParent();
                         if (parent != null) {
                             Files.createDirectories(parent);
                         }
-                        Files.writeString(Path.of(path), content);
+                        Files.writeString(safe, content);
                         return "文件已写入: " + path;
                     } catch (Exception e) {
                         return "写入文件失败: " + e.getMessage();
@@ -124,13 +140,12 @@ public class ToolRegistry {
         // list_dir 工具
         tools.put("list_dir", new Tool(
                 "list_dir",
-                "列出目录内容",
+                "列出目录内容（仅限项目根目录之内）",
                 createParameters(new Param("path", "string", "目录路径", true)),
                 args -> {
-                    String path = args.get("path");
+                    Path safe = pathGuard.resolveSafe(args.get("path"));
                     try {
-                        File dir = new File(path);
-                        File[] files = dir.listFiles();
+                        File[] files = safe.toFile().listFiles();
                         if (files == null) {
                             return "目录为空或不存在";
                         }
@@ -174,15 +189,15 @@ public class ToolRegistry {
                 args -> {
                     String name = args.get("name");
                     String type = args.get("type");
+                    Path projectRoot = pathGuard.resolveSafe(name);
                     try {
-                        Path projectPath = Paths.get(name);
-                        Files.createDirectories(projectPath);
+                        Files.createDirectories(projectRoot);
 
                         switch (type.toLowerCase()) {
                             case "java" -> {
-                                Files.createDirectories(projectPath.resolve("src/main/java"));
-                                Files.createDirectories(projectPath.resolve("src/main/resources"));
-                                Files.writeString(projectPath.resolve("pom.xml"),
+                                Files.createDirectories(projectRoot.resolve("src/main/java"));
+                                Files.createDirectories(projectRoot.resolve("src/main/resources"));
+                                Files.writeString(projectRoot.resolve("pom.xml"),
                                         String.format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
                                                 "<project>\n" +
                                                 "    <modelVersion>4.0.0</modelVersion>\n" +
@@ -192,12 +207,12 @@ public class ToolRegistry {
                                                 "</project>", name));
                             }
                             case "python" -> {
-                                Files.createDirectories(projectPath.resolve(name));
-                                Files.writeString(projectPath.resolve("main.py"), "# 主程序入口\n");
-                                Files.writeString(projectPath.resolve("requirements.txt"), "# 依赖列表\n");
+                                Files.createDirectories(projectRoot.resolve(name));
+                                Files.writeString(projectRoot.resolve("main.py"), "# 主程序入口\n");
+                                Files.writeString(projectRoot.resolve("requirements.txt"), "# 依赖列表\n");
                             }
                             case "node" -> {
-                                Files.writeString(projectPath.resolve("package.json"),
+                                Files.writeString(projectRoot.resolve("package.json"),
                                         String.format("{\"name\": \"%s\", \"version\": \"1.0.0\"}", name));
                             }
                         }
@@ -438,6 +453,11 @@ public class ToolRegistry {
 
     /**
      * 执行工具调用
+     *
+     * 危险工具（write_file / execute_command / create_project）会写一行审计：
+     * - 策略拦截（PathGuard / CommandGuard / 文件大小上限）→ deny
+     * - 普通异常 → error
+     * - 其他情况 → allow（仅表示工具调用真的发生过，工具内部的业务错误仍以返回字符串呈现给 LLM）
      */
     public String executeTool(String name, String argumentsJson) {
         Tool tool = tools.get(name);
@@ -445,15 +465,36 @@ public class ToolRegistry {
             return "未知工具: " + name;
         }
 
+        boolean shouldAudit = AUDIT_TOOLS.contains(name);
+        long start = System.nanoTime();
+
         try {
             JsonNode args = mapper.readTree(argumentsJson);
             Map<String, String> argMap = new HashMap<>();
             args.fields().forEachRemaining(entry ->
                     argMap.put(entry.getKey(), entry.getValue().asText()));
-            return tool.executor().execute(argMap);
+            String result = tool.executor().execute(argMap);
+            if (shouldAudit) {
+                auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start)));
+            }
+            return result;
+        } catch (PolicyException e) {
+            if (shouldAudit) {
+                auditLog.record(AuditLog.AuditEntry.denyByPolicy(
+                        name, argumentsJson, e.getMessage(), elapsedMillis(start)));
+            }
+            return "🛡️ 策略拒绝: " + e.getMessage();
         } catch (Exception e) {
+            if (shouldAudit) {
+                auditLog.record(AuditLog.AuditEntry.error(
+                        name, argumentsJson, e.getMessage(), elapsedMillis(start)));
+            }
             return "工具执行失败: " + e.getMessage();
         }
+    }
+
+    public AuditLog getAuditLog() {
+        return auditLog;
     }
 
     /**
@@ -538,8 +579,11 @@ public class ToolRegistry {
         if (normalized.isEmpty()) {
             return "执行命令失败: 命令不能为空";
         }
-        if (isDisallowedBroadScan(normalized)) {
-            return "拒绝执行命令: 不允许扫描 /、~ 或整个文件系统。请改用项目内相对路径，或优先使用 read_file、list_dir、search_code。";
+        String denyReason = CommandGuard.check(normalized);
+        if (denyReason != null) {
+            // 抛 PolicyException 让外层 executeTool 统一写 audit 并格式化拒绝消息，
+            // 命令围栏与路径围栏的拒绝路径走同一个出口。
+            throw new PolicyException(denyReason);
         }
 
         ExecutorService outputReaderExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -577,13 +621,6 @@ public class ToolRegistry {
         } finally {
             outputReaderExecutor.shutdownNow();
         }
-    }
-
-    private boolean isDisallowedBroadScan(String command) {
-        String normalized = command.replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
-        return normalized.contains("find /")
-                || normalized.contains("find ~")
-                || normalized.contains("find $home");
     }
 
     private String readProcessOutput(Process process) throws Exception {

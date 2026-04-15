@@ -142,4 +142,28 @@ class CliCommandParserTest {
         assertEquals(CliCommandParser.CommandType.SWITCH_HITL, command.type());
         assertNull(command.payload());
     }
+
+    @Test
+    void parsesPolicyStatusCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/policy");
+
+        assertEquals(CliCommandParser.CommandType.POLICY_STATUS, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesAuditTailWithoutPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/audit");
+
+        assertEquals(CliCommandParser.CommandType.AUDIT_TAIL, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesAuditTailWithPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/audit 20");
+
+        assertEquals(CliCommandParser.CommandType.AUDIT_TAIL, command.type());
+        assertEquals("20", command.payload());
+    }
 }

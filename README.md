@@ -73,6 +73,18 @@
 - 默认安全策略：屏蔽 `file://` / 内网 / loopback；30 秒超时；5MB 响应上限；每分钟 30 次限流
 - 边界明确：SPA / 防爬墙站点会返回空正文 + 已知边界提示，不反复重试，留给后续 CDP 路线
 
+### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
+
+`com.paicli.policy` 包，作为 HITL 之外的辅助层（不是沙箱、不提供进程隔离）：
+
+- `PathGuard` 路径围栏：文件类工具强制限定在项目根之内，拦截绝对路径外逃 / `..` 穿越 / 符号链接逃逸
+- `CommandGuard` 命令快速拒绝：HITL 之前的 fast-fail 黑名单（`sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` / `find /` / `chmod 777 /` / `shutdown`），减少 HITL 弹窗骚扰
+- `AuditLog` 结构化审计：危险工具调用按天写 JSONL 到 `~/.paicli/audit/`，含 `outcome (allow|deny|error)` 与 `approver (hitl|policy|none)`
+- `write_file` 单文件 5MB 上限
+- CLI 命令：`/policy` 查看安全策略状态、`/audit [N]` 看最近 N 条审计
+
+**为什么不叫沙箱**：本地 Agent CLI（参考 Claude Code / Cursor / Aider）默认都不做容器/VM 沙箱——沙箱削弱 Agent 能力、给虚假安全感、体验更差。生产级 Agent 沙箱实际是 microVM-level（Devin / Modal / Anthropic Computer Use 用 Firecracker / gVisor）。PaiCLI 的安全模型是 **HITL + 路径校验 + 命令快速拒绝 + 审计**，不是隔离。
+
 ## 启动界面
 
 ### 当前启动界面
@@ -160,6 +172,14 @@
 - 📰 `web_fetch` 工具：抓 URL → readability 提取 → 返回 Markdown 正文
 - 🛡️ 内置网络访问策略：屏蔽内网、loopback、`file://`；5MB 响应上限；每分钟 30 次限流
 - 🚧 边界明确：SPA / 防爬墙返回空正文 + 已知边界提示，不重试
+
+### 第六期 HITL 增强
+
+- 🛡️ 路径围栏：文件类工具强制限定在项目根之内，绝对路径外逃 / `..` 穿越 / 符号链接逃逸全部拦截
+- 🧯 命令快速拒绝：HITL 之前的 fast-fail 黑名单（`sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` / `find /` / `chmod 777 /` / `shutdown`），减少 HITL 弹窗骚扰
+- 📦 资源上限：`write_file` 5MB；`execute_command` 60 秒超时 + 8KB 输出截断
+- 📋 结构化审计：危险工具调用按天写一行 JSONL 到 `~/.paicli/audit/`，可通过 `/audit [N]` 查看
+- 🧱 定位：HITL 之外的辅助层，不是沙箱、不提供进程隔离
 
 ## 快速开始
 
@@ -320,11 +340,13 @@ I
 - `read_file` - 读取文件内容
 - `write_file` - 写入文件内容
 - `list_dir` - 列出目录内容
-- `execute_command` - 在当前项目目录执行短时 Shell 命令（默认 60 秒超时，不允许全盘扫描）
+- `execute_command` - 在当前项目目录执行短时 Shell 命令（默认 60 秒超时，黑名单拦截破坏性命令）
 - `create_project` - 创建项目结构（java/python/node）
 - `search_code` - 语义检索代码库（自然语言查询）
 
 同一轮模型返回多个工具调用时，PaiCLI 会并行执行这些工具；如果工具之间有依赖关系，模型应分多轮调用。
+
+文件类工具（`read_file` / `write_file` / `list_dir` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。详见 `/policy`。
 
 ## 命令
 
@@ -335,6 +357,8 @@ I
 - `/hitl on` - 启用危险操作人工审批（HITL）
 - `/hitl off` - 关闭 HITL 审批
 - `/hitl` - 查看 HITL 当前状态
+- `/policy` - 查看安全策略状态（路径围栏 / 命令黑名单 / 资源上限 / 审计目录）
+- `/audit [N]` - 查看今日最近 N 条危险工具审计记录（默认 10）
 - `/memory` / `/mem` - 查看记忆系统状态
 - `/memory clear` - 清空长期记忆
 - `/save <事实>` - 手动保存关键事实到长期记忆

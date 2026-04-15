@@ -88,6 +88,7 @@ class HitlToolRegistryTest {
         Path target = tempDir.resolve("approved.txt");
         StubHandler stub = new StubHandler(req -> ApprovalResult.approve());
         HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
 
         String result = registry.executeTool("write_file",
                 "{\"path\":\"" + target.toString().replace("\\", "\\\\") + "\",\"content\":\"approved\"}");
@@ -105,6 +106,7 @@ class HitlToolRegistryTest {
         String modifiedArgs = "{\"path\":\"" + modified.toString().replace("\\", "\\\\") + "\",\"content\":\"modified!\"}";
         StubHandler stub = new StubHandler(req -> ApprovalResult.modify(modifiedArgs));
         HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
 
         String result = registry.executeTool("write_file",
                 "{\"path\":\"" + original.toString().replace("\\", "\\\\") + "\",\"content\":\"oops\"}");
@@ -120,6 +122,7 @@ class HitlToolRegistryTest {
         Path target = tempDir.resolve("approved-all.txt");
         StubHandler stub = new StubHandler(req -> ApprovalResult.approveAll());
         HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
 
         String result = registry.executeTool("write_file",
                 "{\"path\":\"" + target.toString().replace("\\", "\\\\") + "\",\"content\":\"ok\"}");
