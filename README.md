@@ -1,6 +1,6 @@
 # PaiCLI
 
-一个教学导向的 Java Agent CLI，已经从第一期的 `ReAct` 单代理循环，演进到第九期的 `联网能力 + Web 工具`。
+一个成熟的 Java Agent CLI 产品，对标 Claude Code，从第一期的 `ReAct` 单代理循环逐步演进到第九期的 `联网能力 + Web 工具`。
 
 ## 演进历程
 

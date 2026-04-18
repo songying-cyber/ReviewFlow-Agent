@@ -38,7 +38,7 @@ public class ToolRegistry {
     private static final int MAX_PARALLEL_TOOLS = 4;
     private static final int MAX_COMMAND_OUTPUT_CHARS = 8_000;
     // write_file 单次写入字节数上限。LLM 想塞超大内容时通常是误生成（重复粘贴 / hallucinate 大段日志），
-    // 5MB 对教学项目完全够用，超过即拒，避免磁盘灌满与误覆盖。
+    // 5MB 对常规代码生成 / 文档撰写完全够用，超过即拒，避免磁盘灌满与误覆盖。
     private static final int MAX_WRITE_FILE_BYTES = 5 * 1024 * 1024;
     // 需要审计的工具（与 ApprovalPolicy 的 DANGEROUS_TOOLS 保持一致）。
     private static final Set<String> AUDIT_TOOLS = Set.of("write_file", "execute_command", "create_project");

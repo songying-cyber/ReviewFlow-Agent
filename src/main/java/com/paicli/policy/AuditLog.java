@@ -22,9 +22,9 @@ import java.util.Locale;
  * - 默认目录 ~/.paicli/audit，可通过 -Dpaicli.audit.dir 或 PAICLI_AUDIT_DIR 覆盖
  * - 写入失败只在 stderr 提示，不抛出，避免审计故障影响主流程
  *
- * 教学意义：
+ * 设计意图：
  * - 把 Agent 的"实际副作用"变成可回放的事实流
- * - 是后续做行为评估、差错复盘、监控告警的基础
+ * - 行为评估、差错复盘、监控告警的统一数据源
  *
  * 接入点：
  * - {@code allow}：危险工具执行成功

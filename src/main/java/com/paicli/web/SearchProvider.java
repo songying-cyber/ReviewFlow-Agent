@@ -10,7 +10,7 @@ import java.util.List;
  * - {@link SerpApiSearchProvider}：商业聚合 API，需 API Key，开箱即用
  * - {@link SearxngSearchProvider}：开源元搜索引擎，需要本地或可访问的 SearXNG 实例，免费
  *
- * 教学意义：让用户亲手体会「付费但即开即用」与「免费但要自托管」的取舍。
+ * 让用户根据成本 / 数据合规 / 离线需求自由切换 provider。
  * 后续如果新增 Brave / Tavily / Exa 等实现，只要继续实现这个接口，无需改动调用方。
  */
 public interface SearchProvider {

@@ -1,4 +1,4 @@
-# PaiCLI 迭代路线图（14期教程）
+# PaiCLI 迭代路线图（16 期）
 
 从零开始，逐步构建生产级 Java Agent CLI
 
@@ -206,29 +206,93 @@
 
 ---
 
-## 第10期：MCP协议 + 生态接入
+## 第10期：MCP 协议核心（stdio + Streamable HTTP，默认开启）
 
-**目标**：接入丰富的外部工具生态
+**目标**：把 PaiCLI 接入 MCP 生态。stdio 子进程 server 与 Streamable HTTP 远程 server 都能用，工具自动注册到 ToolRegistry，与 HITL / AuditLog 协同。
 
 **功能迭代**：
-- MCP（Model Context Protocol）支持
-- MCP Server发现与连接
-- 工具动态加载
-- 第三方服务集成（GitHub、Slack、数据库）
-- 插件市场机制
+- 手写 `JsonRpcClient`：JSON-RPC 2.0 客户端，请求-响应配对、通知、错误码、超时
+- `McpTransport` 抽象 + 两个实现：
+  - `StdioTransport`：ProcessBuilder + newline-delimited JSON-RPC，stderr 单独 drain，JVM 退出 hook 清理子进程
+  - `StreamableHttpTransport`：OkHttp + 单 POST + 服务端 SSE 流式响应，支持 session ID
+- `initialize` 握手 + capabilities 协商 + protocol version negotiation
+- `tools/list` + `tools/call`：工具按 `serverName__toolName` 前缀注册到 `ToolRegistry`
+- MCP 返回 `content` 数组扁平化（text 拼接，image / resource 给 fallback 提示）
+- 配置文件：`~/.paicli/mcp.json`（用户级）+ `.paicli/mcp.json`（项目级，可入 git），格式与 Claude Code `claude_desktop_config.json` 兼容
+- 启动时 eager 并行启动所有 server（复用第 7 期并行调度）
+- **默认开启**，`/mcp disable <name>` 关单个
+- HITL + AuditLog 集成：MCP 工具默认走 HITL，audit `tool` 字段带 `mcp__` 前缀
+- CLI：`/mcp` / `/mcp restart <name>` / `/mcp logs <name>` / `/mcp disable <name>` / `/mcp enable <name>`
+- 默认配置三个 stdio server：`filesystem` / `fetch` / `git`；外加 Streamable HTTP demo
 
 **核心知识点**：
-- MCP协议
-- 插件架构
-- 生态集成
+- JSON-RPC 2.0 协议实现
+- 长 running 子进程生命周期管理（NIO + 流分离）
+- Streamable HTTP（2025 年 3 月新规范，替代已废弃的 SSE）
+- 第三方工具源进入安全模型的纳管方式（HITL + Audit + 命名空间隔离）
 
-**教程标题候选**：《工具不够用了？接入MCP生态，GitHub、Slack、数据库随便调》
+**估算**：5–6 天
 
 ---
 
-## 第11期：Chrome DevTools MCP
+## 第11期：MCP 高级能力（resources + prompts + sampling + 鉴权 + 双向通知）
 
-**前置依赖**：第10期已完成 MCP 客户端
+**前置依赖**：第 10 期 MCP 协议核心
+
+**目标**：补齐 MCP 协议的非工具能力，覆盖企业级 server 的真实需求（鉴权、长 running、动态变更）。
+
+**功能迭代**：
+- `resources/list` / `resources/read` / `resources/subscribe` + 变更通知（拿到 server 暴露的可寻址内容）
+- `prompts/list` / `prompts/get`：参数化提示模板，可作为 `/team` / `/plan` 的输入
+- `sampling/createMessage`：server 反向请求 client 调用 LLM（要走 LlmClient + HITL + 预算控制）
+- Streamable HTTP 远程鉴权：
+  - Bearer token（环境变量注入 Authorization header）
+  - OAuth 2.0 authorization code flow
+  - 自定义 header（企业 server 常见）
+- `notifications/tools/list_changed`：工具列表动态更新，无需重启
+- `notifications/cancelled`：长时工具调用可取消，与第 7 期工具批次超时协同
+- 进程崩溃自动重启（指数退避，最多 3 次）
+
+**核心知识点**：
+- 双向通信（client ↔ server 双向通知）
+- OAuth 2.0 在 Agent CLI 场景的落地
+- 反向 LLM 调用（sampling）的预算 / 安全控制
+
+**估算**：4–5 天
+
+---
+
+## 第12期：长上下文工程（适配 200k–1M 模型 + prompt caching）
+
+**目标**：适配 GLM-5.1（200k）/ DeepSeek V4（1M）/ Claude Sonnet 4.6（1M）等长上下文模型。第 3 期 Memory 是基于"短上下文兜底"假设设计的，长窗口下要切换策略。
+
+**功能迭代**：
+- `LlmClient` 接口扩展能力声明：`maxContextWindow()` / `supportsPromptCaching()`
+- `AgentBudget` token 预算从写死 300K 改为按当前模型动态计算（默认 80% × maxContextWindow）
+- 长 / 短上下文双模式：
+  - 短模式（< 32k window）：保留第 3 期 Memory 完整策略（摘要 / 检索 / 压缩）
+  - 长模式（≥ 100k window）：跳过摘要、提高 RAG top-K（5 → 20）、允许直接装填整个文件
+- prompt caching 接入：
+  - Anthropic / Claude：`cache_control` 块
+  - GLM-5.1：智谱 prompt cache 字段
+  - DeepSeek V4：自动 prefix cache
+  - 缓存边界放在 system prompt 之后、对话历史之前，最大化命中率
+- 上下文成本可见化：每轮工具结束后打印 `已用 X / Y token (cached: Z, ¥cost: A)`
+- 检索策略自适应：根据剩余 budget 动态决定 RAG top-K 与代码片段长度
+- `/context` 命令扩展：显示当前 window 占用率、cache 命中率、模式（long / short）
+
+**核心知识点**：
+- 长上下文模型的成本模型（input vs cached input 价差通常 5–10 倍）
+- prompt caching 的缓存边界设计
+- RAG 在长上下文时代的角色变化（从"压缩选择"到"加速 + 精排"）
+
+**估算**：3–4 天
+
+---
+
+## 第13期：Chrome DevTools MCP
+
+**前置依赖**：第 10 / 11 期 MCP 框架
 
 **目标**：让 Agent 能操控浏览器，处理需要 JS 渲染或 UI 交互的页面
 
@@ -247,9 +311,9 @@
 
 ---
 
-## 第12期：CDP 会话复用 + 登录态访问
+## 第14期：CDP 会话复用 + 登录态访问
 
-**前置依赖**：第11期 Chrome DevTools MCP 已能驱动浏览器
+**前置依赖**：第13期 Chrome DevTools MCP 已能驱动浏览器
 
 **目标**：让 Agent 复用用户已登录的 Chrome 实例，访问需要认证的页面
 
@@ -268,9 +332,9 @@
 
 ---
 
-## 第13期：Skill 系统 + web-access Skill
+## 第15期：Skill 系统 + web-access Skill
 
-**前置依赖**：第 9 期 web 工具、第 11 期 Chrome DevTools MCP、第 12 期 CDP 会话复用全部就绪
+**前置依赖**：第 9 期 web 工具、第 13 期 Chrome DevTools MCP、第 14 期 CDP 会话复用全部就绪
 
 **目标**：做出 PaiCLI 自己的 Skill 加载机制，把零散的工具与决策指引打包成可复用单元，并以 web-access 作为首个落地 Skill
 
@@ -287,13 +351,13 @@
 - 提示词工程的工程化封装
 - 触发词路由与按需加载
 - 经验沉淀目录（按域名/场景累积可复用知识）
-- 教学意义：从「写工具」演进到「打包专家手册」
+- 设计意图：从「写工具」演进到「打包专家手册」
 
 **教程标题候选**：《工具堆成山，Agent 还是不会用？给它写本「专家手册」，按场景自动展开》
 
 ---
 
-## 第14期：TUI界面 + 产品化
+## 第16期：TUI界面 + 产品化
 
 **目标**：从CLI到完整产品体验
 
@@ -321,16 +385,16 @@
 基础      规划      记忆      RAG       多Agent   人机      异步      多模型
 ReAct    执行     上下文    检索       协作      协同      并行      切换
 
-第9期 ──► 第10期 ──► 第11期 ──► 第12期 ──► 第13期 ──► 第14期
-联网     MCP        Chrome     CDP        Skill      TUI
-能力     生态       DevTools   会话复用    系统       产品化
+第9期 ──► 第10期 ──► 第11期 ──► 第12期 ──► 第13期 ──► 第14期 ──► 第15期 ──► 第16期
+联网     MCP核心    MCP高级     长上下文    Chrome     CDP        Skill      TUI
+能力     stdio+HTTP rsc/sample  200k-1M    DevTools   会话复用    系统       产品化
 ```
 
 ## 学习路径建议
 
-**初学者**：按顺序 1 → 2 → 3 → 6 → 14，掌握核心即可
-**进阶者**：1 → 2 → 3 → 4 → 7 → 8 → 9 → 10 → 13，深入技术细节
-**全面掌握**：全部 14 期，完整技术栈
+**入门**：按顺序 1 → 2 → 3 → 6 → 16，掌握核心即可
+**进阶**：1 → 2 → 3 → 4 → 7 → 8 → 9 → 10 → 12 → 15，深入技术细节
+**全套**：全部 16 期
 
 ## 参考项目
 
@@ -344,17 +408,17 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ## Pro 升级版本（独立分支）
 
-主线 15 期完成后，将开启独立分支做框架重构，作为「手写版 → 框架版」的对照教程。不并入主分支，主线手写版保持稳定基线。
+主线 16 期完成后，将开启独立分支做框架重构，作为「手写版 → 框架版」的对照实现。不并入主分支，主线手写版保持稳定基线。
 
-**触发时机**：主线 1–15 期全部交付后启动
+**触发时机**：主线 1–16 期全部交付后启动
 
 **候选实现**：
 
 - **Spring AI 版本**：用 `ChatModel` / `StreamingChatModel` / `ToolCallback` / Spring Boot DI 重写主流程；`Agent` / `PlanExecuteAgent` / `AgentOrchestrator` / `ToolRegistry` / `MemoryManager` 全面 Bean 化；HITL 通过 AOP 拦截
 - **LangGraph4J 版本**：用图状态机模型重构 Agent 流程，把 ReAct / Plan-and-Execute / Multi-Agent 三种模式统一到 graph 抽象下，节点 = 角色/工具调用，边 = 状态转移条件
 
-**教学价值**：完整呈现「自己造轮子 → 用社区轮子」的取舍——什么场景手写更清晰、什么场景框架更省心，让学习者既能看懂底层、又能驾驭主流框架。
+**设计价值**：完整呈现「自己造轮子 → 用社区轮子」的取舍——什么场景手写更清晰、什么场景框架更省心，让用户既能看懂底层、又能切换主流框架。
 
 ---
 
-*已完成第9期 联网能力 + Web 工具（含 HITL 增强：路径围栏 / 命令快速拒绝 / 操作审计），下一步进入第10期 MCP 协议 + 生态接入。*
+*已完成第 9 期 联网能力 + Web 工具（含 HITL 增强：路径围栏 / 命令快速拒绝 / 操作审计），下一步进入第 10 期 MCP 协议核心。*

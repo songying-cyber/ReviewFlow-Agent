@@ -16,8 +16,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>简易 token bucket 限流：每 60 秒最多 30 次请求</li>
  * </ul>
  *
- * 设计目标是教学项目可读，不追求生产级威胁建模。
- * 真正的 SSRF 防护还需要解决 DNS rebinding、CIDR 计算等问题，本类只是基础围栏。
+ * 当前是基础围栏，覆盖常见 SSRF 场景；面向严苛企业环境时还需补 DNS rebinding 防护、
+ * 完整 CIDR 黑白名单、证书校验加固等。
  */
 public class NetworkPolicy {
 

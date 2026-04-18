@@ -198,7 +198,7 @@ public class HtmlExtractor {
                 }
             }
             case "img" -> {
-                // 默认不渲染图片：教学项目里会让 markdown 体积爆涨。如需要可在调用方扩展
+                // 默认不渲染图片：会让 markdown 体积爆涨且 LLM 处理不了图片字节。如需要可在调用方扩展
                 String alt = el.attr("alt");
                 if (!alt.isBlank()) {
                     out.append(alt);

@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
  * 设计取舍：
  * - 不做完整 shell 解析，只做正则模式匹配，够覆盖明显破坏性命令即可
  * - 命令替换段 $(...) 和反引号内的内容仍以原文存在，正则会一并扫描，不需要单独展开
- * - 教学项目里 curl / git / 网络命令默认放行，只拦真正破坏性的（rm -rf 全盘、sudo、mkfs 等）
+ * - curl / git / 网络命令默认放行，只拦真正破坏性的（rm -rf 全盘、sudo、mkfs 等）
  */
 public final class CommandGuard {
 
