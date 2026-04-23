@@ -55,6 +55,10 @@ public record ApprovalRequest(
         sb.append(formatBoxLine("⚠️  需要审批")).append("\n");
         sb.append("├").append(border).append("┤\n");
         sb.append(formatBoxField("工具", toolName)).append("\n");
+        String mcpServer = ApprovalPolicy.mcpServerName(toolName);
+        if (mcpServer != null && !mcpServer.isBlank()) {
+            sb.append(formatBoxField("MCP server", mcpServer)).append("\n");
+        }
         sb.append(formatBoxField("等级", dangerLevel)).append("\n");
         sb.append(formatBoxField("风险", riskDescription)).append("\n");
         if (callerContext != null && !callerContext.isBlank()) {

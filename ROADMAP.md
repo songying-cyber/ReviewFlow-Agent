@@ -206,7 +206,9 @@
 
 ---
 
-## 第10期：MCP 协议核心（stdio + Streamable HTTP，默认开启）
+## 第10期：MCP 协议核心（stdio + Streamable HTTP，默认开启） ✅
+
+**已完成**
 
 **目标**：把 PaiCLI 接入 MCP 生态。stdio 子进程 server 与 Streamable HTTP 远程 server 都能用，工具自动注册到 ToolRegistry，与 HITL / AuditLog 协同。
 
@@ -216,14 +218,14 @@
   - `StdioTransport`：ProcessBuilder + newline-delimited JSON-RPC，stderr 单独 drain，JVM 退出 hook 清理子进程
   - `StreamableHttpTransport`：OkHttp + 单 POST + 服务端 SSE 流式响应，支持 session ID
 - `initialize` 握手 + capabilities 协商 + protocol version negotiation
-- `tools/list` + `tools/call`：工具按 `serverName__toolName` 前缀注册到 `ToolRegistry`
+- `tools/list` + `tools/call`：工具按 `mcp__{server}__{tool}` 前缀注册到 `ToolRegistry`
 - MCP 返回 `content` 数组扁平化（text 拼接，image / resource 给 fallback 提示）
 - 配置文件：`~/.paicli/mcp.json`（用户级）+ `.paicli/mcp.json`（项目级，可入 git），格式与 Claude Code `claude_desktop_config.json` 兼容
 - 启动时 eager 并行启动所有 server（复用第 7 期并行调度）
 - **默认开启**，`/mcp disable <name>` 关单个
 - HITL + AuditLog 集成：MCP 工具默认走 HITL，audit `tool` 字段带 `mcp__` 前缀
 - CLI：`/mcp` / `/mcp restart <name>` / `/mcp logs <name>` / `/mcp disable <name>` / `/mcp enable <name>`
-- 默认配置三个 stdio server：`filesystem` / `fetch` / `git`；外加 Streamable HTTP demo
+- MCP 子系统默认启动；未配置 `mcp.json` 时不启动外部 server，避免首次运行被 `npx` / `uvx` 冷启动阻塞
 
 **核心知识点**：
 - JSON-RPC 2.0 协议实现
@@ -421,4 +423,4 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ---
 
-*已完成第 9 期 联网能力 + Web 工具（含 HITL 增强：路径围栏 / 命令快速拒绝 / 操作审计），下一步进入第 10 期 MCP 协议核心。*
+*已完成第 10 期 MCP 协议核心（stdio + Streamable HTTP，默认开启），下一步进入第 11 期 MCP 高级能力。*

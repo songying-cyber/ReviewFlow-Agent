@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.paicli.mcp.protocol.McpToolDescriptor;
 import com.paicli.rag.CodeRetriever;
 import com.paicli.rag.SearchResultFormatter;
 import com.paicli.rag.VectorStore;
@@ -27,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Function;
 
 /**
  * 工具注册表 - 管理所有可用工具
@@ -40,9 +42,10 @@ public class ToolRegistry {
     // write_file 单次写入字节数上限。LLM 想塞超大内容时通常是误生成（重复粘贴 / hallucinate 大段日志），
     // 5MB 对常规代码生成 / 文档撰写完全够用，超过即拒，避免磁盘灌满与误覆盖。
     private static final int MAX_WRITE_FILE_BYTES = 5 * 1024 * 1024;
-    // 需要审计的工具（与 ApprovalPolicy 的 DANGEROUS_TOOLS 保持一致）。
+    // 需要审计的内置工具（与 ApprovalPolicy 的 DANGEROUS_TOOLS 保持一致）；MCP 工具按前缀动态纳入审计。
     private static final Set<String> AUDIT_TOOLS = Set.of("write_file", "execute_command", "create_project");
-    private final Map<String, Tool> tools = new HashMap<>();
+    private final Map<String, Tool> tools = new ConcurrentHashMap<>();
+    private final Map<String, McpRegisteredTool> mcpTools = new ConcurrentHashMap<>();
     private final long commandTimeoutSeconds;
     private final long toolBatchTimeoutSeconds;
     private static final int DEFAULT_FETCH_MAX_CHARS = 8_000;
@@ -452,6 +455,35 @@ public class ToolRegistry {
     }
 
     /**
+     * 注册一个 MCP 工具到 ToolRegistry。
+     *
+     * @param descriptor 工具描述（含 namespacedName 如 mcp__filesystem__read_file）
+     * @param invoker    工具执行器：输入 JSON 参数字符串，输出给 LLM 看的字符串结果。
+     *                   typically lambda 在内部调用 McpClient.callTool 并处理异常 → 字符串。
+     */
+    public void registerMcpTool(McpToolDescriptor descriptor, Function<String, String> invoker) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        Objects.requireNonNull(invoker, "invoker");
+        String toolName = descriptor.namespacedName();
+        McpRegisteredTool registered = new McpRegisteredTool(descriptor, invoker);
+        mcpTools.put(toolName, registered);
+        tools.put(toolName, new Tool(
+                toolName,
+                mcpDescription(descriptor),
+                descriptor.inputSchema(),
+                args -> "MCP 工具不应通过 Map<String,String> 入口执行"
+        ));
+    }
+
+    public void unregisterMcpTool(String toolName) {
+        if (toolName == null || toolName.isBlank()) {
+            return;
+        }
+        mcpTools.remove(toolName);
+        tools.remove(toolName);
+    }
+
+    /**
      * 执行工具调用
      *
      * 危险工具（write_file / execute_command / create_project）会写一行审计：
@@ -465,10 +497,19 @@ public class ToolRegistry {
             return "未知工具: " + name;
         }
 
-        boolean shouldAudit = AUDIT_TOOLS.contains(name);
+        boolean shouldAudit = shouldAudit(name);
         long start = System.nanoTime();
 
         try {
+            McpRegisteredTool mcpTool = mcpTools.get(name);
+            if (mcpTool != null) {
+                String result = mcpTool.invoker().apply(argumentsJson);
+                if (shouldAudit) {
+                    auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start)));
+                }
+                return result;
+            }
+
             JsonNode args = mapper.readTree(argumentsJson);
             Map<String, String> argMap = new HashMap<>();
             args.fields().forEachRemaining(entry ->
@@ -574,6 +615,17 @@ public class ToolRegistry {
         return tools.containsKey(name);
     }
 
+    private static boolean shouldAudit(String name) {
+        return AUDIT_TOOLS.contains(name) || (name != null && name.startsWith("mcp__"));
+    }
+
+    private static String mcpDescription(McpToolDescriptor descriptor) {
+        String base = descriptor.description() == null || descriptor.description().isBlank()
+                ? "MCP server 提供的外部工具"
+                : descriptor.description();
+        return base + " (MCP server: " + descriptor.serverName() + ", tool: " + descriptor.name() + ")";
+    }
+
     private String executeCommand(String command) {
         String normalized = command == null ? "" : command.trim();
         if (normalized.isEmpty()) {
@@ -658,6 +710,8 @@ public class ToolRegistry {
     private record Param(String name, String type, String description, boolean required) {}
 
     public record Tool(String name, String description, JsonNode parameters, ToolExecutor executor) {}
+
+    private record McpRegisteredTool(McpToolDescriptor descriptor, Function<String, String> invoker) {}
 
     public record ToolInvocation(String id, String name, String argumentsJson) {}
 

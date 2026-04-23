@@ -1,13 +1,13 @@
 # PaiCLI
 
-一个成熟的 Java Agent CLI 产品，对标 Claude Code，从第一期的 `ReAct` 单代理循环逐步演进到第九期的 `联网能力 + Web 工具`。
+一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十期的 `MCP 协议核心`。
 
 ## 演进历程
 
 ### 第一期：ReAct Agent CLI
 
 - 单轮对话驱动的 `ReAct` 循环
-- 支持工具调用：读文件、写文件、列目录、执行命令、创建项目、代码语义检索、联网搜索
+- 支持工具调用：读文件、写文件、列目录、执行命令、创建项目、代码语义检索、联网搜索、MCP 动态工具
 - 更适合简单任务或单步操作
 
 ### 第二期：Plan-and-Execute + DAG
@@ -73,6 +73,15 @@
 - 默认安全策略：屏蔽 `file://` / 内网 / loopback；30 秒超时；5MB 响应上限；每分钟 30 次限流
 - 边界明确：SPA / 防爬墙站点会返回空正文 + 已知边界提示，不反复重试，留给后续 CDP 路线
 
+### 第十期：MCP 协议核心
+
+- 新增 `com.paicli.mcp` 模块，支持 stdio 子进程 server 与 Streamable HTTP 远程 server
+- 启动时读取 `~/.paicli/mcp.json` 与 `.paicli/mcp.json`，项目级配置按 server 名覆盖用户级配置
+- MCP 工具自动注册为 `mcp__{server}__{tool}`，参数 schema 会清洗 `$ref` / `anyOf` / 超长 description，降低模型调用失败率
+- 所有 MCP 工具默认走 HITL 审批和审计，审计参数会脱敏 token / key / password / Authorization / Bearer 凭证
+- CLI 命令：`/mcp`、`/mcp restart <name>`、`/mcp logs <name>`、`/mcp disable <name>`、`/mcp enable <name>`
+- 没有 MCP 配置文件时不会启动外部 server；子系统保持开启，创建配置后重启 PaiCLI 即可加载
+
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
 `com.paicli.policy` 包，作为 HITL 之外的辅助层（不是沙箱、不提供进程隔离）：
@@ -101,7 +110,7 @@
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      Web-aware Tool CLI v9.0.0                        ║
+║      MCP-Enabled Agent CLI v10.0.0                    ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -114,7 +123,7 @@
 
 - 🤖 基于 GLM-5.1 的智能对话
 - 🔄 ReAct Agent 循环（思考-行动-观察）
-- 🛠️ 工具调用（文件操作、Shell命令、项目创建、代码语义检索、联网搜索）
+- 🛠️ 工具调用（文件操作、Shell命令、项目创建、代码语义检索、联网搜索、MCP 动态工具）
 - 💬 交互式命令行界面
 - 🧠 默认通过流式接口获取模型输出；ReAct 与用户可见的 Plan 阶段都会按流式展示思考过程与最终回复；ReAct 同一次用户输入只打印一次 `🧠 思考过程` 标题，工具调用前后的后续推理继续归在同一块下
 - 🖥️ 终端会对常见 Markdown（标题、列表、表格、代码块）做渲染后再显示，避免直接暴露原始标记符号
@@ -231,7 +240,32 @@ PAICLI_LOG_MAX_FILE_SIZE=10MB
 PAICLI_LOG_TOTAL_SIZE_CAP=100MB
 ```
 
-### 2. 编译运行
+### 2. 可选：配置 MCP server
+
+MCP 子系统默认开启。没有配置文件时不会启动外部 server；需要接入时创建 `~/.paicli/mcp.json` 或项目内 `.paicli/mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "${PROJECT_DIR}"]
+    },
+    "remote-demo": {
+      "url": "https://mcp.example.com/v1",
+      "headers": {"Authorization": "Bearer ${REMOTE_TOKEN}"}
+    }
+  }
+}
+```
+
+`command` 表示 stdio server，`url` 表示 Streamable HTTP server。`${PROJECT_DIR}` / `${HOME}` 是内置变量，其他 `${VAR}` 从环境变量读取；缺失会在启动时直接提示。
+
+### 3. 编译运行
 
 ```bash
 # 编译
@@ -247,7 +281,7 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ```
 
-### 3. 如何进入 Plan 模式
+### 4. 如何进入 Plan 模式
 
 当前默认模式是 `ReAct`。进入 `Plan-and-Execute` 的方式只有 `/plan`：
 
@@ -343,10 +377,13 @@ I
 - `execute_command` - 在当前项目目录执行短时 Shell 命令（默认 60 秒超时，黑名单拦截破坏性命令）
 - `create_project` - 创建项目结构（java/python/node）
 - `search_code` - 语义检索代码库（自然语言查询）
+- `web_search` - 搜索互联网获取实时信息
+- `web_fetch` - 抓取已知 URL 并提取正文 Markdown
+- `mcp__{server}__{tool}` - MCP server 动态提供的外部工具
 
 同一轮模型返回多个工具调用时，PaiCLI 会并行执行这些工具；如果工具之间有依赖关系，模型应分多轮调用。
 
-文件类工具（`read_file` / `write_file` / `list_dir` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。详见 `/policy`。
+文件类工具（`read_file` / `write_file` / `list_dir` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。所有 `mcp__` 前缀工具默认触发 HITL 和审计。详见 `/policy`。
 
 ## 命令
 
@@ -357,6 +394,11 @@ I
 - `/hitl on` - 启用危险操作人工审批（HITL）
 - `/hitl off` - 关闭 HITL 审批
 - `/hitl` - 查看 HITL 当前状态
+- `/mcp` - 查看所有 MCP server 状态
+- `/mcp restart <name>` - 重启单个 MCP server
+- `/mcp logs <name>` - 查看 MCP server 最近 200 行 stderr 日志
+- `/mcp disable <name>` - 运行时禁用 MCP server 并移除其工具
+- `/mcp enable <name>` - 运行时启用 MCP server
 - `/policy` - 查看安全策略状态（路径围栏 / 命令黑名单 / 资源上限 / 审计目录）
 - `/audit [N]` - 查看今日最近 N 条危险工具审计记录（默认 10）
 - `/memory` / `/mem` - 查看记忆系统状态

@@ -121,7 +121,20 @@ public class AuditLog {
 
     private static String truncate(String s) {
         if (s == null) return null;
-        return s.length() <= MAX_FIELD_CHARS ? s : s.substring(0, MAX_FIELD_CHARS) + "...(truncated)";
+        String sanitized = sanitize(s);
+        return sanitized.length() <= MAX_FIELD_CHARS ? sanitized : sanitized.substring(0, MAX_FIELD_CHARS) + "...(truncated)";
+    }
+
+    static String sanitize(String s) {
+        if (s == null) return null;
+        String sanitized = s.replaceAll("(?i)Bearer\\s+[^\\s\"'}]+", "Bearer ***");
+        sanitized = sanitized.replaceAll(
+                "(?i)(\"?(?:token|key|password|secret|authorization)\"?\\s*[:=]\\s*\")([^\"]+)(\")",
+                "$1***$3");
+        sanitized = sanitized.replaceAll(
+                "(?i)(\\b(?:token|key|password|secret|authorization)\\b\\s*[:=]\\s*)([^\\s,}]+)",
+                "$1***");
+        return sanitized;
     }
 
     public record AuditEntry(

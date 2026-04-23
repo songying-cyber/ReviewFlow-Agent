@@ -8,6 +8,7 @@ import com.paicli.hitl.HitlToolRegistry;
 import com.paicli.hitl.TerminalHitlHandler;
 import com.paicli.llm.LlmClient;
 import com.paicli.llm.LlmClientFactory;
+import com.paicli.mcp.McpServerManager;
 import com.paicli.plan.ExecutionPlan;
 import com.paicli.rag.CodeIndex;
 import com.paicli.hitl.ApprovalPolicy;
@@ -35,13 +36,13 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * PaiCLI v9.0.0 - Web-aware Tool CLI
- * 支持 ReAct、Plan-and-Execute、Memory、RAG、Multi-Agent、HITL、并行工具调用、多模型切换
- * 第 9 期新增：web_search（智谱 / SerpAPI / SearXNG 三 provider）、web_fetch（HTTP + readability）
+ * PaiCLI v10.0.0 - MCP-Enabled Agent CLI
+ * 支持 ReAct、Plan-and-Execute、Memory、RAG、Multi-Agent、HITL、并行工具调用、多模型切换、MCP
+ * 第 10 期新增：stdio / Streamable HTTP MCP server 自动接入，工具动态注册为 mcp__{server}__{tool}
  * HITL 增强：路径围栏（PathGuard）、命令快速拒绝（CommandGuard）、操作审计链（AuditLog）—— 见 com.paicli.policy
  */
 public class Main {
-    private static final String VERSION = "9.0.0";
+    private static final String VERSION = "10.0.0";
     private static final String ENV_FILE = ".env";
     private static final String LOG_DIR_PROPERTY = "paicli.log.dir";
     private static final String LOG_LEVEL_PROPERTY = "paicli.log.level";
@@ -123,6 +124,17 @@ public class Main {
 
             TerminalHitlHandler hitlHandler = new TerminalHitlHandler(false);
             HitlToolRegistry hitlToolRegistry = new HitlToolRegistry(hitlHandler);
+            McpServerManager mcpServerManager = new McpServerManager(hitlToolRegistry, Path.of("."));
+            try {
+                mcpServerManager.loadConfiguredServers();
+                mcpServerManager.startAll();
+                Runtime.getRuntime().addShutdownHook(new Thread(mcpServerManager::close, "paicli-mcp-shutdown"));
+                System.out.println(mcpServerManager.startupSummary());
+                System.out.println();
+            } catch (Exception e) {
+                System.out.println("⚠️ MCP 初始化失败: " + e.getMessage());
+                System.out.println("   可检查 ~/.paicli/mcp.json 或 .paicli/mcp.json\n");
+            }
 
             Agent reactAgent = new Agent(llmClient, hitlToolRegistry);
             System.out.println("🔄 使用 ReAct 模式\n");
@@ -163,7 +175,7 @@ public class Main {
                 switch (command.type()) {
                     case UNKNOWN_COMMAND -> {
                         System.out.println("❌ 未知命令: " + command.payload());
-                        System.out.println("可用命令：/model /plan /team /hitl /policy /audit /clear /context /memory /memory clear /save /index /search /graph /exit\n");
+                        System.out.println("可用命令：/model /plan /team /hitl /mcp /policy /audit /clear /context /memory /memory clear /save /index /search /graph /exit\n");
                         continue;
                     }
                     case EXIT -> {
@@ -267,6 +279,27 @@ public class Main {
                     }
                     case AUDIT_TAIL -> {
                         printAuditTail(reactAgent, command.payload());
+                        continue;
+                    }
+                    case MCP_LIST -> {
+                        System.out.println(mcpServerManager.formatStatus());
+                        System.out.println();
+                        continue;
+                    }
+                    case MCP_RESTART -> {
+                        printMcpCommandResult(mcpServerManager.restart(command.payload()));
+                        continue;
+                    }
+                    case MCP_LOGS -> {
+                        printMcpCommandResult(mcpServerManager.logs(command.payload()));
+                        continue;
+                    }
+                    case MCP_DISABLE -> {
+                        printMcpCommandResult(mcpServerManager.disable(command.payload()));
+                        continue;
+                    }
+                    case MCP_ENABLE -> {
+                        printMcpCommandResult(mcpServerManager.enable(command.payload()));
                         continue;
                     }
                     case INDEX_CODE -> {
@@ -623,6 +656,7 @@ public class Main {
                 "计划生成后可直接执行、补充要求重规划，或取消",
                 "输入 '/hitl on' 启用危险操作人工审批（HITL）",
                 "输入 '/hitl off' 关闭 HITL 审批",
+                "输入 '/mcp' 查看 MCP server，'/mcp restart|logs|disable|enable <name>' 管理 MCP",
                 "输入 '/policy' 查看安全策略状态（路径围栏 / 命令黑名单 / 资源上限）",
                 "输入 '/audit [N]' 查看最近 N 条危险工具审计记录（默认 10）",
                 "输入 '/index [路径]' 为代码库建立向量索引",
@@ -641,12 +675,17 @@ public class Main {
     private static void printPolicyStatus(Agent reactAgent) {
         System.out.println("🛡️ 安全策略状态：");
         System.out.println("   项目根: " + reactAgent.getToolRegistry().getProjectPath());
-        System.out.println("   危险工具: " + String.join(", ", ApprovalPolicy.getDangerousTools()));
+        System.out.println("   危险工具: " + String.join(", ", ApprovalPolicy.getDangerousTools()) + "，以及所有 mcp__ 前缀工具");
         System.out.println("   路径围栏: 强制限定在项目根之内（read_file / write_file / list_dir / create_project）");
         System.out.println("   命令黑名单: sudo / rm -rf 全盘 / mkfs / dd of=/dev / fork bomb / curl|sh / find / / chmod 777 / / shutdown");
         System.out.println("   写入文件上限: 5MB");
         System.out.println("   命令执行上限: 60 秒，输出 8KB（截断）");
         System.out.println("   审计目录: " + reactAgent.getToolRegistry().getAuditLog().getAuditDir());
+        System.out.println();
+    }
+
+    private static void printMcpCommandResult(String result) {
+        System.out.println(result);
         System.out.println();
     }
 
@@ -873,7 +912,7 @@ public class Main {
         System.out.println("║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║");
         System.out.println("║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║");
         System.out.println("║                                                          ║");
-        System.out.printf("║      Web-aware Tool CLI %-33s║%n", "v" + VERSION);
+        System.out.printf("║      MCP-Enabled Agent CLI %-28s║%n", "v" + VERSION);
         System.out.println("║                                                          ║");
         System.out.println("╚══════════════════════════════════════════════════════════╝");
         System.out.println();

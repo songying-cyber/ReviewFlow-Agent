@@ -166,4 +166,14 @@ class CliCommandParserTest {
         assertEquals(CliCommandParser.CommandType.AUDIT_TAIL, command.type());
         assertEquals("20", command.payload());
     }
+
+    @Test
+    void parsesMcpCommands() {
+        assertEquals(CliCommandParser.CommandType.MCP_LIST, CliCommandParser.parse("/mcp").type());
+        assertEquals(CliCommandParser.CommandType.MCP_RESTART, CliCommandParser.parse("/mcp restart filesystem").type());
+        assertEquals("filesystem", CliCommandParser.parse("/mcp restart filesystem").payload());
+        assertEquals(CliCommandParser.CommandType.MCP_LOGS, CliCommandParser.parse("/mcp logs filesystem").type());
+        assertEquals(CliCommandParser.CommandType.MCP_DISABLE, CliCommandParser.parse("/mcp disable filesystem").type());
+        assertEquals(CliCommandParser.CommandType.MCP_ENABLE, CliCommandParser.parse("/mcp enable filesystem").type());
+    }
 }

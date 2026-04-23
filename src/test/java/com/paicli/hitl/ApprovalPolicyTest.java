@@ -44,6 +44,12 @@ class ApprovalPolicyTest {
     }
 
     @Test
+    void mcpToolRequiresApproval() {
+        assertTrue(ApprovalPolicy.requiresApproval("mcp__filesystem__read_file"));
+        assertEquals("filesystem", ApprovalPolicy.mcpServerName("mcp__filesystem__read_file"));
+    }
+
+    @Test
     void executeCommandIsHighDanger() {
         assertEquals("🔴 高危", ApprovalPolicy.getDangerLevel("execute_command"));
     }
@@ -64,6 +70,12 @@ class ApprovalPolicyTest {
     }
 
     @Test
+    void mcpToolHasMcpDangerLevel() {
+        assertEquals("🟡 MCP", ApprovalPolicy.getDangerLevel("mcp__demo__tool"));
+        assertTrue(ApprovalPolicy.getRiskDescription("mcp__demo__tool").contains("MCP"));
+    }
+
+    @Test
     void getDangerousToolsContainsAllThree() {
         Set<String> tools = ApprovalPolicy.getDangerousTools();
         assertTrue(tools.contains("write_file"));
@@ -77,5 +89,42 @@ class ApprovalPolicyTest {
         assertFalse(ApprovalPolicy.getRiskDescription("write_file").isBlank());
         assertFalse(ApprovalPolicy.getRiskDescription("execute_command").isBlank());
         assertFalse(ApprovalPolicy.getRiskDescription("create_project").isBlank());
+    }
+
+    @Test
+    void isMcpToolRecognizesPrefix() {
+        assertTrue(ApprovalPolicy.isMcpTool("mcp__filesystem__read_file"));
+        assertTrue(ApprovalPolicy.isMcpTool("mcp__a__b"));
+    }
+
+    @Test
+    void isMcpToolRejectsNonMcpNames() {
+        assertFalse(ApprovalPolicy.isMcpTool(null));
+        assertFalse(ApprovalPolicy.isMcpTool(""));
+        assertFalse(ApprovalPolicy.isMcpTool("read_file"));
+        assertFalse(ApprovalPolicy.isMcpTool("MCP__server__tool"), "前缀大小写敏感，仅小写 mcp__ 才识别");
+        assertFalse(ApprovalPolicy.isMcpTool("mcp_singleunderscore"));
+    }
+
+    @Test
+    void mcpServerNameReturnsNullForNonMcpTool() {
+        assertNull(ApprovalPolicy.mcpServerName(null));
+        assertNull(ApprovalPolicy.mcpServerName("read_file"));
+        assertNull(ApprovalPolicy.mcpServerName("write_file"));
+    }
+
+    @Test
+    void mcpServerNameExtractsServerSegment() {
+        assertEquals("filesystem", ApprovalPolicy.mcpServerName("mcp__filesystem__read_file"));
+        assertEquals("git", ApprovalPolicy.mcpServerName("mcp__git__status"));
+        // 工具名内可以再含 __，server 名只取第一段
+        assertEquals("server", ApprovalPolicy.mcpServerName("mcp__server__tool__with__underscores"));
+    }
+
+    @Test
+    void mcpToolStaysOutsideOfBuiltinDangerousTools() {
+        // mcp__ 前缀不应污染 DANGEROUS_TOOLS 集合本身（保证 set 含义清晰）
+        assertEquals(3, ApprovalPolicy.getDangerousTools().size());
+        assertFalse(ApprovalPolicy.getDangerousTools().contains("mcp__demo__tool"));
     }
 }
