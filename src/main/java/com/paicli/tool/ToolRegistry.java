@@ -12,6 +12,7 @@ import com.paicli.policy.AuditLog;
 import com.paicli.policy.CommandGuard;
 import com.paicli.policy.PathGuard;
 import com.paicli.policy.PolicyException;
+import com.paicli.runtime.CancellationContext;
 import com.paicli.web.FetchResult;
 import com.paicli.web.HtmlExtractor;
 import com.paicli.web.NetworkPolicy;
@@ -461,7 +462,7 @@ public class ToolRegistry {
      * @param invoker    工具执行器：输入 JSON 参数字符串，输出给 LLM 看的字符串结果。
      *                   typically lambda 在内部调用 McpClient.callTool 并处理异常 → 字符串。
      */
-    public void registerMcpTool(McpToolDescriptor descriptor, Function<String, String> invoker) {
+    public synchronized void registerMcpTool(McpToolDescriptor descriptor, Function<String, String> invoker) {
         Objects.requireNonNull(descriptor, "descriptor");
         Objects.requireNonNull(invoker, "invoker");
         String toolName = descriptor.namespacedName();
@@ -475,12 +476,30 @@ public class ToolRegistry {
         ));
     }
 
-    public void unregisterMcpTool(String toolName) {
+    public synchronized void unregisterMcpTool(String toolName) {
         if (toolName == null || toolName.isBlank()) {
             return;
         }
         mcpTools.remove(toolName);
         tools.remove(toolName);
+    }
+
+    public synchronized void replaceMcpToolsForServer(String serverName, List<McpToolDescriptor> newTools,
+                                                      Function<McpToolDescriptor, Function<String, String>> invokerFactory) {
+        Objects.requireNonNull(serverName, "serverName");
+        Objects.requireNonNull(newTools, "newTools");
+        Objects.requireNonNull(invokerFactory, "invokerFactory");
+        String prefix = "mcp__" + serverName + "__";
+        List<String> existing = mcpTools.keySet().stream()
+                .filter(name -> name.startsWith(prefix))
+                .toList();
+        for (String toolName : existing) {
+            mcpTools.remove(toolName);
+            tools.remove(toolName);
+        }
+        for (McpToolDescriptor descriptor : newTools) {
+            registerMcpTool(descriptor, invokerFactory.apply(descriptor));
+        }
     }
 
     /**
@@ -492,6 +511,9 @@ public class ToolRegistry {
      * - 其他情况 → allow（仅表示工具调用真的发生过，工具内部的业务错误仍以返回字符串呈现给 LLM）
      */
     public String executeTool(String name, String argumentsJson) {
+        if (CancellationContext.isCancelled()) {
+            return "用户取消了此次工具调用";
+        }
         Tool tool = tools.get(name);
         if (tool == null) {
             return "未知工具: " + name;
@@ -548,6 +570,11 @@ public class ToolRegistry {
         if (invocations == null || invocations.isEmpty()) {
             return List.of();
         }
+        if (CancellationContext.isCancelled()) {
+            return invocations.stream()
+                    .map(invocation -> ToolExecutionResult.failed(invocation, "用户取消了此次工具调用"))
+                    .toList();
+        }
         if (invocations.size() == 1) {
             ToolInvocation invocation = invocations.get(0);
             long startedAt = System.nanoTime();
@@ -565,6 +592,9 @@ public class ToolRegistry {
         try {
             List<Callable<ToolExecutionResult>> tasks = invocations.stream()
                     .<Callable<ToolExecutionResult>>map(invocation -> () -> {
+                        if (CancellationContext.isCancelled()) {
+                            return ToolExecutionResult.failed(invocation, "用户取消了此次工具调用");
+                        }
                         long startedAt = System.nanoTime();
                         String result = executeTool(invocation.name(), invocation.argumentsJson());
                         return ToolExecutionResult.completed(invocation, result, elapsedMillis(startedAt));
@@ -665,6 +695,12 @@ public class ToolRegistry {
             String output = getCommandOutput(outputFuture);
             int exitCode = process.exitValue();
             return String.format("命令执行完成 (exit code: %d)\n%s", exitCode, output);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            if (process != null) {
+                process.destroyForcibly();
+            }
+            return "用户取消了此次工具调用";
         } catch (Exception e) {
             if (process != null) {
                 process.destroyForcibly();

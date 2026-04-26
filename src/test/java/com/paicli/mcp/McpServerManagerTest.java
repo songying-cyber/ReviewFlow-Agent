@@ -60,6 +60,24 @@ class McpServerManagerTest {
     }
 
     @Test
+    void resourcesCapabilityRegistersVirtualResourceTools() throws Exception {
+        enqueueInitialize("{\"resources\":{\"listChanged\":true},\"prompts\":{}}");
+        enqueueToolsList(toolJson("echo", "Echo back text"));
+        enqueueResourcesList();
+
+        loadServersFromMap(Map.of("demo", httpConfig(webServer)));
+        manager.startAll();
+
+        assertTrue(registry.hasTool("mcp__demo__echo"));
+        assertTrue(registry.hasTool("mcp__demo__list_resources"));
+        assertTrue(registry.hasTool("mcp__demo__read_resource"));
+        assertTrue(manager.resourceCandidates().stream().anyMatch(r -> r.uri().equals("file://README.md")));
+
+        enqueuePromptsList();
+        assertTrue(manager.prompts("demo").contains("Review (review)"));
+    }
+
+    @Test
     void singleServerFailureDoesNotBlockOthers() throws Exception {
         // 一个 OK 的 server + 一个引用未设置 ${VAR} 的 server
         enqueueInitialize();
@@ -134,11 +152,16 @@ class McpServerManagerTest {
     // ---- helpers ----
 
     private void enqueueInitialize() {
+        enqueueInitialize(null);
+    }
+
+    private void enqueueInitialize(String capabilitiesJson) {
+        String capabilities = capabilitiesJson == null ? "" : ",\"capabilities\":" + capabilitiesJson;
         // initialize 请求响应
         webServer.enqueue(new MockResponse()
                 .setHeader("Content-Type", "application/json")
                 .setHeader("Mcp-Session-Id", "session-test")
-                .setBody("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}"));
+                .setBody("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"" + capabilities + "}}"));
         // initialized 通知（无 id），server 仍要返回 200，body 任意
         webServer.enqueue(new MockResponse()
                 .setHeader("Content-Type", "application/json")
@@ -149,6 +172,26 @@ class McpServerManagerTest {
         webServer.enqueue(new MockResponse()
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[" + toolJson + "]}}"));
+    }
+
+    private void enqueueResourcesList() {
+        webServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"jsonrpc":"2.0","id":3,"result":{"resources":[
+                          {"uri":"file://README.md","name":"README.md","description":"docs","mimeType":"text/markdown"}
+                        ]}}
+                        """));
+    }
+
+    private void enqueuePromptsList() {
+        webServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"jsonrpc":"2.0","id":4,"result":{"prompts":[
+                          {"name":"review","title":"Review","description":"Review code"}
+                        ]}}
+                        """));
     }
 
     private static String toolJson(String name, String description) {

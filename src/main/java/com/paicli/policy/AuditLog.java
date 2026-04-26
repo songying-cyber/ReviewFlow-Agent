@@ -36,6 +36,7 @@ public class AuditLog {
     public static final String APPROVER_HITL = "hitl";
     public static final String APPROVER_POLICY = "policy";
     public static final String APPROVER_NONE = "none";
+    public static final String APPROVER_MENTION = "mention";
 
     public static final String OUTCOME_ALLOW = "allow";
     public static final String OUTCOME_DENY = "deny";
@@ -149,6 +150,11 @@ public class AuditLog {
         public static AuditEntry allow(String tool, String args, long durationMs) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
                     OUTCOME_ALLOW, null, APPROVER_NONE, durationMs);
+        }
+
+        public static AuditEntry allowByMention(String tool, String args, long durationMs) {
+            return new AuditEntry(Instant.now().toString(), tool, truncate(args),
+                    OUTCOME_ALLOW, null, APPROVER_MENTION, durationMs);
         }
 
         public static AuditEntry denyByHitl(String tool, String args, String reason, long durationMs) {

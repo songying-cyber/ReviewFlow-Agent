@@ -175,5 +175,15 @@ class CliCommandParserTest {
         assertEquals(CliCommandParser.CommandType.MCP_LOGS, CliCommandParser.parse("/mcp logs filesystem").type());
         assertEquals(CliCommandParser.CommandType.MCP_DISABLE, CliCommandParser.parse("/mcp disable filesystem").type());
         assertEquals(CliCommandParser.CommandType.MCP_ENABLE, CliCommandParser.parse("/mcp enable filesystem").type());
+        assertEquals(CliCommandParser.CommandType.MCP_RESOURCES, CliCommandParser.parse("/mcp resources filesystem").type());
+        assertEquals("filesystem", CliCommandParser.parse("/mcp resources filesystem").payload());
+        assertEquals(CliCommandParser.CommandType.MCP_PROMPTS, CliCommandParser.parse("/mcp prompts filesystem").type());
+        assertEquals("filesystem", CliCommandParser.parse("/mcp prompts filesystem").payload());
+    }
+
+    @Test
+    void parsesCancelCommand() {
+        assertEquals(CliCommandParser.CommandType.CANCEL, CliCommandParser.parse("/cancel").type());
+        assertEquals(CliCommandParser.CommandType.CANCEL, CliCommandParser.parse("cancel").type());
     }
 }

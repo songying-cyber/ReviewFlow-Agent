@@ -5,6 +5,7 @@ final class CliCommandParser {
     enum CommandType {
         NONE,
         UNKNOWN_COMMAND,
+        CANCEL,
         EXIT,
         CLEAR,
         SWITCH_MODEL,
@@ -24,7 +25,9 @@ final class CliCommandParser {
         MCP_RESTART,
         MCP_LOGS,
         MCP_DISABLE,
-        MCP_ENABLE
+        MCP_ENABLE,
+        MCP_RESOURCES,
+        MCP_PROMPTS
     }
 
     record ParsedCommand(CommandType type, String payload) {
@@ -51,6 +54,10 @@ final class CliCommandParser {
                 || trimmed.equalsIgnoreCase("exit")
                 || trimmed.equalsIgnoreCase("quit")) {
             return new ParsedCommand(CommandType.EXIT, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/cancel") || trimmed.equalsIgnoreCase("cancel")) {
+            return new ParsedCommand(CommandType.CANCEL, null);
         }
 
         if (trimmed.equalsIgnoreCase("/clear") || trimmed.equalsIgnoreCase("clear")) {
@@ -151,6 +158,14 @@ final class CliCommandParser {
 
         if (trimmed.equalsIgnoreCase("/mcp")) {
             return new ParsedCommand(CommandType.MCP_LIST, null);
+        }
+
+        if (trimmed.regionMatches(true, 0, "/mcp resources ", 0, 15)) {
+            return new ParsedCommand(CommandType.MCP_RESOURCES, trimmed.substring(15).trim());
+        }
+
+        if (trimmed.regionMatches(true, 0, "/mcp prompts ", 0, 13)) {
+            return new ParsedCommand(CommandType.MCP_PROMPTS, trimmed.substring(13).trim());
         }
 
         if (trimmed.regionMatches(true, 0, "/mcp restart ", 0, 13)) {

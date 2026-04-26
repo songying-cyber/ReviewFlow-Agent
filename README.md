@@ -1,6 +1,6 @@
 # PaiCLI
 
-一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十期的 `MCP 协议核心`。
+一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十一期的 `MCP 高级能力`。
 
 ## 演进历程
 
@@ -82,6 +82,16 @@
 - CLI 命令：`/mcp`、`/mcp restart <name>`、`/mcp logs <name>`、`/mcp disable <name>`、`/mcp enable <name>`
 - 没有 MCP 配置文件时不会启动外部 server；子系统保持开启，创建配置后重启 PaiCLI 即可加载
 
+### 第十一期：MCP 高级能力（resources 双轨）
+
+- 支持 MCP resources：server 声明 `resources` capability 后，自动注册 `mcp__{server}__list_resources` / `mcp__{server}__read_resource` 两个虚拟工具
+- 普通输入支持 `@server:protocol://path` 显式引用 resource，提交给 Agent 前展开为 `<resource>` 内联块
+- JLine 自动补全会基于启动时缓存的 resources 提供 `@...` 候选，不干扰 Plan / Team 的 raw-mode 单键交互
+- 新增 `/mcp resources <server>` 查看资源列表，`/mcp prompts <server>` 查看 prompt 模板
+- 被动处理 `notifications/tools/list_changed`、`notifications/resources/list_changed`、`notifications/resources/updated`
+- 运行中输入 `/cancel` 并回车可请求取消当前 Agent run；ReAct、Plan、Team、工具批次和 `execute_command` 会协同检查取消信号
+- OAuth 与 `sampling/createMessage` 已确认延后，不属于本期交付
+
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
 `com.paicli.policy` 包，作为 HITL 之外的辅助层（不是沙箱、不提供进程隔离）：
@@ -110,7 +120,7 @@
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      MCP-Enabled Agent CLI v10.0.0                    ║
+║      MCP-Native Agent CLI v11.0.0                     ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -190,6 +200,13 @@
 - 📋 结构化审计：危险工具调用按天写一行 JSONL 到 `~/.paicli/audit/`，可通过 `/audit [N]` 查看
 - 🧱 定位：HITL 之外的辅助层，不是沙箱、不提供进程隔离
 
+### 第十一期
+
+- 📚 MCP resources 双轨：模型可调用 `mcp__{server}__list_resources` / `mcp__{server}__read_resource`，用户也可手动输入 `@server:protocol://path`
+- ⌨️ 普通输入支持 resource 自动补全，Plan / Team 审阅的 raw-mode 单键交互保持不变
+- 🧩 `/mcp prompts <server>` 查看 server 暴露的 prompts，但不自动注入对话
+- 🔄 被动响应 MCP list_changed / resources updated 通知，刷新工具列表或让 resource cache 失效
+
 ## 快速开始
 
 ### 1. 配置 API Key
@@ -264,6 +281,16 @@ MCP 子系统默认开启。没有配置文件时不会启动外部 server；需
 ```
 
 `command` 表示 stdio server，`url` 表示 Streamable HTTP server。`${PROJECT_DIR}` / `${HOME}` 是内置变量，其他 `${VAR}` 从环境变量读取；缺失会在启动时直接提示。
+
+如果 server 支持 resources，可以直接查看或引用：
+
+```text
+/mcp resources filesystem
+/mcp prompts filesystem
+帮我看下 @filesystem:file://README.md 这份文档
+```
+
+OAuth 和 `sampling/createMessage` 当前未实现；远程 server 需要鉴权时仍使用 `headers` + 环境变量注入 Bearer token。
 
 ### 3. 编译运行
 
@@ -380,6 +407,7 @@ I
 - `web_search` - 搜索互联网获取实时信息
 - `web_fetch` - 抓取已知 URL 并提取正文 Markdown
 - `mcp__{server}__{tool}` - MCP server 动态提供的外部工具
+- `mcp__{server}__list_resources` / `mcp__{server}__read_resource` - 支持 resources 的 MCP server 自动注册的虚拟工具
 
 同一轮模型返回多个工具调用时，PaiCLI 会并行执行这些工具；如果工具之间有依赖关系，模型应分多轮调用。
 
@@ -391,6 +419,7 @@ I
 - `/plan <任务>` - 直接用 Plan-and-Execute 模式执行这条任务
 - `/team` - 下一条任务使用 Multi-Agent 协作模式
 - `/team <任务>` - 直接用 Multi-Agent 协作模式执行这条任务
+- `/cancel` - 运行中请求取消当前任务；空闲时会提示当前没有正在运行的任务
 - `/hitl on` - 启用危险操作人工审批（HITL）
 - `/hitl off` - 关闭 HITL 审批
 - `/hitl` - 查看 HITL 当前状态
@@ -399,6 +428,8 @@ I
 - `/mcp logs <name>` - 查看 MCP server 最近 200 行 stderr 日志
 - `/mcp disable <name>` - 运行时禁用 MCP server 并移除其工具
 - `/mcp enable <name>` - 运行时启用 MCP server
+- `/mcp resources <name>` - 查看 MCP server 暴露的 resources
+- `/mcp prompts <name>` - 查看 MCP server 暴露的 prompts（只查看，不注入对话）
 - `/policy` - 查看安全策略状态（路径围栏 / 命令黑名单 / 资源上限 / 审计目录）
 - `/audit [N]` - 查看今日最近 N 条危险工具审计记录（默认 10）
 - `/memory` / `/mem` - 查看记忆系统状态

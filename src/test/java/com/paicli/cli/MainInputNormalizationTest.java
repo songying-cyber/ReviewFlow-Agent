@@ -13,6 +13,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MainInputNormalizationTest {
@@ -80,6 +81,42 @@ class MainInputNormalizationTest {
         lineReader.getHistory().add("最近一条");
 
         assertEquals("", Main.seedBufferForHistoryNavigation(lineReader, "[B"));
+    }
+
+    @Test
+    void decideEscCancelTriggersOnStandaloneEsc() {
+        // 单 ESC（escTail 为空）→ 取消
+        assertTrue(Main.decideEscCancel(27, ""));
+        assertTrue(Main.decideEscCancel(27, null));
+    }
+
+    @Test
+    void decideEscCancelIgnoresArrowKeyEscapeSequence() {
+        // 上方向键 ESC[A → CONTROL_SEQUENCE，不取消
+        assertFalse(Main.decideEscCancel(27, "[A"));
+        // 下方向键
+        assertFalse(Main.decideEscCancel(27, "[B"));
+        // 应用模式方向键
+        assertFalse(Main.decideEscCancel(27, "OA"));
+    }
+
+    @Test
+    void decideEscCancelIgnoresBracketedPaste() {
+        assertFalse(Main.decideEscCancel(27, "[200~hello"));
+    }
+
+    @Test
+    void decideEscCancelIgnoresNonEscFirstByte() {
+        // 普通字符不应触发
+        assertFalse(Main.decideEscCancel((int) 'a', null));
+        assertFalse(Main.decideEscCancel((int) '/', "cancel"));
+        assertFalse(Main.decideEscCancel(0, null));
+        assertFalse(Main.decideEscCancel(-1, null));
+    }
+
+    @Test
+    void readEscCancelHandlesNullTerminalSafely() {
+        assertFalse(Main.readEscCancel(null));
     }
 
     private static LineReader newLineReader() throws Exception {

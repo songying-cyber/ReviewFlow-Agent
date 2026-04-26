@@ -237,30 +237,43 @@
 
 ---
 
-## 第11期：MCP 高级能力（resources + prompts + sampling + 鉴权 + 双向通知）
+## 第11期：MCP 高级能力（resources 双轨 + prompts 查看 + 被动通知） ✅
 
 **前置依赖**：第 10 期 MCP 协议核心
 
-**目标**：补齐 MCP 协议的非工具能力，覆盖企业级 server 的真实需求（鉴权、长 running、动态变更）。
+**目标**：优先补齐 MCP resources 体验，对齐 Claude Code 的资源引用方式，并提供 prompts 查看、被动通知处理与运行中取消。OAuth 与 sampling 已确认延后，不计入本期交付。
 
-**功能迭代**：
-- `resources/list` / `resources/read` / `resources/subscribe` + 变更通知（拿到 server 暴露的可寻址内容）
-- `prompts/list` / `prompts/get`：参数化提示模板，可作为 `/team` / `/plan` 的输入
-- `sampling/createMessage`：server 反向请求 client 调用 LLM（要走 LlmClient + HITL + 预算控制）
-- Streamable HTTP 远程鉴权：
-  - Bearer token（环境变量注入 Authorization header）
-  - OAuth 2.0 authorization code flow
-  - 自定义 header（企业 server 常见）
-- `notifications/tools/list_changed`：工具列表动态更新，无需重启
-- `notifications/cancelled`：长时工具调用可取消，与第 7 期工具批次超时协同
-- 进程崩溃自动重启（指数退避，最多 3 次）
+**功能迭代**（详细开发任务见 `docs/phase-11-mcp-advanced.md`）：
+
+- **resources 双轨**（参考 Claude Code）：
+  - 工具层：每个支持 resources 的 server 注册 `mcp__{server}__list_resources` / `mcp__{server}__read_resource` 虚拟工具，让 LLM 自决
+  - 用户 @-mention 层：`@server:protocol://path` 语法 + jline 自动补全，输入预处理时 fetch 内容并替换为 `<resource>` 内联块
+  - `resources/list_changed` / `resources/updated` 到达后只做缓存失效，下次 read/list 重拉
+- **prompts 查看**：`/mcp prompts <server>` 展示 server 暴露的 prompt 模板；不加载到对话流
+- **双向通知（被动）**：
+  - `tools/list_changed` → 重拉工具列表 → `replaceMcpToolsForServer` 全量替换
+  - `resources/list_changed` / `resources/updated` → cache 失效
+  - **不做 health ping**，不主动探活，避免对按量或按月计费 server 造成额外负担
+- **新增 CLI**：`/mcp resources <server>`、`/mcp prompts <server>`
+- **运行中取消**：任务执行期间输入 `/cancel` 并回车，请求取消当前 Agent run；ReAct、Plan、Team、工具批次与 `execute_command` 在边界处协同检查取消信号
+
+**不做（明确边界）**：
+- OAuth 2.0 Authorization Code + PKCE
+- `sampling/createMessage`
+- MCP server 自动重启
+- prompts 加载到对话流（仅保留 `/mcp prompts` 查看 server 暴露的模板）
+- resources 自动注入 system prompt（留给第 12 期长上下文模式决定）
+- server health ping / heartbeat
+- progress / logging notification 的 UI 展示
+- OAuth Device Flow / Client Credentials
 
 **核心知识点**：
-- 双向通信（client ↔ server 双向通知）
-- OAuth 2.0 在 Agent CLI 场景的落地
-- 反向 LLM 调用（sampling）的预算 / 安全控制
+- MCP resources/list + resources/read 的工具化封装
+- 用户显式 `@server:protocol://path` resource 引用与上下文注入
+- jline `Completer` 与 raw mode 的协同（@-mention autocomplete 不能干扰 plan/team raw mode 路径）
+- 被动通知响应模式 vs 主动 ping 的取舍（按月计费的 server 必须不主动 ping）
 
-**估算**：4–5 天
+**验证**：`mvn test` 336 tests 通过
 
 ---
 
@@ -281,12 +294,14 @@
   - 缓存边界放在 system prompt 之后、对话历史之前，最大化命中率
 - 上下文成本可见化：每轮工具结束后打印 `已用 X / Y token (cached: Z, ¥cost: A)`
 - 检索策略自适应：根据剩余 budget 动态决定 RAG top-K 与代码片段长度
-- `/context` 命令扩展：显示当前 window 占用率、cache 命中率、模式（long / short）
+- **MCP resources 自动注入**（与第 11 期联动）：长模式下，把所有 server 已知 resources 的 URI + 描述（不含 body）作为索引注入 system prompt，LLM 可以不调 list_resources 直接判断要不要 read；短模式不注入（按需 list 即可）
+- `/context` 命令扩展：显示当前 window 占用率、cache 命中率、模式（long / short）、resources 是否已自动注入
 
 **核心知识点**：
 - 长上下文模型的成本模型（input vs cached input 价差通常 5–10 倍）
 - prompt caching 的缓存边界设计
 - RAG 在长上下文时代的角色变化（从"压缩选择"到"加速 + 精排"）
+- 资源索引（MCP resources URI + 描述）作为长上下文的有效填充
 
 **估算**：3–4 天
 
@@ -423,4 +438,4 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ---
 
-*已完成第 10 期 MCP 协议核心（stdio + Streamable HTTP，默认开启），下一步进入第 11 期 MCP 高级能力。*
+*已完成第 11 期 MCP 高级能力首批交付（resources 双轨、prompts 查看、被动通知、运行中取消）。下一步进入第 12 期长上下文工程，OAuth / sampling / recovery 留给后续 MCP 增强期。*

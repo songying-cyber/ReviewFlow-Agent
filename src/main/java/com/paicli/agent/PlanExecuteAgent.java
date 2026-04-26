@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.llm.LlmClient;
 import com.paicli.memory.MemoryManager;
 import com.paicli.plan.*;
+import com.paicli.runtime.CancellationContext;
 import com.paicli.util.AnsiStyle;
 import com.paicli.tool.ToolRegistry;
 import com.paicli.tool.ToolRegistry.ToolExecutionResult;
@@ -157,6 +158,9 @@ public class PlanExecuteAgent {
         memoryManager.addUserMessage(userInput);
         StreamState streamState = new StreamState();
         try {
+            if (CancellationContext.isCancelled()) {
+                return "⏹️ 已取消当前计划执行。";
+            }
             PlanRunOutcome outcome = runWithPlan(userInput, streamState);
             if (outcome.persistAssistantMessage() && outcome.result() != null && !outcome.result().isBlank()) {
                 memoryManager.addAssistantMessage("[计划结果] " + outcome.result());
@@ -211,6 +215,9 @@ public class PlanExecuteAgent {
         Map<String, Boolean> streamedTaskOutputs = new HashMap<>();
 
         while (true) {
+            if (CancellationContext.isCancelled()) {
+                return "⏹️ 已取消当前计划执行。";
+            }
             List<Task> executableTasks = getExecutableTasksInOrder(plan);
             if (executableTasks.isEmpty()) {
                 break;
@@ -393,6 +400,10 @@ public class PlanExecuteAgent {
         int totalOutputTokens = 0;
 
         while (iteration < MAX_TASK_ITERATIONS) {
+            if (CancellationContext.isCancelled()) {
+                streamRenderer.finish();
+                return TaskRunResult.of("⏹️ 已取消任务 [" + task.getId() + "]。", streamRenderer.hasStreamedOutput());
+            }
             iteration++;
 
             LlmClient.ChatResponse response = llmClient.chat(
@@ -400,6 +411,10 @@ public class PlanExecuteAgent {
                     toolRegistry.getToolDefinitions(),
                     streamRenderer
             );
+            if (CancellationContext.isCancelled()) {
+                streamRenderer.finish();
+                return TaskRunResult.of("⏹️ 已取消任务 [" + task.getId() + "]。", streamRenderer.hasStreamedOutput());
+            }
 
             totalInputTokens += response.inputTokens();
             totalOutputTokens += response.outputTokens();

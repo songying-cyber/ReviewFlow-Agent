@@ -3,6 +3,8 @@ package com.paicli.mcp;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.mcp.protocol.McpToolDescriptor;
+import com.paicli.mcp.resources.McpResourceContent;
+import com.paicli.mcp.resources.McpResourceDescriptor;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -169,6 +171,78 @@ class McpClientTest {
         // 应该没有新消息被发出
         assertEquals(before, transport.sentMessages().size(),
                 "close 不再发 shutdown 通知，sent 列表不应增长");
+    }
+
+    @Test
+    void listResourcesConvertsServerResources() throws Exception {
+        InMemoryTransport transport = new InMemoryTransport()
+                .handle("initialize", p -> readJson("""
+                        {"capabilities":{"resources":{"listChanged":true}}}
+                        """))
+                .handle("resources/list", p -> readJson("""
+                        {"resources":[
+                          {"uri":"file://README.md","name":"README.md","description":"docs","mimeType":"text/markdown","size":42}
+                        ]}
+                        """));
+        McpClient client = new McpClient("fs", transport);
+        client.initialize();
+
+        List<McpResourceDescriptor> resources = client.listResources();
+
+        assertTrue(client.supportsResources());
+        assertEquals(1, resources.size());
+        assertEquals("fs", resources.get(0).serverName());
+        assertEquals("file://README.md", resources.get(0).uri());
+        assertEquals("text/markdown", resources.get(0).mimeType());
+        client.close();
+    }
+
+    @Test
+    void listResourcesTreatsMethodNotFoundAsEmptyList() throws Exception {
+        InMemoryTransport transport = new InMemoryTransport()
+                .handle("initialize", p -> MAPPER.createObjectNode());
+        McpClient client = new McpClient("fs", transport);
+        client.initialize();
+
+        assertTrue(client.listResources().isEmpty());
+        client.close();
+    }
+
+    @Test
+    void readResourceReturnsTextContents() throws Exception {
+        InMemoryTransport transport = new InMemoryTransport()
+                .handle("initialize", p -> MAPPER.createObjectNode())
+                .handle("resources/read", p -> readJson("""
+                        {"contents":[{"uri":"file://README.md","mimeType":"text/markdown","text":"hello"}]}
+                        """));
+        McpClient client = new McpClient("fs", transport);
+        client.initialize();
+
+        List<McpResourceContent> contents = client.readResource("file://README.md");
+
+        assertEquals(1, contents.size());
+        assertEquals("hello", contents.get(0).text());
+        assertTrue(McpClient.formatResourceContents(contents).contains("<resource uri=\"file://README.md\""));
+        client.close();
+    }
+
+    @Test
+    void listPromptsFormatsPromptSummaries() throws Exception {
+        InMemoryTransport transport = new InMemoryTransport()
+                .handle("initialize", p -> readJson("""
+                        {"capabilities":{"prompts":{"listChanged":true}}}
+                        """))
+                .handle("prompts/list", p -> readJson("""
+                        {"prompts":[{"name":"review","title":"Review","description":"Review code"}]}
+                        """));
+        McpClient client = new McpClient("svc", transport);
+        client.initialize();
+
+        List<String> prompts = client.listPrompts();
+
+        assertTrue(client.supportsPrompts());
+        assertEquals(List.of("Review (review) - Review code"), prompts);
+        client.close();
     }
 
     private static JsonNode readJson(String json) {

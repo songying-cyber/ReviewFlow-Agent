@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -69,11 +70,33 @@ class McpToolRegistrationTest {
         });
     }
 
+    @Test
+    void replaceMcpToolsForServerAtomicallyReplacesOnlyThatServer(@TempDir Path tempDir) throws Exception {
+        withAuditDir(tempDir, () -> {
+            ToolRegistry registry = new ToolRegistry();
+            registry.registerMcpTool(sampleDescriptor("demo", "old"), args -> "old");
+            registry.registerMcpTool(sampleDescriptor("other", "keep"), args -> "keep");
+
+            registry.replaceMcpToolsForServer("demo",
+                    List.of(sampleDescriptor("demo", "new")),
+                    descriptor -> args -> "new:" + descriptor.name());
+
+            assertFalse(registry.hasTool("mcp__demo__old"));
+            assertTrue(registry.hasTool("mcp__demo__new"));
+            assertTrue(registry.hasTool("mcp__other__keep"));
+            assertEquals("new:new", registry.executeTool("mcp__demo__new", "{}"));
+        });
+    }
+
     private static McpToolDescriptor sampleDescriptor() throws Exception {
+        return sampleDescriptor("demo", "echo");
+    }
+
+    private static McpToolDescriptor sampleDescriptor(String server, String name) throws Exception {
         return new McpToolDescriptor(
-                "demo",
-                "echo",
-                "mcp__demo__echo",
+                server,
+                name,
+                "mcp__" + server + "__" + name,
                 "Echo input",
                 MAPPER.readTree("{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}}}")
         );

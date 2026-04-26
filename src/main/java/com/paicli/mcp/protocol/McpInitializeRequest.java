@@ -16,7 +16,7 @@ public final class McpInitializeRequest {
         capabilities.putObject("tools");
         ObjectNode clientInfo = root.putObject("clientInfo");
         clientInfo.put("name", "paicli");
-        clientInfo.put("version", "10.0.0");
+        clientInfo.put("version", "11.0.0");
         return root;
     }
 }

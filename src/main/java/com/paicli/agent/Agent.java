@@ -2,6 +2,7 @@ package com.paicli.agent;
 
 import com.paicli.llm.LlmClient;
 import com.paicli.memory.MemoryManager;
+import com.paicli.runtime.CancellationContext;
 import com.paicli.util.AnsiStyle;
 import com.paicli.tool.ToolRegistry;
 import com.paicli.tool.ToolRegistry.ToolExecutionResult;
@@ -111,6 +112,10 @@ public class Agent {
         // 主退出条件 = LLM 自己决定（不再调用工具就返回）；
         // budget 仅在 token 用尽 / 检测到死循环 / 超出硬轮数时兜底。
         while (true) {
+            if (CancellationContext.isCancelled()) {
+                log.info("ReAct run cancelled before iteration");
+                return "⏹️ 已取消当前任务。";
+            }
             AgentBudget.ExitReason exitReason = budget.check();
             if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
                 String statsLine = formatTokenStats(budget.totalInputTokens(), budget.totalOutputTokens(), startNanos);
@@ -130,6 +135,10 @@ public class Agent {
                         toolRegistry.getToolDefinitions(),
                         streamRenderer
                 );
+                if (CancellationContext.isCancelled()) {
+                    log.info("ReAct run cancelled after LLM response");
+                    return "⏹️ 已取消当前任务。";
+                }
 
                 budget.recordTokens(response.inputTokens(), response.outputTokens());
 
