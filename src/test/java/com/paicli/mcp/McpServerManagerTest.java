@@ -72,6 +72,7 @@ class McpServerManagerTest {
         assertTrue(registry.hasTool("mcp__demo__list_resources"));
         assertTrue(registry.hasTool("mcp__demo__read_resource"));
         assertTrue(manager.resourceCandidates().stream().anyMatch(r -> r.uri().equals("file://README.md")));
+        assertTrue(manager.resourceIndexForPrompt().contains("@demo:file://README.md"));
 
         enqueuePromptsList();
         assertTrue(manager.prompts("demo").contains("Review (review)"));

@@ -2,6 +2,7 @@ package com.paicli.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.paicli.context.TokenUsageFormatter;
 import com.paicli.llm.LlmClient;
 import com.paicli.memory.MemoryManager;
 import com.paicli.plan.*;
@@ -20,6 +21,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -91,6 +93,7 @@ public class PlanExecuteAgent {
     private final Planner planner;
     private final PlanReviewHandler reviewHandler;
     private final MemoryManager memoryManager;
+    private Supplier<String> externalContextSupplier = () -> "";
 
     // 执行提示词
     private static final String EXECUTION_PROMPT = """
@@ -113,7 +116,12 @@ public class PlanExecuteAgent {
             如果任务涉及理解代码库（如分析代码结构、查找实现位置），请优先使用 search_code 工具。
             如果任务需要实时互联网信息（如查询框架最新版本、官方文档），请使用 web_search 找入口，
             拿到具体 URL 后用 web_fetch 抓取全文。已经有 URL 时直接 web_fetch，不要再 web_search 一次。
-            web_fetch 拿到空正文（SPA / 防爬墙）时，明确告知用户这是已知边界，不要反复重试。
+            web_fetch 拿到空正文（SPA / 防爬墙）时，自动 fallback 到浏览器 MCP，不要重复 web_fetch。
+            工具选择 - 网页内容获取：静态 / SSR 页面用 web_fetch；SPA / React / Vue / 客户端渲染、需要 JS 才有内容、防爬墙、
+            需要登录态、需要表单交互（点击/输入/提交）时用浏览器 MCP（mcp__chrome-devtools__navigate_page + take_snapshot）。
+            微信公众号文章 (mp.weixin.qq.com)、知乎专栏、推特、小红书等站点 web_fetch 通常拿不到正文，应走浏览器 MCP。
+            浏览器操作优先 mcp__chrome-devtools__take_snapshot（结构化 DOM 文本），不要默认 take_screenshot；
+            表单填写优先 fill_form，等待异步加载用 wait_for，控制台排查用 list_console_messages，网络排查用 list_network_requests + get_network_request。
             对于当前项目内的文件，请优先使用 read_file 或 list_dir，不要用 execute_command 扫描 /、~ 或整个文件系统。
             execute_command 只适合在当前项目目录执行短时命令。
             安全策略硬规则（HITL 之外的兜底，无法绕过）：read_file / write_file / list_dir / create_project 必须在项目根之内；write_file 单文件 5MB 上限；
@@ -148,6 +156,11 @@ public class PlanExecuteAgent {
         this.planner = planner != null ? planner : new Planner(llmClient);
         this.reviewHandler = reviewHandler == null ? (goal, plan) -> PlanReviewDecision.execute() : reviewHandler;
         this.memoryManager = memoryManager != null ? memoryManager : new MemoryManager(llmClient);
+        this.toolRegistry.setContextProfile(this.memoryManager.getContextProfile());
+    }
+
+    public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
+        this.externalContextSupplier = externalContextSupplier == null ? () -> "" : externalContextSupplier;
     }
 
     /**
@@ -378,9 +391,15 @@ public class PlanExecuteAgent {
                                       StreamState streamState, PrintStream out) throws IOException {
         String prompt = String.format(EXECUTION_PROMPT,
                 task.getType(), task.getDescription());
+        String externalContext = buildExternalContext();
+        if (!externalContext.isEmpty()) {
+            prompt = prompt + "\n" + externalContext;
+        }
 
         // 注入长期记忆上下文
-        String memoryContext = memoryManager.buildContextForQuery(task.getDescription(), 300);
+        String memoryContext = memoryManager.buildContextForQuery(
+                task.getDescription(),
+                memoryManager.getContextProfile().memoryContextTokens());
         String taskInput = buildTaskContext(goal, plan, task);
         if (!memoryContext.isEmpty()) {
             taskInput = taskInput + "\n\n" + memoryContext;
@@ -398,6 +417,7 @@ public class PlanExecuteAgent {
         long startNanos = System.nanoTime();
         int totalInputTokens = 0;
         int totalOutputTokens = 0;
+        int totalCachedInputTokens = 0;
 
         while (iteration < MAX_TASK_ITERATIONS) {
             if (CancellationContext.isCancelled()) {
@@ -418,6 +438,7 @@ public class PlanExecuteAgent {
 
             totalInputTokens += response.inputTokens();
             totalOutputTokens += response.outputTokens();
+            totalCachedInputTokens += response.cachedInputTokens();
 
             log.info("Task {} iteration {} response: toolCalls={}, reasoningChars={}, contentChars={}",
                     task.getId(),
@@ -427,21 +448,21 @@ public class PlanExecuteAgent {
                     response.content() == null ? 0 : response.content().length());
 
             if (!response.hasToolCalls()) {
-                memoryManager.recordTokenUsage(totalInputTokens, totalOutputTokens);
+                memoryManager.recordTokenUsage(totalInputTokens, totalOutputTokens, totalCachedInputTokens);
                 if (!allResults.isEmpty() && (response.content() == null || response.content().isBlank())) {
                     String toolOnlyResult = allResults.toString().trim();
                     if (!toolOnlyResult.isBlank()) {
                         memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + toolOnlyResult);
                     }
                     streamRenderer.finish();
-                    out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
+                    out.println(formatTokenStats(totalInputTokens, totalOutputTokens, totalCachedInputTokens, startNanos));
                     return TaskRunResult.of(toolOnlyResult, streamRenderer.hasStreamedOutput());
                 }
                 if (response.content() != null && !response.content().isBlank()) {
                     memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + response.content());
                 }
                 streamRenderer.finish();
-                out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
+                out.println(formatTokenStats(totalInputTokens, totalOutputTokens, totalCachedInputTokens, startNanos));
                 return TaskRunResult.of(response.content(), streamRenderer.hasStreamedOutput());
             }
 
@@ -470,8 +491,21 @@ public class PlanExecuteAgent {
             memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + fallbackResult);
         }
         streamRenderer.finish();
-        out.println(formatTokenStats(totalInputTokens, totalOutputTokens, startNanos));
+        out.println(formatTokenStats(totalInputTokens, totalOutputTokens, totalCachedInputTokens, startNanos));
         return TaskRunResult.of(fallbackResult, streamRenderer.hasStreamedOutput());
+    }
+
+    private String buildExternalContext() {
+        if (!memoryManager.getContextProfile().mcpResourceIndexEnabled()) {
+            return "";
+        }
+        try {
+            String context = externalContextSupplier.get();
+            return context == null ? "" : context.trim();
+        } catch (Exception e) {
+            log.warn("Failed to build external context for plan task", e);
+            return "";
+        }
     }
 
     private String preview(String content, int maxLength) {
@@ -571,11 +605,8 @@ public class PlanExecuteAgent {
         }
     }
 
-    private static String formatTokenStats(int inputTokens, int outputTokens, long startNanos) {
-        double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
-        return AnsiStyle.subtle(String.format(
-                "📊 Token: %d 输入 / %d 输出 / %d 合计 | ⏱ %.1fs",
-                inputTokens, outputTokens, inputTokens + outputTokens, elapsedSeconds));
+    private String formatTokenStats(int inputTokens, int outputTokens, int cachedInputTokens, long startNanos) {
+        return TokenUsageFormatter.format(llmClient, inputTokens, outputTokens, cachedInputTokens, startNanos);
     }
 
     private static final class StreamState {

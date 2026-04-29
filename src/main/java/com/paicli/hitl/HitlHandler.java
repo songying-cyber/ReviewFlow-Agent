@@ -33,4 +33,12 @@ public interface HitlHandler {
      * @param enabled true 表示启用，false 表示关闭
      */
     void setEnabled(boolean enabled);
+
+    default boolean isApprovedAllByTool(String toolName) {
+        return false;
+    }
+
+    default boolean isApprovedAllByServer(String serverName) {
+        return false;
+    }
 }

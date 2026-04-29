@@ -83,6 +83,7 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
             List<ToolCallAccumulator> toolAccumulators = new ArrayList<>();
             int inputTokens = 0;
             int outputTokens = 0;
+            int cachedInputTokens = 0;
 
             while (!source.exhausted()) {
                 String line = source.readUtf8Line();
@@ -108,6 +109,7 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
                 if (!usage.isMissingNode()) {
                     inputTokens = usage.path("prompt_tokens").asInt(inputTokens);
                     outputTokens = usage.path("completion_tokens").asInt(outputTokens);
+                    cachedInputTokens = parseCachedInputTokens(usage, cachedInputTokens);
                 }
 
                 JsonNode choices = root.path("choices");
@@ -150,9 +152,25 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
                     reasoning.toString(),
                     buildToolCalls(toolAccumulators),
                     inputTokens,
-                    outputTokens
+                    outputTokens,
+                    cachedInputTokens
             );
         }
+    }
+
+    private int parseCachedInputTokens(JsonNode usage, int fallback) {
+        int cached = usage.path("cached_tokens").asInt(fallback);
+        cached = usage.path("prompt_cache_hit_tokens").asInt(cached);
+        cached = usage.path("input_cache_hit_tokens").asInt(cached);
+        JsonNode promptDetails = usage.path("prompt_tokens_details");
+        if (!promptDetails.isMissingNode()) {
+            cached = promptDetails.path("cached_tokens").asInt(cached);
+        }
+        JsonNode inputDetails = usage.path("input_tokens_details");
+        if (!inputDetails.isMissingNode()) {
+            cached = inputDetails.path("cached_tokens").asInt(cached);
+        }
+        return cached;
     }
 
     private ObjectNode buildRequestBody(List<Message> messages, List<Tool> tools) {

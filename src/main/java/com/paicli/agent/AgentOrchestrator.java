@@ -15,6 +15,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Supplier;
 
 /**
  * Agent 编排器 - Multi-Agent 系统的"主"
@@ -49,6 +50,7 @@ public class AgentOrchestrator {
     private final SubAgent reviewer;
     private final MemoryManager memoryManager;
     private final ToolRegistry toolRegistry;
+    private Supplier<String> externalContextSupplier = () -> "";
 
     // 执行步骤的数据结构（package-private 供测试访问）
     record ExecutionStep(String id, String description, String type,
@@ -86,6 +88,7 @@ public class AgentOrchestrator {
     public AgentOrchestrator(LlmClient llmClient, ToolRegistry toolRegistry, MemoryManager memoryManager) {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
+        this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
         this.planner = new SubAgent("planner", AgentRole.PLANNER, llmClient, toolRegistry);
         this.workers = List.of(
                 new SubAgent("worker-1", AgentRole.WORKER, llmClient, toolRegistry),
@@ -93,6 +96,13 @@ public class AgentOrchestrator {
         );
         this.reviewer = new SubAgent("reviewer", AgentRole.REVIEWER, llmClient, toolRegistry);
         this.memoryManager = memoryManager;
+    }
+
+    public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
+        this.externalContextSupplier = externalContextSupplier == null ? () -> "" : externalContextSupplier;
+        planner.setExternalContextSupplier(this.externalContextSupplier);
+        workers.forEach(worker -> worker.setExternalContextSupplier(this.externalContextSupplier));
+        reviewer.setExternalContextSupplier(this.externalContextSupplier);
     }
 
     /**

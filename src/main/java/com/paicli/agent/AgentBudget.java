@@ -1,6 +1,7 @@
 package com.paicli.agent;
 
 import com.paicli.llm.LlmClient;
+import com.paicli.context.ContextProfile;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -22,7 +23,7 @@ import java.util.Locale;
  * 配置读取顺序（以 {@link #fromSystemProperties()} 为准）：
  * 1. 系统属性：{@code paicli.react.token.budget} / {@code paicli.react.stagnation.window} /
  *    {@code paicli.react.hard.max.iterations}
- * 2. 默认值：300_000 token / 连续 3 次相同工具调用 / 50 轮
+ * 2. 默认值：按当前模型 maxContextWindow 的 80% 计算 / 连续 3 次相同工具调用 / 50 轮
  */
 public class AgentBudget {
 
@@ -33,7 +34,6 @@ public class AgentBudget {
         HARD_ITERATION_LIMIT
     }
 
-    private static final int DEFAULT_TOKEN_BUDGET = 300_000;
     private static final int DEFAULT_STAGNATION_WINDOW = 3;
     private static final int DEFAULT_HARD_MAX_ITERATIONS = 50;
 
@@ -45,6 +45,7 @@ public class AgentBudget {
     private int iteration;
     private int totalInputTokens;
     private int totalOutputTokens;
+    private int totalCachedInputTokens;
     private boolean stagnant;
 
     public AgentBudget(int tokenBudget, int stagnationWindow, int hardMaxIterations) {
@@ -63,8 +64,13 @@ public class AgentBudget {
     }
 
     public static AgentBudget fromSystemProperties() {
+        return fromLlmClient(null);
+    }
+
+    public static AgentBudget fromLlmClient(LlmClient llmClient) {
+        ContextProfile profile = ContextProfile.from(llmClient);
         return new AgentBudget(
-                readIntProperty("paicli.react.token.budget", DEFAULT_TOKEN_BUDGET),
+                readIntProperty("paicli.react.token.budget", profile.agentTokenBudget()),
                 readIntProperty("paicli.react.stagnation.window", DEFAULT_STAGNATION_WINDOW),
                 readIntProperty("paicli.react.hard.max.iterations", DEFAULT_HARD_MAX_ITERATIONS)
         );
@@ -76,8 +82,13 @@ public class AgentBudget {
     }
 
     public void recordTokens(int inputTokens, int outputTokens) {
+        recordTokens(inputTokens, outputTokens, 0);
+    }
+
+    public void recordTokens(int inputTokens, int outputTokens, int cachedInputTokens) {
         this.totalInputTokens += Math.max(0, inputTokens);
         this.totalOutputTokens += Math.max(0, outputTokens);
+        this.totalCachedInputTokens += Math.max(0, cachedInputTokens);
     }
 
     /**
@@ -125,6 +136,10 @@ public class AgentBudget {
 
     public int totalOutputTokens() {
         return totalOutputTokens;
+    }
+
+    public int totalCachedInputTokens() {
+        return totalCachedInputTokens;
     }
 
     public int tokenBudget() {

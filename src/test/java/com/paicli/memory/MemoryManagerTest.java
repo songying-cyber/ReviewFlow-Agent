@@ -55,6 +55,16 @@ class MemoryManagerTest {
         assertEquals(0, longTermMemory.size());
     }
 
+    @Test
+    void compressionTriggerRatioAppliesToAllModelsUniformly() {
+        // 验证：长 window 模型也使用统一的 90% 压缩触发阈值，没有"长模式不压缩"的二元开关
+        MemoryManager memoryManager = new MemoryManager(new GLMClient("test-key"));
+
+        assertEquals(0.90, memoryManager.getContextProfile().compressionTriggerRatio(), 0.001);
+        assertEquals(200000, memoryManager.getTokenBudget().getContextWindow());
+        assertEquals(180000, memoryManager.getContextProfile().compressionTriggerTokens());
+    }
+
     private static final class StubGLMClient extends GLMClient {
         private final Queue<ChatResponse> responses;
 

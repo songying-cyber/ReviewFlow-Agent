@@ -18,6 +18,10 @@ class TerminalHitlHandlerTest {
 
     private static final ApprovalRequest WRITE_FILE_REQUEST =
             ApprovalRequest.of("write_file", "{\"path\":\"/tmp/x.txt\",\"content\":\"hi\"}", null);
+    private static final ApprovalRequest MCP_CHROME_REQUEST =
+            ApprovalRequest.of("mcp__chrome-devtools__navigate_page", "{\"url\":\"https://example.com\"}", null);
+    private static final ApprovalRequest MCP_CHROME_CLICK_REQUEST =
+            ApprovalRequest.of("mcp__chrome-devtools__click", "{\"uid\":\"1\"}", null);
 
     @Test
     void yInputApproves() {
@@ -36,7 +40,7 @@ class TerminalHitlHandlerTest {
     @Test
     void aInputApprovesAllAndCachesTool() {
         // 一次性准备两轮输入：第一次 a 触发缓存，第二次根本不读 stdin（缓存命中）
-        Harness h = Harness.withInput("a\n");
+        Harness h = Harness.withInput("a\n\n");
         assertEquals(ApprovalResult.Decision.APPROVED_ALL,
                 h.handler.requestApproval(WRITE_FILE_REQUEST).decision());
 
@@ -44,6 +48,28 @@ class TerminalHitlHandlerTest {
         assertEquals(ApprovalResult.Decision.APPROVED_ALL, cached.decision());
         assertTrue(h.output().contains("已在本次会话中全部放行"),
                 "第二次应命中缓存；实际输出：" + h.output());
+    }
+
+    @Test
+    void aInputForMcpCanApproveEntireServer() {
+        Harness h = Harness.withInput("a\nserver\n");
+        ApprovalResult result = h.handler.requestApproval(MCP_CHROME_REQUEST);
+
+        assertEquals(ApprovalResult.Decision.APPROVED_ALL_BY_SERVER, result.decision());
+        assertTrue(h.handler.isApprovedAllByServer("chrome-devtools"));
+        assertFalse(h.handler.isApprovedAllByTool("mcp__chrome-devtools__navigate_page"));
+        assertTrue(h.output().contains("MCP server chrome-devtools"));
+    }
+
+    @Test
+    void approvedServerCacheSkipsLaterMcpToolsFromSameServer() {
+        Harness h = Harness.withInput("a\nserver\n");
+        h.handler.requestApproval(MCP_CHROME_REQUEST);
+
+        ApprovalResult cached = h.handler.requestApproval(MCP_CHROME_CLICK_REQUEST);
+
+        assertEquals(ApprovalResult.Decision.APPROVED_ALL_BY_SERVER, cached.decision());
+        assertTrue(h.output().contains("已在本次会话中全部放行"));
     }
 
     @Test
@@ -118,7 +144,7 @@ class TerminalHitlHandlerTest {
 
     @Test
     void clearApprovedAllResetsCache() {
-        Harness h = Harness.withInput("a\ny\n");
+        Harness h = Harness.withInput("a\n\ny\n");
         h.handler.requestApproval(WRITE_FILE_REQUEST);
         h.handler.clearApprovedAll();
         // 清空后需要重新审批，会读取第二行 "y"

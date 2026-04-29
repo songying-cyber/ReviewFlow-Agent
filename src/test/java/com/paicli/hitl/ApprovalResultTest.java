@@ -21,8 +21,20 @@ class ApprovalResultTest {
         ApprovalResult result = ApprovalResult.approveAll();
         assertTrue(result.isApproved());
         assertTrue(result.isApprovedAll());
+        assertTrue(result.isApprovedAllForTool());
+        assertFalse(result.isApprovedAllForServer());
         assertFalse(result.isRejected());
         assertFalse(result.isSkipped());
+    }
+
+    @Test
+    void approveAllByServerIsApprovedForServerOnly() {
+        ApprovalResult result = ApprovalResult.approveAllByServer();
+        assertTrue(result.isApproved());
+        assertFalse(result.isApprovedAll());
+        assertFalse(result.isApprovedAllForTool());
+        assertTrue(result.isApprovedAllForServer());
+        assertEquals(ApprovalResult.Decision.APPROVED_ALL_BY_SERVER, result.decision());
     }
 
     @Test
@@ -68,6 +80,13 @@ class ApprovalResultTest {
     void effectiveArgumentsReturnsOriginalWhenApprovedAll() {
         ApprovalResult result = ApprovalResult.approveAll();
         String original = "{\"path\": \"pom.xml\", \"content\": \"...\"}";
+        assertEquals(original, result.effectiveArguments(original));
+    }
+
+    @Test
+    void effectiveArgumentsReturnsOriginalWhenApprovedAllByServer() {
+        ApprovalResult result = ApprovalResult.approveAllByServer();
+        String original = "{\"url\": \"https://example.com\"}";
         assertEquals(original, result.effectiveArguments(original));
     }
 

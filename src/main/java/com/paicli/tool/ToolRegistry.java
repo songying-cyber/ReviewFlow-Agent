@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.paicli.context.ContextProfile;
 import com.paicli.mcp.protocol.McpToolDescriptor;
 import com.paicli.rag.CodeRetriever;
 import com.paicli.rag.SearchResultFormatter;
@@ -57,6 +58,7 @@ public class ToolRegistry {
     private WebFetcher webFetcher;
     private HtmlExtractor htmlExtractor;
     private NetworkPolicy networkPolicy;
+    private ContextProfile contextProfile = ContextProfile.from(null);
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -90,6 +92,16 @@ public class ToolRegistry {
      */
     public String getProjectPath() {
         return projectPath;
+    }
+
+    public void setContextProfile(ContextProfile contextProfile) {
+        if (contextProfile != null) {
+            this.contextProfile = contextProfile;
+        }
+    }
+
+    public ContextProfile getContextProfile() {
+        return contextProfile;
     }
 
     /**
@@ -234,10 +246,10 @@ public class ToolRegistry {
     private void registerRagTools() {
         tools.put("search_code", new Tool(
                 "search_code",
-                "语义检索代码库，根据自然语言描述查找相关代码块",
+                "语义检索代码库，根据自然语言描述查找相关代码块；默认 top_k=5，可显式指定（上限 30）",
                 createParameters(
                         new Param("query", "string", "自然语言查询描述，例如'用户登录的实现'", true),
-                        new Param("top_k", "integer", "返回结果数量（默认5）", false)
+                        new Param("top_k", "integer", "返回结果数量（默认 5，上限 30）", false)
                 ),
                 args -> {
                     String query = args.get("query");
@@ -248,6 +260,7 @@ public class ToolRegistry {
                         }
                     } catch (NumberFormatException ignored) {
                     }
+                    topK = Math.max(1, Math.min(topK, 30));
 
                     try (CodeRetriever retriever = new CodeRetriever(projectPath)) {
                         var stats = retriever.getStats();

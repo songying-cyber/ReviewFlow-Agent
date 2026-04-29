@@ -40,4 +40,19 @@ public class DeepSeekClient extends AbstractOpenAiCompatibleClient {
     public String getProviderName() {
         return "deepseek";
     }
+
+    @Override
+    public int maxContextWindow() {
+        return 1_000_000;
+    }
+
+    @Override
+    public boolean supportsPromptCaching() {
+        return true;
+    }
+
+    @Override
+    public String promptCacheMode() {
+        return "automatic-prefix-cache";
+    }
 }

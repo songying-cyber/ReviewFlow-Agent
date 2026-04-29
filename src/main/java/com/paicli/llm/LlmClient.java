@@ -15,6 +15,18 @@ public interface LlmClient {
 
     String getProviderName();
 
+    default int maxContextWindow() {
+        return 128_000;
+    }
+
+    default boolean supportsPromptCaching() {
+        return false;
+    }
+
+    default String promptCacheMode() {
+        return "none";
+    }
+
     record Message(String role, String content, String reasoningContent, List<ToolCall> toolCalls,
                    String toolCallId) {
         public Message(String role, String content) {
@@ -65,10 +77,15 @@ public interface LlmClient {
     }
 
     record ChatResponse(String role, String content, String reasoningContent, List<ToolCall> toolCalls,
-                        int inputTokens, int outputTokens) {
+                        int inputTokens, int outputTokens, int cachedInputTokens) {
         public ChatResponse(String role, String content, List<ToolCall> toolCalls,
                             int inputTokens, int outputTokens) {
-            this(role, content, null, toolCalls, inputTokens, outputTokens);
+            this(role, content, null, toolCalls, inputTokens, outputTokens, 0);
+        }
+
+        public ChatResponse(String role, String content, String reasoningContent, List<ToolCall> toolCalls,
+                            int inputTokens, int outputTokens) {
+            this(role, content, reasoningContent, toolCalls, inputTokens, outputTokens, 0);
         }
 
         public boolean hasToolCalls() {

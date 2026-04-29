@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
  */
 public class ConversationMemory implements Memory {
     private final LinkedHashMap<String, MemoryEntry> entries;
-    private final int maxTokens;
+    private int maxTokens;
     private int currentTokens;
     private final List<MemoryEntry> compressedSummaries;
 
@@ -86,6 +86,16 @@ public class ConversationMemory implements Memory {
 
     public int getMaxTokens() {
         return maxTokens;
+    }
+
+    public void setMaxTokens(int maxTokens) {
+        if (maxTokens <= 0) {
+            throw new IllegalArgumentException("maxTokens must be positive");
+        }
+        this.maxTokens = maxTokens;
+        while (currentTokens > maxTokens && entries.size() > 1) {
+            evictOldest();
+        }
     }
 
     /**

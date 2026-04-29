@@ -31,6 +31,10 @@ public class HitlToolRegistry extends ToolRegistry {
         if (!hitlHandler.isEnabled() || !ApprovalPolicy.requiresApproval(name)) {
             return super.executeTool(name, argumentsJson);
         }
+        String mcpServer = ApprovalPolicy.mcpServerName(name);
+        if (hitlHandler.isApprovedAllByTool(name) || hitlHandler.isApprovedAllByServer(mcpServer)) {
+            return super.executeTool(name, argumentsJson);
+        }
 
         long start = System.nanoTime();
         ApprovalRequest request = ApprovalRequest.of(name, argumentsJson, null);

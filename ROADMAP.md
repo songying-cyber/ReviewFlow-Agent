@@ -1,4 +1,4 @@
-# PaiCLI 迭代路线图（16 期）
+# PaiCLI 迭代路线图（17 期）
 
 从零开始，逐步构建生产级 Java Agent CLI
 
@@ -262,7 +262,7 @@
 - `sampling/createMessage`
 - MCP server 自动重启
 - prompts 加载到对话流（仅保留 `/mcp prompts` 查看 server 暴露的模板）
-- resources 自动注入 system prompt（留给第 12 期长上下文模式决定）
+- resources 自动注入 system prompt（第 12 期长上下文模式已接入 URI / 描述索引）
 - server health ping / heartbeat
 - progress / logging notification 的 UI 展示
 - OAuth Device Flow / Client Credentials
@@ -277,25 +277,25 @@
 
 ---
 
-## 第12期：长上下文工程（适配 200k–1M 模型 + prompt caching）
+## 第12期：长上下文工程（适配 200k–1M 模型 + prompt caching） ✅
 
 **目标**：适配 GLM-5.1（200k）/ DeepSeek V4（1M）/ Claude Sonnet 4.6（1M）等长上下文模型。第 3 期 Memory 是基于"短上下文兜底"假设设计的，长窗口下要切换策略。
 
-**功能迭代**：
-- `LlmClient` 接口扩展能力声明：`maxContextWindow()` / `supportsPromptCaching()`
-- `AgentBudget` token 预算从写死 300K 改为按当前模型动态计算（默认 80% × maxContextWindow）
+**功能迭代**（详细开发任务见 `docs/phase-12-long-context.md`）：
+- `LlmClient` 接口扩展能力声明：`maxContextWindow()` / `supportsPromptCaching()` / `promptCacheMode()`
+- `ContextProfile` 统一管理 short / balanced / long 三种上下文模式
+- `AgentBudget` token 预算从写死 300K 改为按当前模型动态计算（默认 80% × maxContextWindow，仍支持系统属性覆盖）
 - 长 / 短上下文双模式：
-  - 短模式（< 32k window）：保留第 3 期 Memory 完整策略（摘要 / 检索 / 压缩）
-  - 长模式（≥ 100k window）：跳过摘要、提高 RAG top-K（5 → 20）、允许直接装填整个文件
+  - 短 / balanced：保留第 3 期 Memory 摘要压缩策略
+  - long（≥ 100k window）：跳过摘要压缩，提高 RAG 默认 topK（20），扩大短期记忆预算
 - prompt caching 接入：
-  - Anthropic / Claude：`cache_control` 块
-  - GLM-5.1：智谱 prompt cache 字段
-  - DeepSeek V4：自动 prefix cache
-  - 缓存边界放在 system prompt 之后、对话历史之前，最大化命中率
-- 上下文成本可见化：每轮工具结束后打印 `已用 X / Y token (cached: Z, ¥cost: A)`
-- 检索策略自适应：根据剩余 budget 动态决定 RAG top-K 与代码片段长度
-- **MCP resources 自动注入**（与第 11 期联动）：长模式下，把所有 server 已知 resources 的 URI + 描述（不含 body）作为索引注入 system prompt，LLM 可以不调 list_resources 直接判断要不要 read；短模式不注入（按需 list 即可）
-- `/context` 命令扩展：显示当前 window 占用率、cache 命中率、模式（long / short）、resources 是否已自动注入
+  - 能力声明与 `/context` 可见化
+  - OpenAI-compatible usage 中解析 cached input tokens
+  - DeepSeek V4 走 automatic prefix cache；当前不注入未确认兼容的 provider 私有字段
+- 上下文成本可见化：每轮输出 `已用 X / Y token (window W, cached: Z, 估算 ¥A)`
+- 检索策略自适应：`search_code` 未传 `top_k` 时按上下文模式选择 5 / 10 / 20
+- **MCP resources 自动注入**（与第 11 期联动）：长模式下，把所有 server 已知 resources 的 URI + 描述（不含 body）作为索引注入 system prompt；ReAct / Plan / Team 都接入
+- `/context` 命令扩展：显示当前 window、动态预算、模式、prompt cache、RAG topK、resources 是否已自动注入
 
 **核心知识点**：
 - 长上下文模型的成本模型（input vs cached input 价差通常 5–10 倍）
@@ -303,28 +303,42 @@
 - RAG 在长上下文时代的角色变化（从"压缩选择"到"加速 + 精排"）
 - 资源索引（MCP resources URI + 描述）作为长上下文的有效填充
 
-**估算**：3–4 天
+**验证**：`mvn test` 347 tests 通过；`mvn clean package` 通过
 
 ---
 
-## 第13期：Chrome DevTools MCP
+## 第13期：Chrome DevTools MCP ✅
 
-**前置依赖**：第 10 / 11 期 MCP 框架
+**前置依赖**：第 10 / 11 期 MCP 框架（已完成）
 
-**目标**：让 Agent 能操控浏览器，处理需要 JS 渲染或 UI 交互的页面
+**目标**：让 Agent 能操控浏览器，处理需要 JS 渲染、防爬墙、表单交互、登录态的页面（如微信公众号文章、知乎专栏、SPA 应用等）。
 
-**功能迭代**：
-- 通过 MCP 协议接入 Chrome DevTools Server
-- 浏览器基础操作：打开页面、截图、读取 DOM、点击交互
-- 与已有 `web_fetch` 的分工：静态页面走 `web_fetch`，需 JS 渲染或交互的走浏览器
-- Agent 工具选择策略升级：何时用 `web_fetch`、何时上浏览器
+**功能迭代**（详细开发任务见 `docs/phase-13-chrome-devtools-mcp.md`）：
+
+- 接入 Google 官方 `chrome-devtools-mcp@latest`（28 个工具：导航 / 输入 / 调试 / 网络 / 性能 / 模拟 / 扩展 / 内存）
+- **默认 enabled**：`~/.paicli/mcp.json` 不存在时启动自动创建模板，含 chrome-devtools 条目
+- `image` content 处理走**路线 B**：fallback 文案引导 LLM 优先用 `take_snapshot`（DOM 文本快照）而非 `take_screenshot`；不做真 multimodal LLM 输入（拆到第 17 期）
+- HITL「全部放行」改为 **server 维度**：用户对 chrome-devtools 选 `a → server` 后，连续浏览器操作只需确认一次（`approvedAllByServer` 集合 + 子菜单）
+- `Agent` / `PlanExecuteAgent` / `SubAgent` 系统提示词加「web_fetch vs 浏览器 MCP」决策表，明示微信公众号 / 知乎 / 推特等典型 web_fetch 失败站点直接走浏览器
+- `McpClient.initialize` 超时 30s → 60s（chrome-devtools 首次启动需 npx 拉包 + Chrome 冷启 ≈ 20s+），可被 `paicli.mcp.initialize.timeout.seconds` 覆盖
+- `McpServerManager.startAll` 启动期间另起 status printer 线程，每 5s 打印未就绪 server 等待时长
+- 必跑端到端测试：微信公众号文章（`https://mp.weixin.qq.com/s/RB7kF_BbsJZ5_Hmu9PxWdg`），验证 web_fetch 失败 → LLM 自动 fallback 到浏览器 → take_snapshot 拿正文
+
+**不做（明确边界）**：
+- 真 multimodal LLM 输入（拆到第 17 期「多模态 LLM 输入」）
+- CDP 会话复用 / 登录态识别（第 14 期）
+- Playwright / Firefox / WebKit 跨浏览器
+- 浏览器执行隔离（默认 `--isolated=true` 临时 user-data-dir，第 14 期改 `--browser-url` 复用已开 Chrome）
 
 **核心知识点**：
-- Chrome DevTools Protocol（CDP）基础
-- MCP 协议客户端实战
-- 浏览器自动化工具集合
+- 第三方 MCP server 接入实战（直接用 Google 官方 server，不再造轮子）
+- HITL 全放行的多维度设计（tool 维度 vs server 维度）
+- LLM 自动决策 fallback 路径（web_fetch 拿不到 → 提示词引导走浏览器）
+- 长启动 server 的 UX 工程（进度提示 + 超时调整）
 
-**教程标题候选**：《静态抓取不够看？接入 Chrome DevTools MCP，让 Agent 自己开浏览器》
+**教程标题候选**：《静态抓取不够看？接 Chrome DevTools MCP，让 Agent 自己开浏览器》
+
+**验证**：单元测试覆盖默认 MCP 配置创建、HITL server 维度全放行、MCP image fallback 与初始化超时；真实浏览器端到端需本机 Chrome + API Key 环境执行。
 
 ---
 
@@ -395,6 +409,42 @@
 
 ---
 
+## 第17期：多模态 LLM 输入（vision）
+
+**前置依赖**：第 13 期 Chrome DevTools MCP 已能产出截图等 image content；第 12 期长上下文工程已就绪。
+
+**目标**：让 PaiCLI 真正"看见"图片——浏览器截图、用户粘贴的图片、文档中的图表，都能直接喂给 LLM 让它理解，而不是 fallback 成"[此工具返回了 image]"占位。
+
+**功能迭代**：
+
+- `LlmClient.Message.content` 协议升级：从 `String` 扩展为 `List<ContentPart>`（含 `text` / `image_base64` / `image_url`）
+- 各 `LlmClient` 实现适配 OpenAI 兼容的 multimodal API：
+  - GLM-5.1V（智谱多模态变体）
+  - DeepSeek V4（如声明 vision 能力）
+  - Claude Sonnet / Opus 系列
+- `LlmClient` 接口加 `supportsVision()` 能力声明
+- 第 13 期的 `take_screenshot` image fallback 升级为真 multimodal 输入（仅在当前模型 `supportsVision()` 时生效）
+- 用户输入层：终端粘贴 base64 图片或 `@image:file://path/to/img.png` 显式引用
+- HITL 弹窗展示图片元数据（mimeType / size），不展示原图
+- 按 token 成本审计：image input 单独计费维度（多数 vision API 按 image tile 数计 token）
+
+**不做**：
+- 视频 / 音频输入（再独立期）
+- 图像生成（PaiCLI 是 Agent 不是绘图工具）
+- TUI sixel 协议显示截图（依赖第 16 期 TUI 是否实现，留作扩展）
+
+**核心知识点**：
+- OpenAI 兼容协议的 multimodal 扩展（content array vs string）
+- 各模型 vision 输入定价模型差异
+- base64 图片在 JSON-RPC / HTTP / 流式响应里的传输与缓存
+- Agent 何时该截图、何时该读 DOM、何时该问用户（决策权 vs 成本）
+
+**教程标题候选**：《Agent 不能只看文字？接通视觉能力，截图 / 图表 / 设计稿都能"看"》
+
+**估算**：5–6 天
+
+---
+
 ## 技术栈演进图
 
 ```
@@ -402,16 +452,16 @@
 基础      规划      记忆      RAG       多Agent   人机      异步      多模型
 ReAct    执行     上下文    检索       协作      协同      并行      切换
 
-第9期 ──► 第10期 ──► 第11期 ──► 第12期 ──► 第13期 ──► 第14期 ──► 第15期 ──► 第16期
-联网     MCP核心    MCP高级     长上下文    Chrome     CDP        Skill      TUI
-能力     stdio+HTTP rsc/sample  200k-1M    DevTools   会话复用    系统       产品化
+第9期 ──► 第10期 ──► 第11期 ──► 第12期 ──► 第13期 ──► 第14期 ──► 第15期 ──► 第16期 ──► 第17期
+联网     MCP核心    MCP高级     长上下文    Chrome     CDP        Skill      TUI       多模态
+能力     stdio+HTTP rsc/sample  200k-1M    DevTools   会话复用    系统       产品化     vision
 ```
 
 ## 学习路径建议
 
 **入门**：按顺序 1 → 2 → 3 → 6 → 16，掌握核心即可
-**进阶**：1 → 2 → 3 → 4 → 7 → 8 → 9 → 10 → 12 → 15，深入技术细节
-**全套**：全部 16 期
+**进阶**：1 → 2 → 3 → 4 → 7 → 8 → 9 → 10 → 12 → 13 → 15，深入技术细节
+**全套**：全部 17 期
 
 ## 参考项目
 
@@ -425,9 +475,9 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ## Pro 升级版本（独立分支）
 
-主线 16 期完成后，将开启独立分支做框架重构，作为「手写版 → 框架版」的对照实现。不并入主分支，主线手写版保持稳定基线。
+主线 17 期完成后，将开启独立分支做框架重构，作为「手写版 → 框架版」的对照实现。不并入主分支，主线手写版保持稳定基线。
 
-**触发时机**：主线 1–16 期全部交付后启动
+**触发时机**：主线 1–17 期全部交付后启动
 
 **候选实现**：
 
@@ -438,4 +488,4 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ---
 
-*已完成第 11 期 MCP 高级能力首批交付（resources 双轨、prompts 查看、被动通知、运行中取消）。下一步进入第 12 期长上下文工程，OAuth / sampling / recovery 留给后续 MCP 增强期。*
+*已完成第 13 期 Chrome DevTools MCP 首批交付。下一步进入第 14 期 CDP 会话复用，OAuth / sampling / recovery 留给后续 MCP 增强期。*

@@ -40,4 +40,19 @@ public class GLMClient extends AbstractOpenAiCompatibleClient {
     public String getProviderName() {
         return "glm";
     }
+
+    @Override
+    public int maxContextWindow() {
+        return 200_000;
+    }
+
+    @Override
+    public boolean supportsPromptCaching() {
+        return true;
+    }
+
+    @Override
+    public String promptCacheMode() {
+        return "glm-prompt-cache";
+    }
 }

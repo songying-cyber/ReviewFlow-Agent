@@ -1,6 +1,7 @@
 package com.paicli.memory;
 
 import com.paicli.llm.LlmClient;
+import com.paicli.context.ContextProfile;
 
 import java.util.List;
 import java.util.Map;
@@ -17,10 +18,11 @@ public class MemoryManager {
     private final LongTermMemory longTermMemory;
     private final ContextCompressor compressor;
     private final MemoryRetriever retriever;
-    private final TokenBudget tokenBudget;
+    private TokenBudget tokenBudget;
+    private ContextProfile contextProfile;
 
     public MemoryManager(LlmClient llmClient) {
-        this(llmClient, 32768, 200000, null);
+        this(llmClient, ContextProfile.from(llmClient), null);
     }
 
     /**
@@ -33,15 +35,27 @@ public class MemoryManager {
     }
 
     public MemoryManager(LlmClient llmClient, int shortTermBudget, int contextWindow, LongTermMemory longTermMemory) {
-        this.shortTermMemory = new ConversationMemory(shortTermBudget);
+        this(llmClient, ContextProfile.custom(contextWindow, shortTermBudget), longTermMemory);
+    }
+
+    private MemoryManager(LlmClient llmClient, ContextProfile contextProfile, LongTermMemory longTermMemory) {
+        this.contextProfile = contextProfile;
+        this.shortTermMemory = new ConversationMemory(contextProfile.shortTermMemoryBudget());
         this.longTermMemory = longTermMemory != null ? longTermMemory : new LongTermMemory();
         this.compressor = new ContextCompressor(llmClient);
         this.retriever = new MemoryRetriever(shortTermMemory, this.longTermMemory);
-        this.tokenBudget = new TokenBudget(contextWindow);
+        this.tokenBudget = new TokenBudget(contextProfile.maxContextWindow());
     }
 
     public void setLlmClient(LlmClient llmClient) {
         this.compressor.setLlmClient(llmClient);
+        applyContextProfile(ContextProfile.from(llmClient));
+    }
+
+    public void applyContextProfile(ContextProfile contextProfile) {
+        this.contextProfile = contextProfile;
+        this.tokenBudget = new TokenBudget(contextProfile.maxContextWindow());
+        this.shortTermMemory.setMaxTokens(contextProfile.shortTermMemoryBudget());
     }
 
     /**
@@ -131,20 +145,28 @@ public class MemoryManager {
         tokenBudget.recordUsage(inputTokens, outputTokens);
     }
 
+    public void recordTokenUsage(int inputTokens, int outputTokens, int cachedInputTokens) {
+        tokenBudget.recordUsage(inputTokens, outputTokens, cachedInputTokens);
+    }
+
     /**
      * 检查并触发压缩（由 Agent 在 LLM 调用前主动调用）
      *
      * @return 是否执行了压缩
      */
     public boolean compressIfNeeded() {
-        if (!tokenBudget.needsCompression(shortTermMemory)) {
+        // 压缩永远可触发，模式概念已删除。触发条件仅看占用率是否到达 ContextProfile 配置的阈值（默认 90%）。
+        if (!tokenBudget.needsCompression(shortTermMemory, contextProfile.compressionTriggerRatio())) {
             return false;
         }
-        System.out.println("📦 短期记忆接近预算上限，触发压缩...");
+        int beforeTokens = shortTermMemory.getTokenCount();
+        System.out.println("📦 上下文占用达到压缩阈值（" + (int) (contextProfile.compressionTriggerRatio() * 100)
+                + "%），触发压缩...");
         String summary = compressor.compress(shortTermMemory);
         if (summary != null) {
-            System.out.println("   压缩完成，摘要: " +
-                    summary.substring(0, Math.min(100, summary.length())) + "...");
+            int afterTokens = shortTermMemory.getTokenCount();
+            System.out.println("   压缩完成: " + beforeTokens + " → " + afterTokens + " tokens，摘要: "
+                    + summary.substring(0, Math.min(100, summary.length())) + "...");
         }
         return summary != null;
     }
@@ -167,7 +189,8 @@ public class MemoryManager {
      * 获取记忆系统的整体状态
      */
     public String getSystemStatus() {
-        return shortTermMemory.getStatusSummary() + "\n" +
+        return "上下文策略: " + contextProfile.summary() + "\n" +
+                shortTermMemory.getStatusSummary() + "\n" +
                 longTermMemory.getStatusSummary() + "\n" +
                 tokenBudget.getUsageReport();
     }
@@ -176,4 +199,5 @@ public class MemoryManager {
     public ConversationMemory getShortTermMemory() { return shortTermMemory; }
     public LongTermMemory getLongTermMemory() { return longTermMemory; }
     public TokenBudget getTokenBudget() { return tokenBudget; }
+    public ContextProfile getContextProfile() { return contextProfile; }
 }

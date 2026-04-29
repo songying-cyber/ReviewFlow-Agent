@@ -17,6 +17,9 @@ public record McpCallToolResult(List<McpContent> content, boolean isError) {
                     if ("text".equals(type)) {
                         return item.text() == null ? "" : item.text();
                     }
+                    if ("image".equals(type)) {
+                        return "[此工具返回了 image。如果用户没有明确要求截图，请优先调用 take_snapshot 获取 DOM 文本快照；截图内容当前不会作为多模态输入交给模型。]";
+                    }
                     return "[此工具返回了 " + type + "，请向用户描述结果]";
                 })
                 .filter(s -> !s.isBlank())

@@ -1,6 +1,6 @@
 # PaiCLI
 
-一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十一期的 `MCP 高级能力`。
+一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十三期的 `Chrome DevTools MCP`。
 
 ## 演进历程
 
@@ -71,7 +71,7 @@
 - `web_search` 抽象成 `SearchProvider` 接口，内置三个实现：智谱 Web Search（默认，与 GLM 共用 Key，0.01–0.05 元/次）、SerpAPI（国际通用付费）、SearXNG（开源自托管免费）
 - `web_fetch` 新工具：URL → OkHttp 抓取 → Jsoup 解析 → 简易 readability → Markdown 正文
 - 默认安全策略：屏蔽 `file://` / 内网 / loopback；30 秒超时；5MB 响应上限；每分钟 30 次限流
-- 边界明确：SPA / 防爬墙站点会返回空正文 + 已知边界提示，不反复重试，留给后续 CDP 路线
+- 边界明确：SPA / 防爬墙站点会返回空正文 + 已知边界提示，Agent 会 fallback 到浏览器 MCP 路线
 
 ### 第十期：MCP 协议核心
 
@@ -79,18 +79,32 @@
 - 启动时读取 `~/.paicli/mcp.json` 与 `.paicli/mcp.json`，项目级配置按 server 名覆盖用户级配置
 - MCP 工具自动注册为 `mcp__{server}__{tool}`，参数 schema 会清洗 `$ref` / `anyOf` / 超长 description，降低模型调用失败率
 - 所有 MCP 工具默认走 HITL 审批和审计，审计参数会脱敏 token / key / password / Authorization / Bearer 凭证
-- CLI 命令：`/mcp`、`/mcp restart <name>`、`/mcp logs <name>`、`/mcp disable <name>`、`/mcp enable <name>`
-- 没有 MCP 配置文件时不会启动外部 server；子系统保持开启，创建配置后重启 PaiCLI 即可加载
-
-### 第十一期：MCP 高级能力（resources 双轨）
-
-- 支持 MCP resources：server 声明 `resources` capability 后，自动注册 `mcp__{server}__list_resources` / `mcp__{server}__read_resource` 两个虚拟工具
+- 支持 MCP resources：server 声明 `resources` capability 后，自动注册 `mcp__{server}__list_resources` / `mcp__{server}__read_resource` 虚拟工具
 - 普通输入支持 `@server:protocol://path` 显式引用 resource，提交给 Agent 前展开为 `<resource>` 内联块
-- JLine 自动补全会基于启动时缓存的 resources 提供 `@...` 候选，不干扰 Plan / Team 的 raw-mode 单键交互
-- 新增 `/mcp resources <server>` 查看资源列表，`/mcp prompts <server>` 查看 prompt 模板
 - 被动处理 `notifications/tools/list_changed`、`notifications/resources/list_changed`、`notifications/resources/updated`
-- 运行中输入 `/cancel` 并回车可请求取消当前 Agent run；ReAct、Plan、Team、工具批次和 `execute_command` 会协同检查取消信号
-- OAuth 与 `sampling/createMessage` 已确认延后，不属于本期交付
+- 运行中输入 `/cancel` 并回车可请求取消当前 Agent run
+- CLI 命令：`/mcp`、`/mcp restart <name>`、`/mcp logs <name>`、`/mcp disable <name>`、`/mcp enable <name>`、`/mcp resources <name>`、`/mcp prompts <name>`
+- `~/.paicli/mcp.json` 不存在时会自动创建默认 chrome-devtools 配置；项目级 `.paicli/mcp.json` 仍可按 server 名覆盖
+
+### 第十二期：长上下文工程
+
+- `LlmClient` 声明模型能力：`maxContextWindow()`、`supportsPromptCaching()`、`promptCacheMode()`
+- GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window
+- `AgentBudget` 按当前模型动态计算预算，默认 `80% * maxContextWindow`，仍可用系统属性覆盖
+- short / balanced / long 三种上下文模式：长上下文模式跳过摘要压缩，RAG 默认 topK 提升到 20
+- `search_code` 未显式传 `top_k` 时按上下文模式自适应
+- 长上下文模式下自动把 MCP resources 的 URI / 描述索引注入 system prompt，不自动注入正文
+- Token 输出显示 window、动态预算、cached input tokens 和估算成本
+- `/context` 会显示当前上下文模式、prompt cache 模式、RAG topK、resources 自动索引状态
+
+### 第十三期：Chrome DevTools MCP
+
+- 默认接入 Google 官方 `chrome-devtools-mcp@latest`，注册为 `mcp__chrome-devtools__navigate_page`、`take_snapshot`、`click`、`fill_form` 等浏览器工具
+- `~/.paicli/mcp.json` 不存在时启动自动创建模板，默认使用 `--isolated=true` 临时浏览器 profile
+- 用于处理 SPA / JS 渲染 / 防爬墙 / 表单交互页面；微信公众号文章、知乎专栏、推特、小红书等 `web_fetch` 失败站点会引导走浏览器 MCP
+- HITL 的“全部放行”支持 MCP server 维度，连续浏览器操作可对 `chrome-devtools` 一次确认
+- `image` 类型结果仍不进入多模态模型输入，fallback 文案会引导优先使用 `take_snapshot` 获取 DOM 文本
+- MCP initialize 默认超时提升到 60 秒，并在长启动期间打印等待进度
 
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
@@ -120,7 +134,7 @@
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      MCP-Native Agent CLI v11.0.0                     ║
+║      Browser-Capable Agent CLI v13.0.0                ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -149,6 +163,7 @@
 
 - 🧠 短期记忆、长期记忆与相关记忆检索
 - 📦 长对话摘要压缩与 Token 预算管理
+- 🧮 长上下文动态预算、prompt cache 可见化与成本估算
 - 💾 `/memory` 与 `/save` 记忆管理入口
 
 ### 第四期
@@ -199,13 +214,6 @@
 - 📦 资源上限：`write_file` 5MB；`execute_command` 60 秒超时 + 8KB 输出截断
 - 📋 结构化审计：危险工具调用按天写一行 JSONL 到 `~/.paicli/audit/`，可通过 `/audit [N]` 查看
 - 🧱 定位：HITL 之外的辅助层，不是沙箱、不提供进程隔离
-
-### 第十一期
-
-- 📚 MCP resources 双轨：模型可调用 `mcp__{server}__list_resources` / `mcp__{server}__read_resource`，用户也可手动输入 `@server:protocol://path`
-- ⌨️ 普通输入支持 resource 自动补全，Plan / Team 审阅的 raw-mode 单键交互保持不变
-- 🧩 `/mcp prompts <server>` 查看 server 暴露的 prompts，但不自动注入对话
-- 🔄 被动响应 MCP list_changed / resources updated 通知，刷新工具列表或让 resource cache 失效
 
 ## 快速开始
 
@@ -259,7 +267,20 @@ PAICLI_LOG_TOTAL_SIZE_CAP=100MB
 
 ### 2. 可选：配置 MCP server
 
-MCP 子系统默认开启。没有配置文件时不会启动外部 server；需要接入时创建 `~/.paicli/mcp.json` 或项目内 `.paicli/mcp.json`：
+MCP 子系统默认开启。`~/.paicli/mcp.json` 不存在时，PaiCLI 会自动创建默认 chrome-devtools 配置：
+
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--isolated=true"]
+    }
+  }
+}
+```
+
+需要继续接入其他 server 时，可编辑 `~/.paicli/mcp.json` 或项目内 `.paicli/mcp.json`：
 
 ```json
 {
@@ -281,6 +302,14 @@ MCP 子系统默认开启。没有配置文件时不会启动外部 server；需
 ```
 
 `command` 表示 stdio server，`url` 表示 Streamable HTTP server。`${PROJECT_DIR}` / `${HOME}` 是内置变量，其他 `${VAR}` 从环境变量读取；缺失会在启动时直接提示。
+
+浏览器测试可直接让 Agent 读取动态页面，例如：
+
+```text
+帮我看下 https://mp.weixin.qq.com/s/RB7kF_BbsJZ5_Hmu9PxWdg 这篇文章讲了什么
+```
+
+期望路径是 `web_fetch` 尝试失败后，fallback 到 `mcp__chrome-devtools__navigate_page` 与 `take_snapshot`。
 
 如果 server 支持 resources，可以直接查看或引用：
 
@@ -540,6 +569,10 @@ src/main/java/com/paicli
 │   └── PlanReviewInputParser.java  # 计划审核输入
 ├── llm/
 │   └── GLMClient.java          # GLM-5.1 API 客户端
+├── context/
+│   ├── ContextMode.java        # short / balanced / long 模式
+│   ├── ContextProfile.java     # 模型窗口与上下文策略
+│   └── TokenUsageFormatter.java # Token / cache / 成本展示
 ├── memory/
 │   ├── MemoryEntry.java        # 记忆条目
 │   ├── ConversationMemory.java # 短期记忆

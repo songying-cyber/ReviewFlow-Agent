@@ -1,6 +1,8 @@
 package com.paicli.agent;
 
 import com.paicli.llm.LlmClient;
+import com.paicli.context.ContextProfile;
+import com.paicli.context.TokenUsageFormatter;
 import com.paicli.memory.MemoryManager;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.util.AnsiStyle;
@@ -19,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Agent 核心类 - 实现 ReAct 循环
@@ -29,6 +32,7 @@ public class Agent {
     private final ToolRegistry toolRegistry;
     private final List<LlmClient.Message> conversationHistory;
     private final MemoryManager memoryManager;
+    private Supplier<String> externalContextSupplier = () -> "";
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     // 系统提示词
@@ -56,6 +60,7 @@ public class Agent {
             - execute_command 禁止 sudo、rm -rf 全盘或用户目录、mkfs、dd 写裸设备、fork bomb、curl|sh、find /、chmod 777 /、shutdown
             - 若调用被策略拒绝（结果以 "🛡️ 策略拒绝" 开头），不要原样重试，改用项目内相对路径或更安全的方式
             - MCP 工具来自外部 server，默认会触发 HITL 审批与审计；除非任务确实需要该 server 能力，否则优先使用内置工具
+            - 长上下文模式下，system prompt 可能包含 MCP resources 索引（仅 URI / 描述，不含正文）；需要正文时再读取对应 resource
             同一轮返回多个工具调用时，系统会并行执行这些工具；如果工具之间有依赖关系，请分多轮调用。
             如果需要同时检查多个已知且互不依赖的文件或目录（例如同时读取 pom.xml、README.md、ROADMAP.md，
             或同时列出 src/main/java、src/test/java、src/main/resources），请在同一轮返回多个 read_file/list_dir 工具调用。
@@ -65,7 +70,21 @@ public class Agent {
             - 训练数据已知的稳定知识（语法、稳定 API、基础概念）→ 直接回答，不要联网
             - 时效性 / 最新信息 / 不确定的事实 → web_search 找入口，找到 URL 后再 web_fetch 拿全文
             - 已经有具体 URL → 直接 web_fetch，不要再 web_search 一次
-            - web_fetch 拿到空正文（提示 SPA / 防爬墙）→ 这是已知边界，告知用户即可，不要反复重试
+            - web_fetch 拿到空正文（提示 SPA / 防爬墙）→ 自动 fallback 到浏览器 MCP，不要重复 web_fetch
+
+            工具选择 - 网页内容获取：
+            - 静态 / SSR 页面（博客、官方文档、wiki、GitHub README）→ web_fetch
+            - SPA / React / Vue / 客户端渲染、需要 JS 才有内容 → 浏览器 MCP（mcp__chrome-devtools__navigate_page + take_snapshot）
+            - 防爬墙、需要登录态、需要表单交互（点击/输入/提交）→ 浏览器 MCP
+            - 微信公众号文章 (mp.weixin.qq.com)、知乎专栏、推特、小红书等 → 浏览器 MCP（这些站点 web_fetch 通常拿不到正文）
+            - 已知 URL → 直接 web_fetch 试一次，失败再用浏览器 MCP
+
+            工具选择 - 浏览器操作：
+            - 优先 mcp__chrome-devtools__take_snapshot（结构化 DOM 文本，LLM 能直接理解）
+            - 不要默认使用 take_screenshot，除非用户明确要看页面截图或做 UI 验收
+            - 表单填写优先 mcp__chrome-devtools__fill_form，一次性填多字段
+            - 等待异步加载使用 mcp__chrome-devtools__wait_for（指定文本或选择器出现）
+            - 控制台错误排查使用 list_console_messages；网络请求查看使用 list_network_requests + get_network_request
 
             如果提供了相关记忆，请参考其中的信息来辅助决策。
 
@@ -81,12 +100,18 @@ public class Agent {
         this.toolRegistry = toolRegistry;
         this.conversationHistory = new ArrayList<>();
         this.memoryManager = new MemoryManager(llmClient);
+        this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
         conversationHistory.add(LlmClient.Message.system(SYSTEM_PROMPT));
     }
 
     public void setLlmClient(LlmClient llmClient) {
         this.llmClient = llmClient;
         this.memoryManager.setLlmClient(llmClient);
+        this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
+    }
+
+    public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
+        this.externalContextSupplier = externalContextSupplier == null ? () -> "" : externalContextSupplier;
     }
 
     /**
@@ -98,7 +123,8 @@ public class Agent {
         memoryManager.addUserMessage(userInput);
 
         // 检索相关长期记忆，注入到 system prompt
-        String memoryContext = memoryManager.buildContextForQuery(userInput, 500);
+        ContextProfile contextProfile = memoryManager.getContextProfile();
+        String memoryContext = memoryManager.buildContextForQuery(userInput, contextProfile.memoryContextTokens());
         updateSystemPromptWithMemory(memoryContext);
 
         // 添加用户输入到历史（保持原文，不污染 user message）
@@ -107,7 +133,7 @@ public class Agent {
         StreamRenderer streamRenderer = new StreamRenderer();
 
         long startNanos = System.nanoTime();
-        AgentBudget budget = AgentBudget.fromSystemProperties();
+        AgentBudget budget = AgentBudget.fromLlmClient(llmClient);
 
         // 主退出条件 = LLM 自己决定（不再调用工具就返回）；
         // budget 仅在 token 用尽 / 检测到死循环 / 超出硬轮数时兜底。
@@ -118,7 +144,7 @@ public class Agent {
             }
             AgentBudget.ExitReason exitReason = budget.check();
             if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
-                String statsLine = formatTokenStats(budget.totalInputTokens(), budget.totalOutputTokens(), startNanos);
+                String statsLine = formatTokenStats(budget, startNanos);
                 String description = budget.describeExit(exitReason);
                 log.warn("ReAct run exhausted budget: reason={}, iteration={}, tokens={}/{}",
                         exitReason, budget.iteration(),
@@ -140,7 +166,7 @@ public class Agent {
                     return "⏹️ 已取消当前任务。";
                 }
 
-                budget.recordTokens(response.inputTokens(), response.outputTokens());
+                budget.recordTokens(response.inputTokens(), response.outputTokens(), response.cachedInputTokens());
 
                 // 如果有工具调用
                 if (response.hasToolCalls()) {
@@ -181,7 +207,7 @@ public class Agent {
                 memoryManager.addAssistantMessage(response.content());
 
                 // 记录 token 使用
-                memoryManager.recordTokenUsage(budget.totalInputTokens(), budget.totalOutputTokens());
+                memoryManager.recordTokenUsage(budget.totalInputTokens(), budget.totalOutputTokens(), budget.totalCachedInputTokens());
                 log.info("ReAct run finished: inputTokens={}, outputTokens={}, reasoningChars={}, answerChars={}",
                         budget.totalInputTokens(),
                         budget.totalOutputTokens(),
@@ -191,7 +217,7 @@ public class Agent {
                     log.debug("Assistant answer preview: {}", preview(response.content(), 500));
                 }
 
-                String statsLine = formatTokenStats(budget.totalInputTokens(), budget.totalOutputTokens(), startNanos);
+                String statsLine = formatTokenStats(budget, startNanos);
 
                 if (streamRenderer.hasStreamedOutput()) {
                     streamRenderer.finish();
@@ -224,12 +250,32 @@ public class Agent {
      * 将记忆上下文注入到 system prompt 中（替换 conversationHistory[0]）
      */
     private void updateSystemPromptWithMemory(String memoryContext) {
-        if (memoryContext == null || memoryContext.isEmpty()) {
+        String externalContext = buildExternalContext();
+        if ((memoryContext == null || memoryContext.isEmpty()) && externalContext.isEmpty()) {
             // 恢复原始 system prompt
             conversationHistory.set(0, LlmClient.Message.system(SYSTEM_PROMPT));
         } else {
-            String enrichedPrompt = SYSTEM_PROMPT + "\n" + memoryContext;
-            conversationHistory.set(0, LlmClient.Message.system(enrichedPrompt));
+            StringBuilder enrichedPrompt = new StringBuilder(SYSTEM_PROMPT);
+            if (memoryContext != null && !memoryContext.isEmpty()) {
+                enrichedPrompt.append("\n").append(memoryContext);
+            }
+            if (!externalContext.isEmpty()) {
+                enrichedPrompt.append("\n").append(externalContext);
+            }
+            conversationHistory.set(0, LlmClient.Message.system(enrichedPrompt.toString()));
+        }
+    }
+
+    private String buildExternalContext() {
+        if (!memoryManager.getContextProfile().mcpResourceIndexEnabled()) {
+            return "";
+        }
+        try {
+            String context = externalContextSupplier.get();
+            return context == null ? "" : context.trim();
+        } catch (Exception e) {
+            log.warn("Failed to build external context", e);
+            return "";
         }
     }
 
@@ -248,25 +294,91 @@ public class Agent {
     }
 
     public String getContextStatus() {
+        com.paicli.context.ContextProfile profile = memoryManager.getContextProfile();
+        int window = profile.maxContextWindow();
+        int triggerTokens = profile.compressionTriggerTokens();
+
+        // 分类估算 token 占用
+        int systemTokens = 0, userTokens = 0, assistantTokens = 0, toolTokens = 0;
         int systemCount = 0, userCount = 0, assistantCount = 0, toolCount = 0;
-        int totalChars = 0;
         for (LlmClient.Message msg : conversationHistory) {
-            totalChars += msg.content() == null ? 0 : msg.content().length();
+            int t = com.paicli.memory.TokenBudget.estimateMessagesTokens(java.util.List.of(msg));
             switch (msg.role()) {
-                case "system" -> systemCount++;
-                case "user" -> userCount++;
-                case "assistant" -> assistantCount++;
-                case "tool" -> toolCount++;
+                case "system" -> { systemTokens += t; systemCount++; }
+                case "user" -> { userTokens += t; userCount++; }
+                case "assistant" -> { assistantTokens += t; assistantCount++; }
+                case "tool" -> { toolTokens += t; toolCount++; }
             }
         }
-        int totalMessages = conversationHistory.size();
-        int rounds = userCount;
+        int messagesTokens = userTokens + assistantTokens + toolTokens;
+        int toolsSchemaTokens = estimateToolsSchemaTokens();
+        int total = systemTokens + messagesTokens + toolsSchemaTokens;
+        double ratio = window > 0 ? (double) total / window : 0;
+        int triggerRemaining = Math.max(0, triggerTokens - total);
 
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("对话上下文: %d 条消息, %d 轮对话, ~%d 字符\n", totalMessages, rounds, totalChars));
-        sb.append(String.format("   system: %d / user: %d / assistant: %d / tool: %d\n", systemCount, userCount, assistantCount, toolCount));
+        sb.append(String.format("📊 Context Usage   %s   window: %s%n",
+                modelLabel(), formatTokens(window)));
+        sb.append("\n  ").append(progressBar(ratio, 30))
+                .append(String.format("  %d%%  (%s / %s)%n",
+                        (int) Math.round(ratio * 100), formatTokens(total), formatTokens(window)));
+        sb.append("\n  当前占用细分:\n");
+        sb.append(formatLine("System prompt",      systemTokens,    window, systemCount));
+        sb.append(formatLine("Tools schema",       toolsSchemaTokens, window, -1));
+        sb.append(formatLine("Conversation",       messagesTokens, window,
+                userCount + assistantCount + toolCount));
+        sb.append("    ─────────────────────────────────\n");
+        sb.append(String.format("    合计:              %8s  (%4.1f%%)%n",
+                formatTokens(total), ratio * 100));
+        sb.append(String.format("%n  压缩阈值: %s (%d%%)   距压缩还有: %s%n",
+                formatTokens(triggerTokens),
+                (int) (profile.compressionTriggerRatio() * 100),
+                formatTokens(triggerRemaining)));
+        sb.append("  MCP resources 自动索引: ")
+                .append(profile.mcpResourceIndexEnabled() ? "开启" : "关闭（window 不足 32k）")
+                .append("\n");
+        sb.append("  prompt cache: ").append(profile.promptCacheMode()).append("\n");
+        sb.append("\n");
         sb.append(memoryManager.getSystemStatus());
         return sb.toString();
+    }
+
+    private String modelLabel() {
+        if (llmClient == null) return "(no model)";
+        return llmClient.getModelName() + " (" + llmClient.getProviderName() + ")";
+    }
+
+    private int estimateToolsSchemaTokens() {
+        try {
+            return com.paicli.memory.MemoryEntry.estimateTokens(
+                    new ObjectMapper().writeValueAsString(toolRegistry.getToolDefinitions()));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private static String formatLine(String label, int tokens, int window, int count) {
+        double pct = window > 0 ? (double) tokens / window * 100 : 0;
+        String countLabel = count >= 0 ? String.format("  [%d 条]", count) : "";
+        return String.format("    %-18s %8s  (%4.1f%%)%s%n",
+                label + ":", formatTokens(tokens), pct, countLabel);
+    }
+
+    private static String progressBar(double ratio, int width) {
+        ratio = Math.max(0, Math.min(1, ratio));
+        int filled = (int) Math.round(ratio * width);
+        StringBuilder bar = new StringBuilder("[");
+        for (int i = 0; i < width; i++) {
+            bar.append(i < filled ? '█' : '░');
+        }
+        bar.append("]");
+        return bar.toString();
+    }
+
+    private static String formatTokens(int tokens) {
+        if (tokens >= 1_000_000) return String.format("%.1fM", tokens / 1_000_000.0);
+        if (tokens >= 1_000)     return String.format("%.1fk", tokens / 1_000.0);
+        return String.valueOf(tokens);
     }
 
     /**
@@ -276,11 +388,13 @@ public class Agent {
         return toolRegistry;
     }
 
-    private static String formatTokenStats(int inputTokens, int outputTokens, long startNanos) {
-        double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
-        return AnsiStyle.subtle(String.format(
-                "📊 Token: %d 输入 / %d 输出 / %d 合计 | ⏱ %.1fs",
-                inputTokens, outputTokens, inputTokens + outputTokens, elapsedSeconds));
+    private String formatTokenStats(AgentBudget budget, long startNanos) {
+        return TokenUsageFormatter.format(
+                llmClient,
+                budget.totalInputTokens(),
+                budget.totalOutputTokens(),
+                budget.totalCachedInputTokens(),
+                startNanos);
     }
 
     private void appendReasoning(StringBuilder reasoningTranscript, String reasoningContent) {

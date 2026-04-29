@@ -44,13 +44,24 @@ class TokenBudgetTest {
     @Test
     void shouldDetectCompressionNeed() {
         TokenBudget budget = new TokenBudget(128000);
-        // needsCompression 检查 memory.getTokenCount() > getAvailableForConversation() * 0.8
+        // needsCompression 默认 0.9 触发率：
         // getAvailableForConversation = 128000 - 500 - 800 - 2000 = 124700
-        // 80% = 99760
+        // 触发阈值 90% = 112230
         ConversationMemory memory = new ConversationMemory(200000);
-        memory.store(new MemoryEntry("e1", "test content that is long enough", MemoryEntry.MemoryType.CONVERSATION, null, 100000));
+        memory.store(new MemoryEntry("e1", "test content that is long enough", MemoryEntry.MemoryType.CONVERSATION, null, 113000));
 
         assertTrue(budget.needsCompression(memory));
+    }
+
+    @Test
+    void shouldRespectCustomTriggerRatio() {
+        TokenBudget budget = new TokenBudget(128000);
+        ConversationMemory memory = new ConversationMemory(200000);
+        // 占用 70k：超过 0.5 阈值（62k），但低于 0.9 阈值（112k）
+        memory.store(new MemoryEntry("e1", "x", MemoryEntry.MemoryType.CONVERSATION, null, 70000));
+
+        assertTrue(budget.needsCompression(memory, 0.5), "占用 70k 应触发 50% 阈值");
+        assertFalse(budget.needsCompression(memory, 0.9), "占用 70k 不应触发 90% 阈值");
     }
 
     @Test
