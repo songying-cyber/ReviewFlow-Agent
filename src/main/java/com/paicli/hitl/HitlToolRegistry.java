@@ -1,5 +1,6 @@
 package com.paicli.hitl;
 
+import com.paicli.browser.BrowserCheckResult;
 import com.paicli.policy.AuditLog;
 import com.paicli.tool.ToolRegistry;
 
@@ -31,13 +32,24 @@ public class HitlToolRegistry extends ToolRegistry {
         if (!hitlHandler.isEnabled() || !ApprovalPolicy.requiresApproval(name)) {
             return super.executeTool(name, argumentsJson);
         }
+        BrowserCheckResult browserCheck = checkBrowserTool(name, argumentsJson, true);
+        if (browserCheck.blocked()) {
+            return super.executeTool(name, argumentsJson);
+        }
+        if (browserCheck.requiresPerCallApproval()) {
+            return executeAfterExplicitApproval(name, argumentsJson, browserCheck.sensitiveNotice());
+        }
         String mcpServer = ApprovalPolicy.mcpServerName(name);
         if (hitlHandler.isApprovedAllByTool(name) || hitlHandler.isApprovedAllByServer(mcpServer)) {
             return super.executeTool(name, argumentsJson);
         }
 
+        return executeAfterExplicitApproval(name, argumentsJson, null);
+    }
+
+    private String executeAfterExplicitApproval(String name, String argumentsJson, String sensitiveNotice) {
         long start = System.nanoTime();
-        ApprovalRequest request = ApprovalRequest.of(name, argumentsJson, null);
+        ApprovalRequest request = ApprovalRequest.of(name, argumentsJson, null, null, sensitiveNotice);
         ApprovalResult result = hitlHandler.requestApproval(request);
 
         if (result.isRejected()) {

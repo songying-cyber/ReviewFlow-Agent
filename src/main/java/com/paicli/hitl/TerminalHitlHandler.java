@@ -70,11 +70,12 @@ public class TerminalHitlHandler implements HitlHandler {
     @Override
     public synchronized ApprovalResult requestApproval(ApprovalRequest request) {
         String mcpServer = ApprovalPolicy.mcpServerName(request.toolName());
-        if (isApprovedAllByTool(request.toolName())) {
+        boolean sensitivePerCall = request.sensitiveNotice() != null && !request.sensitiveNotice().isBlank();
+        if (!sensitivePerCall && isApprovedAllByTool(request.toolName())) {
             out.println("  [HITL] " + request.toolName() + " 已在本次会话中全部放行，自动通过");
             return ApprovalResult.approveAll();
         }
-        if (isApprovedAllByServer(mcpServer)) {
+        if (!sensitivePerCall && isApprovedAllByServer(mcpServer)) {
             out.println("  [HITL] MCP server " + mcpServer + " 已在本次会话中全部放行，自动通过");
             return ApprovalResult.approveAllByServer();
         }
@@ -82,6 +83,9 @@ public class TerminalHitlHandler implements HitlHandler {
         // 显著的视觉分隔符，避免审批框被误认为属于上游的"回复"区
         out.println();
         out.println("────────── ⚠️  HITL 审批请求 ──────────");
+        if (sensitivePerCall) {
+            out.println("⚠️  " + request.sensitiveNotice());
+        }
         out.println(request.toDisplayText());
 
         return promptUntilDecision(request);
@@ -93,7 +97,12 @@ public class TerminalHitlHandler implements HitlHandler {
     private ApprovalResult promptUntilDecision(ApprovalRequest request) {
         for (int attempt = 0; attempt < 5; attempt++) {
             out.println();
-            out.println("请选择操作：[y/Enter] 批准  [a] 全部放行  [n] 拒绝  [s] 跳过  [m] 修改参数");
+            boolean sensitivePerCall = request.sensitiveNotice() != null && !request.sensitiveNotice().isBlank();
+            if (sensitivePerCall) {
+                out.println("请选择操作：[y/Enter] 批准本次  [n] 拒绝  [s] 跳过  [m] 修改参数");
+            } else {
+                out.println("请选择操作：[y/Enter] 批准  [a] 全部放行  [n] 拒绝  [s] 跳过  [m] 修改参数");
+            }
             out.print("> ");
             out.flush();
 
@@ -118,6 +127,10 @@ public class TerminalHitlHandler implements HitlHandler {
             }
             switch (normalized) {
                 case "a" -> {
+                    if (sensitivePerCall) {
+                        out.println("  敏感页面操作不支持全部放行，请选择 y/n/s/m");
+                        continue;
+                    }
                     return promptApproveAllScope(request);
                 }
                 case "n" -> {
@@ -217,6 +230,12 @@ public class TerminalHitlHandler implements HitlHandler {
     public void clearApprovedAll() {
         approvedAllByTool.clear();
         approvedAllByServer.clear();
+    }
+
+    public void clearApprovedAllForServer(String serverName) {
+        if (serverName != null) {
+            approvedAllByServer.remove(serverName);
+        }
     }
 
     @Override

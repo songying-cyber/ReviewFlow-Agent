@@ -1,6 +1,6 @@
 # PaiCLI
 
-一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十三期的 `Chrome DevTools MCP`。
+一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十四期的 `CDP 会话复用 + 登录态访问`。
 
 ## 演进历程
 
@@ -106,6 +106,16 @@
 - `image` 类型结果仍不进入多模态模型输入，fallback 文案会引导优先使用 `take_snapshot` 获取 DOM 文本
 - MCP initialize 默认超时提升到 60 秒，并在长启动期间打印等待进度
 
+### 第十四期：CDP 会话复用 + 登录态访问
+
+- 新增 `/browser status`、`/browser connect [port]`、`/browser disconnect`、`/browser tabs` 命令组
+- 默认仍使用 `--isolated=true` 临时浏览器 profile；执行 `/browser connect` 后，运行时把 `chrome-devtools` 切到 `--browser-url=http://127.0.0.1:<port>`，复用带登录态的调试 Chrome
+- `/browser connect` 先探活 `127.0.0.1:<port>/json/version`，失败时不会改 MCP 启动参数，并输出 macOS / Windows / Linux 的 Chrome 启动命令
+- 切换 shared / isolated 模式都会清空 `chrome-devtools` 的 server 维度全部放行，避免旧信任跨模式延续
+- shared 模式下 `close_page` 只能关闭 PaiCLI 自己创建的 tab；无法证明是 PaiCLI 创建的 tab 会被策略层拒绝
+- 敏感页面命中规则后，`click` / `fill_form` / `evaluate_script` 等改写型浏览器工具必须单步 HITL 审批，不复用全部放行；读型工具如 `take_snapshot` 仍可继续使用
+- 审计日志为 chrome-devtools 工具追加可选浏览器 metadata：`browser_mode`、`sensitive`、`target_url`，旧格式 JSONL 仍可读取
+
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
 `com.paicli.policy` 包，作为 HITL 之外的辅助层（不是沙箱、不提供进程隔离）：
@@ -134,7 +144,7 @@
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      Browser-Capable Agent CLI v13.0.0                ║
+║      Session-Aware Browser Agent CLI v14.0.0          ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -302,6 +312,34 @@ MCP 子系统默认开启。`~/.paicli/mcp.json` 不存在时，PaiCLI 会自动
 ```
 
 `command` 表示 stdio server，`url` 表示 Streamable HTTP server。`${PROJECT_DIR}` / `${HOME}` 是内置变量，其他 `${VAR}` 从环境变量读取；缺失会在启动时直接提示。
+
+需要复用登录态时，先启动带远程调试端口和独立 user-data-dir 的 Chrome，并在这个调试 Chrome 中完成登录：
+
+```bash
+# macOS
+open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir=/tmp/paicli-chrome-profile
+
+# Windows
+start chrome.exe --remote-debugging-port=9222 --user-data-dir=%TEMP%\paicli-chrome-profile
+
+# Linux
+google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/paicli-chrome-profile
+```
+
+然后在 PaiCLI 内执行：
+
+```text
+/browser status
+/browser connect
+/browser tabs
+/browser disconnect
+```
+
+`/browser connect` 只在当前进程内把 `chrome-devtools` 切到 shared 模式，不会改写 `~/.paicli/mcp.json`。如果希望启动后默认 shared，可手动把 args 改为：
+
+```json
+["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
+```
 
 浏览器测试可直接让 Agent 读取动态页面，例如：
 

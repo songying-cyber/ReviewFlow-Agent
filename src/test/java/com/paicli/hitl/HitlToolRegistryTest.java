@@ -4,6 +4,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.paicli.browser.BrowserGuard;
+import com.paicli.browser.BrowserSession;
+import com.paicli.browser.SensitivePagePolicy;
 import com.paicli.mcp.protocol.McpToolDescriptor;
 
 import java.nio.file.Files;
@@ -160,6 +163,26 @@ class HitlToolRegistryTest {
 
         assertEquals("clicked", result);
         assertEquals(0, stub.requestCount());
+    }
+
+    @Test
+    void sensitiveBrowserToolBypassesApprovedAllByServerCache(@TempDir Path tempDir) throws Exception {
+        Path rules = tempDir.resolve("sensitive_patterns.txt");
+        Files.writeString(rules, "*://example.com/admin/*\n");
+        BrowserSession session = new BrowserSession();
+        session.switchToShared("http://127.0.0.1:9222");
+        session.rememberNavigation("https://example.com/admin/users");
+        StubHandler stub = new StubHandler(req -> ApprovalResult.approve());
+        stub.approveServer("chrome-devtools");
+        HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setBrowserGuard(new BrowserGuard(session, new SensitivePagePolicy(rules)));
+        registerMcpTool(registry, "chrome-devtools", "click", args -> "clicked");
+
+        String result = registry.executeTool("mcp__chrome-devtools__click", "{\"uid\":\"1\"}");
+
+        assertEquals("clicked", result);
+        assertEquals(1, stub.requestCount());
+        assertNotNull(stub.received.get(0).sensitiveNotice());
     }
 
     @Test

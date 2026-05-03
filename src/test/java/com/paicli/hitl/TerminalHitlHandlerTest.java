@@ -73,6 +73,39 @@ class TerminalHitlHandlerTest {
     }
 
     @Test
+    void sensitiveRequestSkipsApprovedServerCache() {
+        Harness h = Harness.withInput("a\nserver\ny\n");
+        h.handler.requestApproval(MCP_CHROME_REQUEST);
+        ApprovalRequest sensitive = ApprovalRequest.of(
+                "mcp__chrome-devtools__click",
+                "{\"uid\":\"1\"}",
+                null,
+                null,
+                "敏感页面命中规则 *://example.com/admin/*");
+
+        ApprovalResult result = h.handler.requestApproval(sensitive);
+
+        assertEquals(ApprovalResult.Decision.APPROVED, result.decision());
+        assertTrue(h.output().contains("敏感页面"));
+    }
+
+    @Test
+    void sensitiveRequestDoesNotAllowApproveAllOption() {
+        ApprovalRequest sensitive = ApprovalRequest.of(
+                "mcp__chrome-devtools__click",
+                "{\"uid\":\"1\"}",
+                null,
+                null,
+                "敏感页面命中规则 *://example.com/admin/*");
+        Harness h = Harness.withInput("a\ny\n");
+
+        ApprovalResult result = h.handler.requestApproval(sensitive);
+
+        assertEquals(ApprovalResult.Decision.APPROVED, result.decision());
+        assertTrue(h.output().contains("不支持全部放行"));
+    }
+
+    @Test
     void nInputRejectsWithReason() {
         Harness h = Harness.withInput("n\n太危险\n");
         ApprovalResult result = h.handler.requestApproval(WRITE_FILE_REQUEST);

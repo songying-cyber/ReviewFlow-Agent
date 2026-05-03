@@ -85,6 +85,8 @@ public class Agent {
             - 表单填写优先 mcp__chrome-devtools__fill_form，一次性填多字段
             - 等待异步加载使用 mcp__chrome-devtools__wait_for（指定文本或选择器出现）
             - 控制台错误排查使用 list_console_messages；网络请求查看使用 list_network_requests + get_network_request
+            - 如果页面需要带登录态的调试 Chrome，而当前浏览器返回登录页，应提示用户先用调试端口启动 Chrome 并执行 /browser connect
+            - shared 模式下敏感页面的点击、填写、脚本执行等改写操作会强制单步 HITL；close_page 只能关闭 PaiCLI 自己创建的 tab
 
             如果提供了相关记忆，请参考其中的信息来辅助决策。
 

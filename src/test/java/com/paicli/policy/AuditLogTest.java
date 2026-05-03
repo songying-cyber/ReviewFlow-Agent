@@ -2,6 +2,7 @@ package com.paicli.policy;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import com.paicli.browser.BrowserAuditMetadata;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,6 +47,38 @@ class AuditLogTest {
         assertEquals("hitl", recent.get(1).approver());
         assertEquals("policy", recent.get(2).approver());
         assertEquals("error", recent.get(3).outcome());
+    }
+
+    @Test
+    void writesAndReadsBrowserMetadata(@TempDir Path tempDir) {
+        AuditLog log = new AuditLog(tempDir);
+        log.record(AuditLog.AuditEntry.allow(
+                "mcp__chrome-devtools__click",
+                "{}",
+                1,
+                new BrowserAuditMetadata("shared", true, "https://github.com/settings/profile")));
+
+        AuditLog.AuditEntry entry = log.readRecent(1).get(0);
+
+        assertNotNull(entry.metadata());
+        assertEquals("shared", entry.metadata().browserMode());
+        assertTrue(entry.metadata().sensitive());
+        assertEquals("https://github.com/settings/profile", entry.metadata().targetUrl());
+    }
+
+    @Test
+    void readsOldSevenFieldAuditJson(@TempDir Path tempDir) throws Exception {
+        String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        Path file = tempDir.resolve("audit-" + today + ".jsonl");
+        Files.writeString(file, """
+                {"timestamp":"2026-01-01T00:00:00Z","tool":"write_file","args":"{}","outcome":"allow","reason":null,"approver":"none","durationMs":1}
+                """);
+        AuditLog log = new AuditLog(tempDir);
+
+        AuditLog.AuditEntry entry = log.readRecent(1).get(0);
+
+        assertEquals("write_file", entry.tool());
+        assertNull(entry.metadata());
     }
 
     @Test

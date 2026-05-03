@@ -92,6 +92,7 @@ public class SubAgent {
             微信公众号文章 (mp.weixin.qq.com)、知乎专栏、推特、小红书等站点 web_fetch 通常拿不到正文，应走浏览器 MCP。
             浏览器操作优先 mcp__chrome-devtools__take_snapshot（结构化 DOM 文本），不要默认 take_screenshot；
             表单填写优先 fill_form，等待异步加载用 wait_for，控制台排查用 list_console_messages，网络排查用 list_network_requests + get_network_request。
+            需要带登录态的调试 Chrome 但拿到登录页时，提示用户先启动 9222 调试端口并执行 /browser connect；shared 模式下敏感页面改写操作会强制单步 HITL，close_page 只能关 PaiCLI 自己创建的 tab。
             对于当前项目内的文件，请优先使用 read_file 或 list_dir，不要用 execute_command 扫描 /、~ 或整个文件系统。
             execute_command 只适合在当前项目目录执行短时命令。
             安全策略硬规则（HITL 之外的兜底，无法绕过）：read_file / write_file / list_dir / create_project 必须在项目根之内；write_file 单文件 5MB 上限；

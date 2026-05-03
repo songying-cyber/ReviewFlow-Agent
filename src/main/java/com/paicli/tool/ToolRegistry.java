@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.paicli.browser.BrowserAuditMetadata;
+import com.paicli.browser.BrowserCheckResult;
+import com.paicli.browser.BrowserGuard;
 import com.paicli.context.ContextProfile;
 import com.paicli.mcp.protocol.McpToolDescriptor;
 import com.paicli.rag.CodeRetriever;
@@ -59,6 +62,7 @@ public class ToolRegistry {
     private HtmlExtractor htmlExtractor;
     private NetworkPolicy networkPolicy;
     private ContextProfile contextProfile = ContextProfile.from(null);
+    private BrowserGuard browserGuard;
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -102,6 +106,14 @@ public class ToolRegistry {
 
     public ContextProfile getContextProfile() {
         return contextProfile;
+    }
+
+    public void setBrowserGuard(BrowserGuard browserGuard) {
+        this.browserGuard = browserGuard;
+    }
+
+    protected BrowserGuard getBrowserGuard() {
+        return browserGuard;
     }
 
     /**
@@ -534,13 +546,22 @@ public class ToolRegistry {
 
         boolean shouldAudit = shouldAudit(name);
         long start = System.nanoTime();
+        BrowserAuditMetadata auditMetadata = null;
 
         try {
             McpRegisteredTool mcpTool = mcpTools.get(name);
             if (mcpTool != null) {
+                BrowserCheckResult browserCheck = checkBrowserTool(name, argumentsJson, false);
+                auditMetadata = browserCheck.metadata();
+                if (browserCheck.blocked()) {
+                    throw new PolicyException(browserCheck.reason());
+                }
                 String result = mcpTool.invoker().apply(argumentsJson);
+                if (browserGuard != null) {
+                    browserGuard.applyAfterExecution(name, argumentsJson, result);
+                }
                 if (shouldAudit) {
-                    auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start)));
+                    auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start), auditMetadata));
                 }
                 return result;
             }
@@ -551,22 +572,29 @@ public class ToolRegistry {
                     argMap.put(entry.getKey(), entry.getValue().asText()));
             String result = tool.executor().execute(argMap);
             if (shouldAudit) {
-                auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start)));
+                auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start), auditMetadata));
             }
             return result;
         } catch (PolicyException e) {
             if (shouldAudit) {
                 auditLog.record(AuditLog.AuditEntry.denyByPolicy(
-                        name, argumentsJson, e.getMessage(), elapsedMillis(start)));
+                        name, argumentsJson, e.getMessage(), elapsedMillis(start), auditMetadata));
             }
             return "🛡️ 策略拒绝: " + e.getMessage();
         } catch (Exception e) {
             if (shouldAudit) {
                 auditLog.record(AuditLog.AuditEntry.error(
-                        name, argumentsJson, e.getMessage(), elapsedMillis(start)));
+                        name, argumentsJson, e.getMessage(), elapsedMillis(start), auditMetadata));
             }
             return "工具执行失败: " + e.getMessage();
         }
+    }
+
+    protected BrowserCheckResult checkBrowserTool(String name, String argumentsJson, boolean previewOnly) {
+        if (browserGuard == null || !BrowserGuard.isChromeTool(name)) {
+            return BrowserCheckResult.allow(null);
+        }
+        return browserGuard.check(name, argumentsJson, !previewOnly);
     }
 
     public AuditLog getAuditLog() {

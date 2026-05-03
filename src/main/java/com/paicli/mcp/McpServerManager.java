@@ -138,6 +138,19 @@ public class McpServerManager implements AutoCloseable {
                 : "❌ MCP server 重启失败: " + name + " - " + server.errorMessage();
     }
 
+    public synchronized String restartWithArgs(String name, List<String> args) {
+        McpServer server = servers.get(name);
+        if (server == null) {
+            return "未找到 MCP server: " + name;
+        }
+        server.config().setArgs(args);
+        return restart(name);
+    }
+
+    public McpServer server(String name) {
+        return servers.get(name);
+    }
+
     public synchronized String disable(String name) {
         McpServer server = servers.get(name);
         if (server == null) {

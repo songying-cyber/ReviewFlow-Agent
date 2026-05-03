@@ -19,7 +19,8 @@ public record ApprovalRequest(
         String dangerLevel,
         String riskDescription,
         String suggestion,
-        String callerContext
+        String callerContext,
+        String sensitiveNotice
 ) {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int BOX_INNER_WIDTH = 58;
@@ -32,13 +33,19 @@ public record ApprovalRequest(
     }
 
     public static ApprovalRequest of(String toolName, String arguments, String suggestion, String callerContext) {
+        return of(toolName, arguments, suggestion, callerContext, null);
+    }
+
+    public static ApprovalRequest of(String toolName, String arguments, String suggestion, String callerContext,
+                                     String sensitiveNotice) {
         return new ApprovalRequest(
                 toolName,
                 arguments,
                 ApprovalPolicy.getDangerLevel(toolName),
                 ApprovalPolicy.getRiskDescription(toolName),
                 suggestion,
-                callerContext
+                callerContext,
+                sensitiveNotice
         );
     }
 
@@ -63,6 +70,9 @@ public record ApprovalRequest(
         sb.append(formatBoxField("风险", riskDescription)).append("\n");
         if (callerContext != null && !callerContext.isBlank()) {
             sb.append(formatBoxField("来源", callerContext)).append("\n");
+        }
+        if (sensitiveNotice != null && !sensitiveNotice.isBlank()) {
+            sb.append(formatBoxField("敏感页面", sensitiveNotice)).append("\n");
         }
         sb.append("├").append(border).append("┤\n");
         sb.append(formatBoxLine("参数:")).append("\n");

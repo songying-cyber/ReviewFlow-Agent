@@ -342,24 +342,25 @@
 
 ---
 
-## 第14期：CDP 会话复用 + 登录态访问
+## 第14期：CDP 会话复用 + 登录态访问 ✅
 
 **前置依赖**：第13期 Chrome DevTools MCP 已能驱动浏览器
 
-**目标**：让 Agent 复用用户已登录的 Chrome 实例，访问需要认证的页面
+**目标**：让 Agent 复用带登录态的调试 Chrome 实例，访问需要认证的页面
 
 **功能迭代**：
-- 通过 `--remote-debugging-port` 连接用户已打开的 Chrome 实例
-- 复用现有登录态访问 GitHub、内部系统等需认证页面
-- 多 Tab / 多上下文管理
-- 登录态访问的安全约束（敏感页面识别、操作前 HITL 审批）
+- 通过 `/browser connect [port]` 探活 `127.0.0.1:<port>/json/version`，运行时把 `chrome-devtools` 切到 `--browser-url=http://127.0.0.1:<port>`
+- 复用调试 Chrome 登录态访问 GitHub、内部系统等需认证页面；默认 `mcp.json` 仍保持 `--isolated=true`
+- `/browser status` / `/browser tabs` / `/browser disconnect` 提供会话状态、tab 查看和回到 isolated 的入口
+- 登录态访问安全约束已落地：敏感页面识别、改写型工具单步 HITL、shared 模式 `close_page` 硬保护
+- 审计日志为 chrome-devtools 工具追加浏览器 metadata，同时兼容旧 JSONL
 
 **核心知识点**：
 - Chrome 远程调试端口工作机制
 - 登录态复用与隔离
 - 认证页面的安全策略
 
-**教程标题候选**：《要登录才能看？让 Agent 复用你已登录的 Chrome，省掉重新登录的麻烦》
+**教程标题候选**：《要登录才能看？让 Agent 连上你的调试 Chrome，省掉重复打开页面的麻烦》
 
 ---
 
@@ -488,4 +489,4 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ---
 
-*已完成第 13 期 Chrome DevTools MCP 首批交付。下一步进入第 14 期 CDP 会话复用，OAuth / sampling / recovery 留给后续 MCP 增强期。*
+*已完成第 14 期 CDP 会话复用 + 登录态访问。下一步进入第 15 期 Skill 系统，OAuth / sampling / recovery 留给后续 MCP 增强期。*
