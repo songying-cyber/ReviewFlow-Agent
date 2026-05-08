@@ -1,9 +1,11 @@
 package com.paicli.tool;
 
+import com.paicli.browser.BrowserConnector;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -101,5 +103,42 @@ class ToolRegistryTest {
         assertTrue(results.get(0).timedOut());
         assertTrue(results.get(0).result().contains("工具执行超时"));
         assertEquals("result-fast", results.get(1).result());
+    }
+
+    @Test
+    void browserConnectToolUsesInjectedConnector() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setBrowserConnector(new BrowserConnector() {
+            @Override
+            public String status() {
+                return "status-ok";
+            }
+
+            @Override
+            public String connectDefault() {
+                return "connected";
+            }
+
+            @Override
+            public String disconnect() {
+                return "disconnected";
+            }
+        });
+
+        assertEquals("connected", registry.executeTool("browser_connect", "{}"));
+        assertEquals("status-ok", registry.executeTool("browser_status", "{}"));
+        assertEquals("disconnected", registry.executeTool("browser_disconnect", "{}"));
+    }
+
+    @Test
+    void saveMemoryToolUsesInjectedMemorySaver() {
+        ToolRegistry registry = new ToolRegistry();
+        List<String> saved = new ArrayList<>();
+        registry.setMemorySaver(saved::add);
+
+        String result = registry.executeTool("save_memory", "{\"fact\":\"访问 yuque.com 时复用登录态\"}");
+
+        assertEquals(List.of("访问 yuque.com 时复用登录态"), saved);
+        assertTrue(result.contains("已保存到长期记忆"));
     }
 }

@@ -1,6 +1,6 @@
 # 第 14 期开发任务：CDP 会话复用 + 登录态访问
 
-> **当前状态**：已落地 `/browser` 命令组、`chrome-devtools` shared/isolated 运行时切换、敏感页面单步 HITL、shared 模式 `close_page` 保护、浏览器审计 metadata 与对应单测。真实登录态端到端仍需本机 Chrome 以 `--remote-debugging-port=9222` 启动后手测。
+> **当前状态**：已落地 `/browser` 命令组、Agent 内部 `browser_connect` / `browser_disconnect` / `browser_status` 工具、`chrome-devtools` shared/isolated 运行时切换、敏感页面单步 HITL、shared 模式 `close_page` 保护、浏览器审计 metadata 与对应单测。登录态复用默认走 `chrome-devtools-mcp --autoConnect`，也保留 `/browser connect <port>` 的旧式 `--browser-url` 端口兼容路径。
 
 > 这份文档是给执行 Agent 的开发任务说明书，自包含、可直接照着推进。
 >
@@ -11,7 +11,7 @@
 > 4. `src/main/java/com/paicli/hitl/`（`approvedAllByTool` / `approvedAllByServer` 已就绪，本期要补「敏感页面强制单步审批」）
 > 5. `src/main/java/com/paicli/policy/`（`PathGuard` / `CommandGuard` / `AuditLog` 已就绪，本期新增 `BrowserGuard`、`SensitivePagePolicy`，`AuditEntry` 加可选 `metadata` 字段）
 >
-> **核心原则**：第 13 期已经把 `chrome-devtools-mcp` 接进来跑通；本期**不写 CDP 协议**——chrome-devtools-mcp 原生支持 `--browser-url=http://127.0.0.1:9222`，PaiCLI 这边只做「运行时切换 server 启动参数 + 登录态安全约束 + UX 引导」。
+> **核心原则**：第 13 期已经把 `chrome-devtools-mcp` 接进来跑通；本期**不写 CDP 协议**——chrome-devtools-mcp 原生支持 `--autoConnect` 连接 Chrome 144+ 的 `chrome://inspect/#remote-debugging` 实例，也支持旧式 `--browser-url=http://127.0.0.1:9222`，PaiCLI 这边只做「运行时切换 server 启动参数 + 登录态安全约束 + UX 引导」。
 
 ---
 
@@ -23,7 +23,7 @@
 
 - `chrome-devtools` server 支持两种运行模式 `isolated`（默认）/ `shared`（复用带登录态的调试 Chrome），运行时切换并自动重启
 - 新增 CLI 命令组 `/browser`：`status` / `connect` / `disconnect` / `tabs`
-- 9222 端口连通性探活 + 三平台 Chrome 启动命令引导（macOS / Linux / Windows）
+- 默认 `--autoConnect` 连接已允许远程调试的本机 Chrome；显式 `/browser connect <port>` 保留 9222 等旧式 CDP 端口探活 + 三平台 Chrome 启动命令引导（macOS / Linux / Windows）
 - 敏感页面识别（默认规则 + 用户级 `~/.paicli/sensitive_patterns.txt`）+ 命中后强制单步审批（绕过 `approvedAllByServer`）
 - `close_page` 工具硬保护：只允许关闭 PaiCLI 当次会话 `new_page` 出来的 tab，否则抛 `PolicyException`
 - `AuditLog.AuditEntry` 新增可选 `metadata` 字段，记录 `browser_mode` / `sensitive` / `target_url`
@@ -43,19 +43,20 @@
 
 ---
 
-## 2. chrome-devtools-mcp `--browser-url` 概况
+## 2. chrome-devtools-mcp 复用模式概况
 
 | 项 | 值 |
 |---|---|
 | chrome-devtools-mcp 版本 | v0.23.0+（同第 13 期） |
-| 复用模式启动参数 | `--browser-url=http://127.0.0.1:9222` |
-| 用户侧前置 | 用户先用 `--remote-debugging-port=9222` 启动 Chrome |
-| 默认端口 | `9222`（CDP 默认） |
-| 探活端点 | `GET http://127.0.0.1:9222/json/version`（返回 JSON `{Browser, webSocketDebuggerUrl, ...}`） |
-| 连通性表现 | server 在 `--browser-url` 指向的端口连不上时会启动失败，stderr 报错 |
+| 默认复用参数 | `--autoConnect` |
+| 默认用户侧前置 | Chrome 144+ 打开 `chrome://inspect/#remote-debugging`，勾选 `Allow remote debugging for this browser instance` |
+| 旧式兼容参数 | `--browser-url=http://127.0.0.1:9222` |
+| 旧式用户侧前置 | 用户先用 `--remote-debugging-port=9222` 启动 Chrome |
+| 旧式探活端点 | `GET http://127.0.0.1:9222/json/version`（返回 JSON `{Browser, webSocketDebuggerUrl, ...}`） |
+| 连通性表现 | `--autoConnect` 由 chrome-devtools-mcp 自己连接并报错；旧式 `--browser-url` 指向的端口连不上时会启动失败，stderr 报错 |
 | 多 Tab 行为 | server 接管已开 Chrome 的所有 tab；`list_pages` 会列出包括用户原有 tab 在内的全部页面 |
 
-**用户侧三平台 Chrome 启动命令**（写进 README）：
+**旧式端口路径三平台 Chrome 启动命令**（写进 README）：
 
 ```bash
 # macOS
@@ -79,7 +80,7 @@ google-chrome --remote-debugging-port=9222
 - 提示词、HITL 全放行的 server 维度都得重写
 - 用户心智复杂
 
-**采用**：`chrome-devtools` server 名不变，args 在 `[--isolated=true]` 与 `[--browser-url=<url>]` 间切换，切换时重启该 server。LLM 看到的工具集（`mcp__chrome-devtools__*`）始终一致。
+**采用**：`chrome-devtools` server 名不变，args 在 `[--isolated=true]`、`[--autoConnect]` 与旧式 `[--browser-url=<url>]` 间切换，切换时重启该 server。LLM 看到的工具集（`mcp__chrome-devtools__*`）始终一致。
 
 `McpServerManager` 已有 `restart(name)`，但只能用 **当前 config** 重启。本期需新增：
 
@@ -89,20 +90,21 @@ public synchronized String restartWithArgs(String name, List<String> newArgs)
 
 实现：把 `McpServer.config().setArgs(newArgs)` 改完后走 `restart(name)` 现有路径。`McpServerConfig` 当前 args 字段如果是不可变 list，需要补一个 setter（保持包内可见，避免外部滥用）。
 
-**默认行为不变**：`~/.paicli/mcp.json` 不存在时仍生成 `--isolated=true`（向后兼容第 13 期用户）。`/browser connect` 是显式动作，不主动改用户 mcp.json 文件，**只在内存中切换 args**；用户重启 PaiCLI 后回到 isolated。这样：
+**默认行为不变**：`~/.paicli/mcp.json` 不存在时仍生成 `--isolated=true`（向后兼容第 13 期用户）。`browser_connect` / `/browser connect` 是运行期动作，不主动改用户 mcp.json 文件，**只在内存中切换 args**；用户重启 PaiCLI 后回到 isolated。这样：
 - 默认安全（isolated 仍是默认）
 - 运行时按需 connect
 - 用户的 mcp.json 不被 PaiCLI 偷偷改动
 
-如果用户希望默认就走 shared，文档里明示：自己改 `~/.paicli/mcp.json` 把 args 改成 `["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]`。
+如果用户希望默认就走 shared，文档里明示：自己改 `~/.paicli/mcp.json` 把 args 改成 `["-y", "chrome-devtools-mcp@latest", "--autoConnect"]`。旧式端口可用 `["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]`。
 
 ### 3.2 `/browser` CLI 命令组
 
 | 命令 | 行为 |
 |---|---|
 | `/browser` | 等价 `/browser status` |
-| `/browser status` | 显示当前模式（isolated / shared）、target URL（shared 模式下）、9222 探活结果、`chrome-devtools` server 状态、当前 tab 数（shared 模式下调 `list_pages`） |
-| `/browser connect [port]` | 切换到 shared 模式，默认 9222，可选 port。先探活 → 失败给三平台命令 + 退出；成功则 `restartWithArgs(chrome-devtools, ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:<port>"])` |
+| `/browser status` | 显示当前模式（isolated / shared）、target URL（shared 模式下）、autoConnect 引导、旧式 9222 探活结果、`chrome-devtools` server 状态 |
+| `/browser connect` | 切换到 shared 模式，默认 `restartWithArgs(chrome-devtools, ["-y", "chrome-devtools-mcp@latest", "--autoConnect"])` |
+| `/browser connect <port>` | 旧式 CDP 端口兼容路径。先探活 → 失败给三平台命令 + 退出；成功则 `restartWithArgs(chrome-devtools, ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:<port>"])` |
 | `/browser disconnect` | 切回 isolated 模式，`restartWithArgs(chrome-devtools, ["-y", "chrome-devtools-mcp@latest", "--isolated=true"])` |
 | `/browser tabs` | shared 模式下：调 `list_pages` 列 tab；isolated 模式下：提示「当前为 isolated 模式，没有真实 Chrome tab，可用 `/browser connect`」 |
 
@@ -200,14 +202,16 @@ public synchronized String restartWithArgs(String name, List<String> newArgs)
 
 **启动期**：PaiCLI 启动时，如果 `mcp.json` 里 `chrome-devtools` 配置已经是 `--browser-url=...`（用户自己改的），不在启动期探活——`chrome-devtools-mcp` 自己会失败并写 stderr，`/mcp logs chrome-devtools` 可见。启动期间不阻塞别的 server。
 
-**`/browser connect [port]` 期**：必须探活。
+**`/browser connect` 期**：不再用 `/json/version` 探活。新版 Chrome 的 `chrome://inspect/#remote-debugging` 开关面向 `chrome-devtools-mcp --autoConnect`，并不保证旧式 `http://127.0.0.1:9222/json/version` 返回 200。默认路径直接重启 server 为 `--autoConnect`，失败则回滚 args，并提示用户确认 Chrome 144+ 已勾选 remote debugging。
+
+**`/browser connect <port>` 期**：旧式 CDP 端口路径，必须探活。
 
 `BrowserConnectivityCheck.probe(host, port)`：
 - 实现：OkHttp `GET http://<host>:<port>/json/version`，timeout 2 秒
 - 成功 → 返回 `Probe(connected=true, browserVersion="Chrome/130.0.0.0", webSocketDebuggerUrl="...")`
 - 失败 → 返回 `Probe(connected=false, errorMessage="Connection refused")`
 
-`/browser connect` 失败时打印：
+`/browser connect <port>` 失败时打印：
 
 ```
 ❌ 无法连接到 Chrome 调试端口 127.0.0.1:9222
@@ -224,10 +228,10 @@ public synchronized String restartWithArgs(String name, List<String> newArgs)
   Windows (PowerShell):
     & "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
 
-启动后再执行 /browser connect 重试。
+启动后再执行 /browser connect 9222 重试。
 ```
 
-`/browser status` 总是显示当前 9222 探活结果（不阻塞、独立线程或 2s 内同步），让用户随时知情。
+`/browser status` 总是显示当前旧式 9222 探活结果（不阻塞、独立线程或 2s 内同步），但这个结果只代表 `--browser-url` 路径，不代表 `--autoConnect` 不可用。
 
 ### 3.6 数据脱敏 / 审计字段升级
 
@@ -301,8 +305,9 @@ if (BrowserGuard.requiresPerCallApproval(toolName, argsJson)) {
 
 ```bash
 # ========== 第 14 期：CDP 会话复用 ==========
-# /browser connect 默认连 127.0.0.1:9222；如需改端口可在命令里传：/browser connect 9333
-# 启动 Chrome 调试端口（先于 PaiCLI）：
+# Chrome 144+ 推荐在 chrome://inspect/#remote-debugging 勾选 Allow remote debugging，
+# 然后让 Agent 自动调用 browser_connect，或手动执行 /browser connect。
+# 旧式 CDP HTTP JSON 端口可用 /browser connect 9222；启动命令：
 #   macOS:   open -a "Google Chrome" --args --remote-debugging-port=9222
 #   Linux:   google-chrome --remote-debugging-port=9222
 #   Windows: chrome.exe --remote-debugging-port=9222
@@ -391,15 +396,26 @@ if (BrowserGuard.requiresPerCallApproval(toolName, argsJson)) {
 🌐 Browser Session
   当前模式: isolated（临时 user-data-dir，无登录态）
   chrome-devtools server: ● ready (28 tools)
-  9222 探活: ⚠️ 未检测到 Chrome 调试端口（这是正常的，isolated 模式不需要）
-  PaiCLI 自开 tab: 0
+  旧式 /json/version 探活: ⚠️ 未检测到 Chrome 调试端口（这是正常的，isolated 模式不需要）
+  自动连接: Chrome 144+ 可在 chrome://inspect/#remote-debugging 勾选 Allow remote debugging 后使用 /browser connect
   提示: /browser connect 切到 shared 模式复用带登录态的调试 Chrome
 ```
 
-### 6.2 `/browser connect`（探活失败）
+### 6.2 `/browser connect`（autoConnect 失败）
 
 ```
 > /browser connect
+
+❌ autoConnect 连接失败，已回滚 chrome-devtools 启动参数：
+...
+
+请确认 Chrome 144+ 已打开 chrome://inspect/#remote-debugging，并勾选 Allow remote debugging for this browser instance。
+```
+
+### 6.3 `/browser connect <port>`（旧式探活失败）
+
+```
+> /browser connect 9222
 
 ❌ 无法连接到 Chrome 调试端口 127.0.0.1:9222
    原因: Connection refused
@@ -415,13 +431,23 @@ if (BrowserGuard.requiresPerCallApproval(toolName, argsJson)) {
   Windows (PowerShell):
     & "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
 
-启动后再执行 /browser connect 重试。
+启动后再执行 /browser connect 9222 重试。
 ```
 
-### 6.3 `/browser connect`（探活成功）
+### 6.4 `/browser connect`（autoConnect 成功）
 
 ```
 > /browser connect
+
+🔄 已用 --autoConnect 连接 Chrome（需已在 chrome://inspect/#remote-debugging 允许远程调试）
+   重启中... 4.2s
+   ✓ chrome-devtools 已就绪 (28 tools)
+```
+
+### 6.5 `/browser connect <port>`（旧式探活成功）
+
+```
+> /browser connect 9222
 
 🔍 探测 127.0.0.1:9222 ... ✓ Chrome/130.0.6723.91
 🔄 切换 chrome-devtools server 到 shared 模式 (--browser-url=http://127.0.0.1:9222)
@@ -575,14 +601,15 @@ if (BrowserGuard.requiresPerCallApproval(toolName, argsJson)) {
 
 ### 已知必踩的坑
 
-1. **chrome-devtools-mcp `--browser-url` 需要 Chrome 已启用 9222**：用户没启动 / 启动了但绑了别的端口 / 或调试端口被另一个工具占用 → 探活失败。文档 + `/browser connect` 错误提示必须清楚。
-2. **9222 未启动情况下还是改了 args**：`restartWithArgs` 后 chrome-devtools-mcp 自己启动失败、状态 `ERROR`。`/browser connect` 必须**先探活，再改 args**——这个顺序硬规定。
+1. **Chrome remote debugging UI 不等于旧式 `/json/version`**：`chrome://inspect/#remote-debugging` 勾选后，截图里会显示 `127.0.0.1:9222`，但 `curl http://127.0.0.1:9222/json/version` 仍可能是 404；默认路径必须走 `chrome-devtools-mcp --autoConnect`。
+2. **旧式 `--browser-url` 需要 Chrome 已启用真实 CDP JSON 端口**：用户没启动 / 启动了但绑了别的端口 / 或调试端口被另一个工具占用 → 探活失败。文档 + `/browser connect <port>` 错误提示必须清楚。
+3. **旧式端口未启动情况下还是改了 args**：`restartWithArgs` 后 chrome-devtools-mcp 自己启动失败、状态 `ERROR`。`/browser connect <port>` 必须**先探活，再改 args**——这个顺序硬规定。
 3. **`close_page` 的 pageId 解析**：chrome-devtools-mcp 工具返回结构 PaiCLI 这边没强约定，需要在 Day 1 实际跑一次 `new_page` 看看 result 长什么样，再决定怎么解析 pageId。如果发现完全没法解析，**保守**：shared 模式下一律拒绝 `close_page`，让用户手动关。
 4. **敏感规则的 URL 来源**：`navigate_page` 的 args 显式带 url，好办；但 `click` / `fill` 这些 args 里没 url，靠 `BrowserSession.lastNavigatedUrl` 缓存。如果 Agent 用 `evaluate_script` 改 location 跳转 → PaiCLI 抓不到。**接受这个边界**，文档明示「敏感判定基于最近一次 navigate_page；evaluate_script 跳转无法识别」。
 5. **`AuditEntry` 加字段的反序列化兼容**：必须先写测试验证旧 7 字段 JSONL 能读，再 commit。Jackson 对 record 的容忍取决于 mapper 配置，宁可保守加 `@JsonCreator` 注解或显式 builder。
 6. **`/browser` 命令撞上 `/browser` 自然语言**：如果用户输入「browser 怎么用」走的是 Agent，没事；只在 `/` 开头才走命令解析。这是项目既有约定（AGENTS.md §2 输入解析），保持。
-7. **shared 模式启动慢**：`--browser-url` 模式因为不用启 Chromium，反而比 isolated 快（约 3-5s vs 15-25s）。但首次仍可能 npx 拉包慢，沿用第 13 期的进度打印逻辑即可。
-8. **跨平台路径**：`~/.paicli/sensitive_patterns.txt` 在 Windows 是 `%USERPROFILE%\.paicli\sensitive_patterns.txt`。沿用项目既有约定 `Path.of(System.getProperty("user.home"), ".paicli", ...)` 不要硬编码 `/`。
+8. **shared 模式启动慢**：`--autoConnect` / `--browser-url` 模式因为不用启 Chromium，通常比 isolated 快。但首次仍可能 npx 拉包慢，沿用第 13 期的进度打印逻辑即可。
+9. **跨平台路径**：`~/.paicli/sensitive_patterns.txt` 在 Windows 是 `%USERPROFILE%\.paicli\sensitive_patterns.txt`。沿用项目既有约定 `Path.of(System.getProperty("user.home"), ".paicli", ...)` 不要硬编码 `/`。
 9. **测试隔离**：`BrowserSession` 单例容易污染测试。**必须**在 `BrowserSessionTest` 等用例里 `@BeforeEach` reset。或者干脆把 BrowserSession 做成**非全局单例**，由 `Main` 持有引用并注入 ToolRegistry / HitlToolRegistry——更可测，推荐这条路。
 10. **HITL 弹窗在敏感页面隐藏 `[a]`**：`TerminalHitlHandler` 的 `promptUntilDecision` 当前对所有请求展示同一组选项。要么按 `request.sensitiveNotice != null` 条件渲染不同的 prompt 文本，要么把「全放行」选项变成可选 flag。**采用前者**，无侵入。
 
@@ -625,14 +652,14 @@ if (BrowserGuard.requiresPerCallApproval(toolName, argsJson)) {
 **产出**：
 - `McpServerConfig.setArgs(...)`
 - `McpServerManager.restartWithArgs(name, newArgs)` 内部走 `restart` 现有路径
-- `Main.java` `/browser connect` 真实实现：探活 → setArgs → restartWithArgs → BrowserSession.switchMode；失败回滚 args、保持 isolated
+- `Main.java` `/browser connect` 真实实现：默认 setArgs 为 `--autoConnect` → restartWithArgs → BrowserSession.switchMode；失败回滚 args、保持 isolated。`/browser connect <port>` 走旧式探活 → `--browser-url` → restartWithArgs。
 - `/browser disconnect` 同理反向
 - `/browser tabs`：shared 模式下调 `mcp__chrome-devtools__list_pages`（通过 ToolRegistry 调）；isolated 模式提示
 - 切换时清 `approvedAllByServer("chrome-devtools")` 与 `agentOpenedTabs`
 
 **测试**：
 - `McpServerManagerTest` 追加：`restartWithArgs` 后 `server.config().getArgs()` 已变（mock McpClient，1+ 用例）
-- `MainBrowserCommandTest` 新建：`/browser connect` 探活失败时不调 restart（4+ 用例）
+- `MainBrowserCommandTest` 新建：`/browser connect <port>` 探活失败时不调 restart，默认 `/browser connect` 走 autoConnect（4+ 用例）
 
 ### Day 3：SensitivePagePolicy + BrowserGuard + close_page 硬保护
 
@@ -675,8 +702,8 @@ if (BrowserGuard.requiresPerCallApproval(toolName, argsJson)) {
 **手测清单**（必跑，结果写到 commit description）：
 
 1. ✅ `/browser status` 默认显示 isolated
-2. ✅ `/browser connect` 9222 未启动 → 三平台命令提示
-3. ✅ Chrome 启动 9222 后 `/browser connect` 成功 → server 重启 → READY
+2. ✅ `/browser connect` 在 Chrome remote debugging 已允许时走 `--autoConnect` → server 重启 → READY
+3. ✅ `/browser connect 9222` 在旧式 9222 未启动 → 三平台命令提示；Chrome 启动旧式 9222 后成功 → server 重启 → READY
 4. ✅ §7.1 GitHub 私仓访问成功
 5. ✅ §7.2 敏感页面强制单步审批（连续 click / fill 都弹窗）
 6. ✅ §7.3 close_page 硬保护（误关用户 tab 100% 拦截）
@@ -796,7 +823,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 | evaluate_script 跳转的敏感判定 | **不拦**，文档明示边界 |
 | DOM snapshot 是否脱敏 | **不脱敏**，由敏感页面单步审批兜底 |
 | 跨平台 Chrome 启动命令 | macOS / Linux / Windows 三平台都给 |
-| `/browser connect` 探活与 setArgs 顺序 | **先探活，再 setArgs**；失败不动 args |
+| `/browser connect` 探活与 setArgs 顺序 | 默认 `--autoConnect` 不探活，失败回滚；旧式 `/browser connect <port>` **先探活，再 setArgs**，失败不动 args |
 | 切换模式时 `approvedAllByServer` | **清空**，新模式新一轮信任 |
 | 第 17 期多模态、第 15 期 Skill 范围 | **保持原计划**，本期不动 |
 

@@ -3,6 +3,7 @@ package com.paicli.agent;
 import com.paicli.llm.LlmClient;
 import com.paicli.context.ContextProfile;
 import com.paicli.context.TokenUsageFormatter;
+import com.paicli.memory.ExplicitMemoryHints;
 import com.paicli.memory.MemoryManager;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.util.AnsiStyle;
@@ -48,10 +49,13 @@ public class Agent {
             6. search_code - 语义检索代码库，参数：{"query": "自然语言描述", "top_k": 5}
             7. web_search - 搜索互联网获取实时信息（最新版本、官方文档、技术资讯等），参数：{"query": "搜索关键词", "top_k": 5}
             8. web_fetch - 抓取已知 URL 并返回正文 Markdown，参数：{"url": "https://...", "max_chars": 8000}
-            9. mcp__{server}__{tool} - MCP server 动态提供的外部工具，具体参数以工具 schema 为准
+            9. save_memory - 在用户明确要求“记一下/记住/以后记得”时保存长期记忆，参数：{"fact": "精炼稳定事实"}
+            10. mcp__{server}__{tool} - MCP server 动态提供的外部工具，具体参数以工具 schema 为准
 
             当需要操作文件、执行命令或创建项目时，请使用工具调用。
             使用工具后，根据工具返回的结果继续思考下一步行动。
+            当用户明确说“记一下”“记住”“以后记得”或要求保存长期偏好/稳定事实时，必须调用 save_memory；
+            只保存跨会话仍成立的精炼事实，不保存一次性任务请求、临时文件名、模型猜测或当前轮执行计划。
             对于当前项目内的文件和代码，请优先使用 read_file、list_dir、search_code。
             execute_command 只适合在当前项目目录执行短时命令（如 git status、mvn test），不要用它扫描 /、~ 或整个文件系统。
             安全策略硬规则（HITL 之外的兜底，无法绕过，请提前规避）：
@@ -85,7 +89,8 @@ public class Agent {
             - 表单填写优先 mcp__chrome-devtools__fill_form，一次性填多字段
             - 等待异步加载使用 mcp__chrome-devtools__wait_for（指定文本或选择器出现）
             - 控制台错误排查使用 list_console_messages；网络请求查看使用 list_network_requests + get_network_request
-            - 如果页面需要带登录态的调试 Chrome，而当前浏览器返回登录页，应提示用户先用调试端口启动 Chrome 并执行 /browser connect
+            - 如果浏览器 MCP 返回登录页、权限不足、需要认证，或用户明确要求访问登录后页面，先调用 browser_connect 自动连接已允许远程调试的本机 Chrome，再重新打开原 URL；不要让用户先手动切换
+            - 公开页面（如微信公众号文章、普通文档、新闻页面）不需要登录态时，不要提前调用 browser_connect，直接用 isolated 浏览器 MCP 即可
             - shared 模式下敏感页面的点击、填写、脚本执行等改写操作会强制单步 HITL；close_page 只能关闭 PaiCLI 自己创建的 tab
 
             如果提供了相关记忆，请参考其中的信息来辅助决策。
@@ -103,6 +108,7 @@ public class Agent {
         this.conversationHistory = new ArrayList<>();
         this.memoryManager = new MemoryManager(llmClient);
         this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
+        this.toolRegistry.setMemorySaver(memoryManager::storeFact);
         conversationHistory.add(LlmClient.Message.system(SYSTEM_PROMPT));
     }
 
@@ -123,6 +129,7 @@ public class Agent {
         log.info("ReAct run started: inputLength={}", userInput == null ? 0 : userInput.length());
         // 存入短期记忆
         memoryManager.addUserMessage(userInput);
+        storeExplicitBrowserMemoryHint(userInput);
 
         // 检索相关长期记忆，注入到 system prompt
         ContextProfile contextProfile = memoryManager.getContextProfile();
@@ -293,6 +300,17 @@ public class Agent {
      */
     public MemoryManager getMemoryManager() {
         return memoryManager;
+    }
+
+    private void storeExplicitBrowserMemoryHint(String userInput) {
+        List<String> recentTexts = conversationHistory.stream()
+                .map(LlmClient.Message::content)
+                .filter(content -> content != null && !content.isBlank())
+                .toList();
+        String fact = ExplicitMemoryHints.browserLoginFact(userInput, recentTexts);
+        if (fact != null && !fact.isBlank()) {
+            memoryManager.storeFact(fact);
+        }
     }
 
     public String getContextStatus() {
@@ -481,6 +499,7 @@ public class Agent {
             case "search_code" -> "🔍 搜索代码 " + count + " 次";
             case "web_search" -> "🌐 联网搜索 " + count + " 次";
             case "web_fetch" -> "📰 抓取 " + count + " 个网页";
+            case "save_memory" -> "💾 保存长期记忆 " + count + " 条";
             default -> toolName != null && toolName.startsWith("mcp__")
                     ? formatMcpLabel(toolName, count)
                     : "🔧 " + toolName + " × " + count;
@@ -504,6 +523,7 @@ public class Agent {
                 case "create_project" -> "name";
                 case "search_code", "web_search" -> "query";
                 case "web_fetch" -> "url";
+                case "save_memory" -> "fact";
                 default -> null;
             };
             if (key == null) {

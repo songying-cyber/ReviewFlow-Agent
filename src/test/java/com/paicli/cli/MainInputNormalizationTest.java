@@ -40,12 +40,23 @@ class MainInputNormalizationTest {
     }
 
     @Test
-    void startupHintsIncludeRagSlashCommands() {
+    void startupHintsKeepSlashCommandDetailsOutOfInitialScreen() {
         List<String> hints = Main.startupHints();
 
-        assertTrue(hints.stream().anyMatch(hint -> hint.contains("/index [路径]")));
-        assertTrue(hints.stream().anyMatch(hint -> hint.contains("/search <查询>")));
-        assertTrue(hints.stream().anyMatch(hint -> hint.contains("/graph <类名>")));
+        assertTrue(hints.stream().anyMatch(hint -> hint.contains("输入 '/' 查看命令")));
+        assertTrue(hints.stream().noneMatch(hint -> hint.contains("/model")));
+        assertTrue(hints.stream().noneMatch(hint -> hint.contains("/index [路径]")));
+    }
+
+    @Test
+    void slashCommandHintsIncludeRagSlashCommands() {
+        List<String> commands = Main.slashCommandHints().stream()
+                .map(Main.SlashCommandHint::display)
+                .toList();
+
+        assertTrue(commands.contains("/index [路径]"));
+        assertTrue(commands.contains("/search <查询>"));
+        assertTrue(commands.contains("/graph <类名>"));
     }
 
     @Test

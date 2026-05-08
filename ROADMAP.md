@@ -328,7 +328,7 @@
 - 真 multimodal LLM 输入（拆到第 17 期「多模态 LLM 输入」）
 - CDP 会话复用 / 登录态识别（第 14 期）
 - Playwright / Firefox / WebKit 跨浏览器
-- 浏览器执行隔离（默认 `--isolated=true` 临时 user-data-dir，第 14 期改 `--browser-url` 复用已开 Chrome）
+- 浏览器执行隔离（默认 `--isolated=true` 临时 user-data-dir，第 14 期通过 `--autoConnect` 或旧式 `--browser-url` 复用已开 Chrome）
 
 **核心知识点**：
 - 第三方 MCP server 接入实战（直接用 Google 官方 server，不再造轮子）
@@ -349,7 +349,7 @@
 **目标**：让 Agent 复用带登录态的调试 Chrome 实例，访问需要认证的页面
 
 **功能迭代**：
-- 通过 `/browser connect [port]` 探活 `127.0.0.1:<port>/json/version`，运行时把 `chrome-devtools` 切到 `--browser-url=http://127.0.0.1:<port>`
+- 通过 Agent 内部 `browser_connect` 或 `/browser connect` 按需切到 `--autoConnect`，复用已在 `chrome://inspect/#remote-debugging` 允许远程调试的 Chrome；`/browser connect <port>` 保留旧式 `--browser-url=http://127.0.0.1:<port>` 兼容路径
 - 复用调试 Chrome 登录态访问 GitHub、内部系统等需认证页面；默认 `mcp.json` 仍保持 `--isolated=true`
 - `/browser status` / `/browser tabs` / `/browser disconnect` 提供会话状态、tab 查看和回到 isolated 的入口
 - 登录态访问安全约束已落地：敏感页面识别、改写型工具单步 HITL、shared 模式 `close_page` 硬保护

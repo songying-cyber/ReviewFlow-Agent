@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.paicli.browser.BrowserAuditMetadata;
 import com.paicli.browser.BrowserCheckResult;
+import com.paicli.browser.BrowserConnector;
 import com.paicli.browser.BrowserGuard;
 import com.paicli.context.ContextProfile;
 import com.paicli.mcp.protocol.McpToolDescriptor;
@@ -63,6 +64,8 @@ public class ToolRegistry {
     private NetworkPolicy networkPolicy;
     private ContextProfile contextProfile = ContextProfile.from(null);
     private BrowserGuard browserGuard;
+    private BrowserConnector browserConnector;
+    private java.util.function.Consumer<String> memorySaver;
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -81,6 +84,8 @@ public class ToolRegistry {
         registerCodeTools();
         registerRagTools();
         registerWebTools();
+        registerBrowserTools();
+        registerMemoryTools();
     }
 
     /**
@@ -114,6 +119,14 @@ public class ToolRegistry {
 
     protected BrowserGuard getBrowserGuard() {
         return browserGuard;
+    }
+
+    public void setBrowserConnector(BrowserConnector browserConnector) {
+        this.browserConnector = browserConnector;
+    }
+
+    public void setMemorySaver(java.util.function.Consumer<String> memorySaver) {
+        this.memorySaver = memorySaver;
     }
 
     /**
@@ -317,6 +330,53 @@ public class ToolRegistry {
                         new Param("max_chars", "integer", "返回 Markdown 最大字符数（默认 8000，超出截断）", false)
                 ),
                 args -> webFetch(args.get("url"), parseInt(args.get("max_chars"), DEFAULT_FETCH_MAX_CHARS))
+        ));
+    }
+
+    private void registerBrowserTools() {
+        tools.put("browser_connect", new Tool(
+                "browser_connect",
+                "当浏览器页面返回登录页、权限不足或明确需要登录态时，自动连接已允许远程调试的本机 Chrome 并复用其登录态；公开页面不要提前调用。",
+                createParameters(),
+                args -> browserConnector == null
+                        ? "浏览器连接器未初始化，无法自动切换 shared 模式"
+                        : browserConnector.connectDefault()
+        ));
+        tools.put("browser_disconnect", new Tool(
+                "browser_disconnect",
+                "完成登录态页面访问后，可切回 isolated 浏览器模式。",
+                createParameters(),
+                args -> browserConnector == null
+                        ? "浏览器连接器未初始化，无法切回 isolated 模式"
+                        : browserConnector.disconnect()
+        ));
+        tools.put("browser_status", new Tool(
+                "browser_status",
+                "查看当前浏览器 MCP 模式、autoConnect 引导和旧式 CDP 端口探活状态。",
+                createParameters(),
+                args -> browserConnector == null
+                        ? "浏览器连接器未初始化，无法查看浏览器状态"
+                        : browserConnector.status()
+        ));
+    }
+
+    private void registerMemoryTools() {
+        tools.put("save_memory", new Tool(
+                "save_memory",
+                "当且仅当用户明确说“记一下”“记住”“以后记得”或要求保存长期偏好/稳定事实时调用，把精炼事实写入长期记忆；不要保存一次性任务请求、临时文件名或模型猜测。",
+                createParameters(new Param("fact", "string", "要长期保存的稳定事实或用户偏好，必须精炼、可跨会话复用", true)),
+                args -> {
+                    String fact = args.get("fact");
+                    if (fact == null || fact.isBlank()) {
+                        return "保存长期记忆失败: fact 不能为空";
+                    }
+                    if (memorySaver == null) {
+                        return "保存长期记忆失败: 记忆保存器未初始化";
+                    }
+                    String normalized = fact.trim();
+                    memorySaver.accept(normalized);
+                    return "💾 已保存到长期记忆: " + normalized;
+                }
         ));
     }
 

@@ -111,9 +111,12 @@ public class PlanExecuteAgent {
             6. search_code - 语义检索代码库，参数：{"query": "自然语言描述", "top_k": 5}
             7. web_search - 搜索互联网获取实时信息，参数：{"query": "搜索关键词", "top_k": 5}
             8. web_fetch - 抓取已知 URL 并返回正文 Markdown，参数：{"url": "https://...", "max_chars": 8000}
-            9. mcp__{server}__{tool} - MCP server 动态提供的外部工具，具体参数以工具 schema 为准
+            9. save_memory - 在用户明确要求“记一下/记住/以后记得”时保存长期记忆，参数：{"fact": "精炼稳定事实"}
+            10. mcp__{server}__{tool} - MCP server 动态提供的外部工具，具体参数以工具 schema 为准
 
             如果任务涉及理解代码库（如分析代码结构、查找实现位置），请优先使用 search_code 工具。
+            当用户明确说“记一下”“记住”“以后记得”或要求保存长期偏好/稳定事实时，必须调用 save_memory；
+            只保存跨会话仍成立的精炼事实，不保存一次性任务请求、临时文件名、模型猜测或当前轮执行计划。
             如果任务需要实时互联网信息（如查询框架最新版本、官方文档），请使用 web_search 找入口，
             拿到具体 URL 后用 web_fetch 抓取全文。已经有 URL 时直接 web_fetch，不要再 web_search 一次。
             web_fetch 拿到空正文（SPA / 防爬墙）时，自动 fallback 到浏览器 MCP，不要重复 web_fetch。
@@ -122,7 +125,7 @@ public class PlanExecuteAgent {
             微信公众号文章 (mp.weixin.qq.com)、知乎专栏、推特、小红书等站点 web_fetch 通常拿不到正文，应走浏览器 MCP。
             浏览器操作优先 mcp__chrome-devtools__take_snapshot（结构化 DOM 文本），不要默认 take_screenshot；
             表单填写优先 fill_form，等待异步加载用 wait_for，控制台排查用 list_console_messages，网络排查用 list_network_requests + get_network_request。
-            需要带登录态的调试 Chrome 但拿到登录页时，提示用户先启动 9222 调试端口并执行 /browser connect；shared 模式下敏感页面改写操作会强制单步 HITL，close_page 只能关 PaiCLI 自己创建的 tab。
+            如果浏览器 MCP 返回登录页、权限不足、需要认证，或用户明确要求访问登录后页面，先调用 browser_connect 自动连接已允许远程调试的本机 Chrome，再重新打开原 URL；公开页面（如微信公众号文章）不要提前连接 shared。shared 模式下敏感页面改写操作会强制单步 HITL，close_page 只能关 PaiCLI 自己创建的 tab。
             对于当前项目内的文件，请优先使用 read_file 或 list_dir，不要用 execute_command 扫描 /、~ 或整个文件系统。
             execute_command 只适合在当前项目目录执行短时命令。
             安全策略硬规则（HITL 之外的兜底，无法绕过）：read_file / write_file / list_dir / create_project 必须在项目根之内；write_file 单文件 5MB 上限；
@@ -158,6 +161,7 @@ public class PlanExecuteAgent {
         this.reviewHandler = reviewHandler == null ? (goal, plan) -> PlanReviewDecision.execute() : reviewHandler;
         this.memoryManager = memoryManager != null ? memoryManager : new MemoryManager(llmClient);
         this.toolRegistry.setContextProfile(this.memoryManager.getContextProfile());
+        this.toolRegistry.setMemorySaver(this.memoryManager::storeFact);
     }
 
     public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
@@ -568,6 +572,7 @@ public class PlanExecuteAgent {
             case "search_code" -> "🔍 搜索代码 " + count + " 次";
             case "web_search" -> "🌐 联网搜索 " + count + " 次";
             case "web_fetch" -> "📰 抓取 " + count + " 个网页";
+            case "save_memory" -> "💾 保存长期记忆 " + count + " 条";
             default -> toolName != null && toolName.startsWith("mcp__")
                     ? formatMcpLabel(toolName, count)
                     : "🔧 " + toolName + " × " + count;
@@ -591,6 +596,7 @@ public class PlanExecuteAgent {
                 case "create_project" -> "name";
                 case "search_code", "web_search" -> "query";
                 case "web_fetch" -> "url";
+                case "save_memory" -> "fact";
                 default -> null;
             };
             if (key == null) {

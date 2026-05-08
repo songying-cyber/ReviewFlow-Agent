@@ -21,10 +21,10 @@
 ### 第三期：Memory + 上下文工程
 
 - 短期记忆管理当前对话与工具结果
-- 长期记忆通过 `/save <事实>` 手动保存关键事实，跨会话复用
+- 长期记忆通过 `/save <事实>` 或用户明确说“记一下 / 记住”时的 `save_memory` 保存关键事实，跨会话复用
 - 注入给模型的相关记忆只使用长期稳定事实，不把当前轮短期对话误当成“历史记忆”
 - 对话接近预算时自动做摘要压缩
-- 新增 `/memory` 查看状态、`/memory clear` 清空长期记忆、`/save` 手动保存事实
+- 新增 `/memory` 查看状态、`/memory clear` 清空长期记忆、`/save` 手动保存事实；Agent 在用户明确说“记一下 / 记住”时可调用 `save_memory`
 
 ### 第四期：RAG 检索 + 代码库理解
 
@@ -108,9 +108,10 @@
 
 ### 第十四期：CDP 会话复用 + 登录态访问
 
-- 新增 `/browser status`、`/browser connect [port]`、`/browser disconnect`、`/browser tabs` 命令组
-- 默认仍使用 `--isolated=true` 临时浏览器 profile；执行 `/browser connect` 后，运行时把 `chrome-devtools` 切到 `--browser-url=http://127.0.0.1:<port>`，复用带登录态的调试 Chrome
-- `/browser connect` 先探活 `127.0.0.1:<port>/json/version`，失败时不会改 MCP 启动参数，并输出 macOS / Windows / Linux 的 Chrome 启动命令
+- 新增 `/browser status`、`/browser connect [port]`、`/browser disconnect`、`/browser tabs` 命令组，并给 Agent 暴露内部 `browser_connect` / `browser_disconnect` / `browser_status` 工具
+- 默认仍使用 `--isolated=true` 临时浏览器 profile；执行 `/browser connect` 后，运行时把 `chrome-devtools` 切到 `--autoConnect`，复用已在 `chrome://inspect/#remote-debugging` 允许远程调试的登录态 Chrome
+- Agent 遇到登录页、权限不足或明确需要登录态页面时，会先调用 `browser_connect` 自动切到 shared；公开页面如微信公众号文章不提前切换
+- `/browser connect <port>` 保留旧式 CDP 端口兼容路径：先探活 `127.0.0.1:<port>/json/version`，成功后切到 `--browser-url=http://127.0.0.1:<port>`；失败时不会改 MCP 启动参数，并输出 macOS / Windows / Linux 的 Chrome 启动命令
 - 切换 shared / isolated 模式都会清空 `chrome-devtools` 的 server 维度全部放行，避免旧信任跨模式延续
 - shared 模式下 `close_page` 只能关闭 PaiCLI 自己创建的 tab；无法证明是 PaiCLI 创建的 tab 会被策略层拒绝
 - 敏感页面命中规则后，`click` / `fill_form` / `evaluate_script` 等改写型浏览器工具必须单步 HITL 审批，不复用全部放行；读型工具如 `take_snapshot` 仍可继续使用
@@ -243,7 +244,7 @@ export GLM_API_KEY=your_api_key_here
 ```
 
 长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
-长期记忆只保存你显式通过 `/save` 写入的稳定事实，不应包含一次性任务请求或临时文件名/目录名。
+长期记忆只保存显式保存意图下的稳定事实：`/save <事实>`，或用户在自然语言里明确说“记一下 / 记住 / 以后记得”时由 Agent 调用 `save_memory`。它不应包含一次性任务请求或临时文件名/目录名。
 代码索引默认保存在 `~/.paicli/rag/codebase.db`。
 调试日志默认滚动写入 `~/.paicli/logs/paicli.log`，旧日志会按保留天数和总容量自动清理。
 
@@ -313,7 +314,7 @@ MCP 子系统默认开启。`~/.paicli/mcp.json` 不存在时，PaiCLI 会自动
 
 `command` 表示 stdio server，`url` 表示 Streamable HTTP server。`${PROJECT_DIR}` / `${HOME}` 是内置变量，其他 `${VAR}` 从环境变量读取；缺失会在启动时直接提示。
 
-需要复用登录态时，先启动带远程调试端口和独立 user-data-dir 的 Chrome，并在这个调试 Chrome 中完成登录：
+需要复用当前登录态时，Chrome 144+ 推荐打开 `chrome://inspect/#remote-debugging` 并勾选 `Allow remote debugging for this browser instance`。旧版本或需要显式 CDP 端口时，可以启动带远程调试端口和独立 user-data-dir 的 Chrome，并在这个调试 Chrome 中完成登录：
 
 ```bash
 # macOS
@@ -326,7 +327,7 @@ start chrome.exe --remote-debugging-port=9222 --user-data-dir=%TEMP%\paicli-chro
 google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/paicli-chrome-profile
 ```
 
-然后在 PaiCLI 内执行：
+通常不需要用户预先切换；Agent 如果遇到登录页会自己调用 `browser_connect`。手工调试时也可以在 PaiCLI 内执行：
 
 ```text
 /browser status
@@ -336,6 +337,12 @@ google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/paicli-chrome-pr
 ```
 
 `/browser connect` 只在当前进程内把 `chrome-devtools` 切到 shared 模式，不会改写 `~/.paicli/mcp.json`。如果希望启动后默认 shared，可手动把 args 改为：
+
+```json
+["-y", "chrome-devtools-mcp@latest", "--autoConnect"]
+```
+
+旧式 CDP HTTP JSON 端口也可使用：
 
 ```json
 ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
@@ -418,20 +425,11 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ```text
 💡 提示:
    - 输入你的问题或任务
-   - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式
-   - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
-   - 输入 '/team' 后，下一条任务使用 Multi-Agent 协作模式
-   - 输入 '/team 任务内容' 直接用多 Agent 协作执行这条任务
-   - 计划生成后可直接执行、补充要求重规划，或取消
-   - 输入 '/index [路径]' 为代码库建立向量索引
-   - 输入 '/search <查询>' 语义检索代码
-   - 输入 '/graph <类名>' 查看代码关系图谱
-   - 输入 '/memory' 查看记忆状态
-   - 输入 '/memory clear' 清空长期记忆
-   - 输入 '/save 事实内容' 手动保存关键事实
+   - 输入 '/' 查看命令
+   - 输入 '@server:protocol://path' 可显式引用 MCP resource
+   - 任务运行中按 ESC 取消当前任务
+   - 默认模式是 ReAct
    - 未识别的 `/xxx` 命令会直接提示“未知命令”，不会再交给 Agent 当普通对话处理
-   - 输入 '/clear' 清空对话历史
-   - 输入 '/exit' 或 '/quit' 退出
 
 👤 你: /plan 创建一个名为 demoapp 的 java 项目，然后读取 pom.xml，最后验证项目结构
 
@@ -502,6 +500,7 @@ I
 - `/memory` / `/mem` - 查看记忆系统状态
 - `/memory clear` - 清空长期记忆
 - `/save <事实>` - 手动保存关键事实到长期记忆
+- `save_memory` - Agent 内置工具，仅在用户明确要求保存长期偏好或稳定事实时调用；“复用已登录 Chrome，记一下”这类浏览器登录态偏好会写入长期记忆，供新会话检索
 - `/index [路径]` - 索引代码库（默认当前目录）
 - `/search <查询>` - 语义检索代码
 - `/graph <类名>` - 查看代码关系图谱
@@ -549,20 +548,10 @@ I
 
 💡 提示:
    - 输入你的问题或任务
-   - 输入 '/plan' 后，下一条任务使用 Plan-and-Execute 模式
-   - 输入 '/plan 任务内容' 直接用计划模式执行这条任务
-   - 输入 '/team' 后，下一条任务使用 Multi-Agent 协作模式
-   - 输入 '/team 任务内容' 直接用多 Agent 协作执行这条任务
-   - 计划生成后可直接执行、补充要求重规划，或取消
-   - 输入 '/index [路径]' 为代码库建立向量索引
-   - 输入 '/search <查询>' 语义检索代码
-   - 输入 '/graph <类名>' 查看代码关系图谱
+   - 输入 '/' 查看命令
+   - 输入 '@server:protocol://path' 可显式引用 MCP resource
+   - 任务运行中按 ESC 取消当前任务
    - 默认模式是 ReAct
-   - 输入 '/clear' 清空对话历史
-   - 输入 '/memory' 查看记忆状态
-   - 输入 '/memory clear' 清空长期记忆
-   - 输入 '/save 事实内容' 手动保存关键事实
-   - 输入 '/exit' 或 '/quit' 退出
 
 👤 你: 你好，请列出当前目录的文件
 
