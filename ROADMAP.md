@@ -364,20 +364,24 @@
 
 ---
 
-## 第15期：Skill 系统 + web-access Skill
+## 第15期：Skill 系统 + web-access Skill ✅
+
+**已完成**
 
 **前置依赖**：第 9 期 web 工具、第 13 期 Chrome DevTools MCP、第 14 期 CDP 会话复用全部就绪
 
 **目标**：做出 PaiCLI 自己的 Skill 加载机制，把零散的工具与决策指引打包成可复用单元，并以 web-access 作为首个落地 Skill
 
-**功能迭代**：
-- Skill 加载机制：扫描目录，解析 `SKILL.md`（frontmatter + 触发词 + 指令体）
-- Skill 注册：启动时把每个 Skill 的 metadata 注入 system prompt，触发词命中时再展开完整指令
-- Skill 目录约定：`<root>/SKILL.md`、可选 `scripts/`、可选 `references/`
-- 内置 web-access Skill：把第 9–14 期的联网能力打包成「何时搜索 / 何时抓取 / 何时开浏览器 / 何时复用登录态」的决策手册，附带站点经验目录
-- 集成 Jina Reader 作为 fallback：`web_fetch` 拿不到正文（SPA / 防爬墙）时，可选降级到 `r.jina.ai/<url>` 拿干净 Markdown，与本地 readability 形成「先本地、再第三方、最后浏览器」的三档兜底
-- CLI 命令：`/skill list`、`/skill on <name>`、`/skill off <name>`、`/skill reload`
-- Skill 与 HITL 协同：Skill 内调用危险工具仍走 HITL 审批，不绕过
+**功能迭代**（详细开发任务见 `docs/phase-15-skill-system.md`）：
+- Skill 加载机制：三层目录扫描（jar 内置 / 用户级 `~/.paicli/skills/` / 项目级 `<project>/.paicli/skills/`），按 name 整体覆盖，frontmatter 走手写 YAML 子集解析（不引 SnakeYAML）
+- 启动期把启用 skill 的 `name` + `description` 注入 system prompt 索引段（单 description ≤ 500 codepoint，启用上限 20 个，索引段 ≤ 4KB）
+- 内置工具 `load_skill(name)`：LLM 主动调用以把 SKILL.md 正文写入 `SkillContextBuffer`，下一轮 user message 自动前置注入（lazy 展开，节省 token）
+- `SkillContextBuffer`：一次性消费、最多保留 3 个 skill body、`/clear` 可 reset
+- 内置 web-access Skill：决策手册（浏览哲学四步法 + 工具选择表 + 浏览器优先级 + Jina 兜底说明）+ 6 个站点经验文件（mp.weixin / zhuanlan.zhihu / x.com / xiaohongshu / github / juejin）+ cdp-cheatsheet
+- 启动期 `SkillBuiltinExtractor` 把 jar 内置 skill 解压到 `~/.paicli/skills-cache/`，按 `.version` 文件控制重建
+- CLI 命令：`/skill` / `/skill list` / `/skill show <name>` / `/skill on <name>` / `/skill off <name>` / `/skill reload`
+- Jina Reader 集成：**只**在 web-access SKILL.md 写入「web_fetch 失败可让 execute_command 调 r.jina.ai」的提示，**不**改 `web_fetch` 工具内部链路（保持第 9 期纯本地约定）
+- Skill 与 HITL 协同：Skill 内调用 `execute_command` / 浏览器 MCP 等危险工具仍走 HITL 审批，沿用 `execute_command` 工具维度全放行；不给 Skill 单独审批维度
 
 **核心知识点**：
 - 提示词工程的工程化封装
@@ -386,6 +390,8 @@
 - 设计意图：从「写工具」演进到「打包专家手册」
 
 **教程标题候选**：《工具堆成山，Agent 还是不会用？给它写本「专家手册」，按场景自动展开》
+
+**验证**：`mvn test` 457 tests 通过；`mvn clean package` 通过
 
 ---
 
@@ -489,4 +495,4 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ---
 
-*已完成第 14 期 CDP 会话复用 + 登录态访问。下一步进入第 15 期 Skill 系统，OAuth / sampling / recovery 留给后续 MCP 增强期。*
+*已完成第 15 期 Skill 系统 + 内置 web-access skill。下一步进入第 16 期 TUI 产品化，OAuth / sampling / recovery 留给后续 MCP 增强期。*

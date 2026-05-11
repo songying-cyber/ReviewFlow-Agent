@@ -4,9 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.context.TokenUsageFormatter;
 import com.paicli.llm.LlmClient;
+import com.paicli.memory.ConversationHistoryCompactor;
 import com.paicli.memory.MemoryManager;
 import com.paicli.plan.*;
 import com.paicli.runtime.CancellationContext;
+import com.paicli.skill.SkillContextBuffer;
+import com.paicli.skill.SkillIndexFormatter;
+import com.paicli.skill.SkillRegistry;
 import com.paicli.util.AnsiStyle;
 import com.paicli.tool.ToolRegistry;
 import com.paicli.tool.ToolRegistry.ToolExecutionResult;
@@ -93,7 +97,10 @@ public class PlanExecuteAgent {
     private final Planner planner;
     private final PlanReviewHandler reviewHandler;
     private final MemoryManager memoryManager;
+    private final ConversationHistoryCompactor historyCompactor;
     private Supplier<String> externalContextSupplier = () -> "";
+    private SkillRegistry skillRegistry;
+    private SkillContextBuffer skillContextBuffer;
 
     // 执行提示词
     private static final String EXECUTION_PROMPT = """
@@ -160,12 +167,53 @@ public class PlanExecuteAgent {
         this.planner = planner != null ? planner : new Planner(llmClient);
         this.reviewHandler = reviewHandler == null ? (goal, plan) -> PlanReviewDecision.execute() : reviewHandler;
         this.memoryManager = memoryManager != null ? memoryManager : new MemoryManager(llmClient);
+        this.historyCompactor = new ConversationHistoryCompactor(llmClient);
         this.toolRegistry.setContextProfile(this.memoryManager.getContextProfile());
         this.toolRegistry.setMemorySaver(this.memoryManager::storeFact);
     }
 
     public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
         this.externalContextSupplier = externalContextSupplier == null ? () -> "" : externalContextSupplier;
+    }
+
+    public void setSkillRegistry(SkillRegistry skillRegistry) {
+        this.skillRegistry = skillRegistry;
+    }
+
+    public void setSkillContextBuffer(SkillContextBuffer skillContextBuffer) {
+        this.skillContextBuffer = skillContextBuffer;
+    }
+
+    private void maybeCompactHistory(List<LlmClient.Message> messages, PrintStream out) {
+        if (historyCompactor == null) return;
+        int trigger = memoryManager.getContextProfile().compressionTriggerTokens();
+        try {
+            boolean compacted = historyCompactor.compactIfNeeded(messages, trigger);
+            if (compacted && out != null) {
+                out.println("📦 上下文接近窗口上限，已把早期对话压缩为摘要后继续。");
+            }
+        } catch (Exception e) {
+            log.warn("conversationHistory compaction failed", e);
+        }
+    }
+
+    private String buildSkillIndex() {
+        if (skillRegistry == null) return "";
+        try {
+            return SkillIndexFormatter.format(skillRegistry.enabledSkills());
+        } catch (Exception e) {
+            log.warn("Failed to build skill index", e);
+            return "";
+        }
+    }
+
+    private String prependSkillBodies(String content) {
+        if (skillContextBuffer == null || skillContextBuffer.isEmpty()) {
+            return content;
+        }
+        String drained = skillContextBuffer.drain();
+        if (drained.isEmpty()) return content;
+        return drained + "\n" + content;
     }
 
     /**
@@ -400,6 +448,10 @@ public class PlanExecuteAgent {
         if (!externalContext.isEmpty()) {
             prompt = prompt + "\n" + externalContext;
         }
+        String skillIndex = buildSkillIndex();
+        if (!skillIndex.isEmpty()) {
+            prompt = prompt + "\n" + skillIndex;
+        }
 
         // 注入长期记忆上下文
         String memoryContext = memoryManager.buildContextForQuery(
@@ -409,6 +461,7 @@ public class PlanExecuteAgent {
         if (!memoryContext.isEmpty()) {
             taskInput = taskInput + "\n\n" + memoryContext;
         }
+        taskInput = prependSkillBodies(taskInput);
 
         List<LlmClient.Message> messages = new ArrayList<>(Arrays.asList(
                 LlmClient.Message.system(prompt),
@@ -430,6 +483,9 @@ public class PlanExecuteAgent {
                 return TaskRunResult.of("⏹️ 已取消任务 [" + task.getId() + "]。", streamRenderer.hasStreamedOutput());
             }
             iteration++;
+
+            // 调 LLM 前评估 messages 是否接近 window 上限；超阈值压缩早期消息为摘要。
+            maybeCompactHistory(messages, out);
 
             LlmClient.ChatResponse response = llmClient.chat(
                     messages,

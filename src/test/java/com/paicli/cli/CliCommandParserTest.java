@@ -198,4 +198,33 @@ class CliCommandParserTest {
         assertEquals(CliCommandParser.CommandType.CANCEL, CliCommandParser.parse("/cancel").type());
         assertEquals(CliCommandParser.CommandType.CANCEL, CliCommandParser.parse("cancel").type());
     }
+
+    @Test
+    void parsesSkillListCommand() {
+        assertEquals(CliCommandParser.CommandType.SKILL_LIST, CliCommandParser.parse("/skill").type());
+        assertEquals(CliCommandParser.CommandType.SKILL_LIST, CliCommandParser.parse("/skill list").type());
+    }
+
+    @Test
+    void parsesSkillReloadCommand() {
+        assertEquals(CliCommandParser.CommandType.SKILL_RELOAD, CliCommandParser.parse("/skill reload").type());
+    }
+
+    @Test
+    void parsesSkillShowCommand() {
+        CliCommandParser.ParsedCommand cmd = CliCommandParser.parse("/skill show web-access");
+        assertEquals(CliCommandParser.CommandType.SKILL_SHOW, cmd.type());
+        assertEquals("web-access", cmd.payload());
+    }
+
+    @Test
+    void parsesSkillOnOffCommands() {
+        CliCommandParser.ParsedCommand on = CliCommandParser.parse("/skill on web-access");
+        assertEquals(CliCommandParser.CommandType.SKILL_ON, on.type());
+        assertEquals("web-access", on.payload());
+
+        CliCommandParser.ParsedCommand off = CliCommandParser.parse("/skill off verbose-debug");
+        assertEquals(CliCommandParser.CommandType.SKILL_OFF, off.type());
+        assertEquals("verbose-debug", off.payload());
+    }
 }

@@ -56,13 +56,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * PaiCLI v14.0.0 - Session-Aware Browser Agent CLI
- * 支持 ReAct、Plan-and-Execute、Memory、RAG、Multi-Agent、HITL、并行工具调用、多模型切换、MCP
- * 第 14 期新增：CDP 会话复用、/browser 命令组、敏感页面单步审批、shared 模式 close_page 保护
+ * PaiCLI v15.0.0 - Skill-Driven Agent CLI
+ * 支持 ReAct、Plan-and-Execute、Memory、RAG、Multi-Agent、HITL、并行工具调用、多模型切换、MCP、CDP 会话复用
+ * 第 15 期新增：Skill 系统（三层加载 + load_skill 工具 + SkillContextBuffer 注入）、内置 web-access skill
  * HITL 增强：路径围栏（PathGuard）、命令快速拒绝（CommandGuard）、操作审计链（AuditLog）—— 见 com.paicli.policy
  */
 public class Main {
-    private static final String VERSION = "14.0.0";
+    private static final String VERSION = "15.0.0";
     private static final String ENV_FILE = ".env";
     private static final String LOG_DIR_PROPERTY = "paicli.log.dir";
     private static final String LOG_LEVEL_PROPERTY = "paicli.log.level";
@@ -199,8 +199,29 @@ public class Main {
             configureSlashCommandHint(lineReader);
             AtMentionExpander mentionExpander = new AtMentionExpander(mcpServerManager);
 
+            // === Skill 系统初始化 ===
+            Path home = Path.of(System.getProperty("user.home"));
+            Path skillsCacheDir = home.resolve(".paicli/skills-cache");
+            Path userSkillsDir = home.resolve(".paicli/skills");
+            Path projectSkillsDir = Path.of(".paicli/skills").toAbsolutePath();
+            try {
+                new com.paicli.skill.SkillBuiltinExtractor(skillsCacheDir).extractAll();
+            } catch (Exception e) {
+                System.err.println("⚠️ 内置 skill 解压失败: " + e.getMessage());
+            }
+            com.paicli.skill.SkillStateStore skillStateStore = new com.paicli.skill.SkillStateStore(home.resolve(".paicli/skills.json"));
+            com.paicli.skill.SkillRegistry skillRegistry = new com.paicli.skill.SkillRegistry(
+                    skillsCacheDir, userSkillsDir, projectSkillsDir, skillStateStore);
+            skillRegistry.reload();
+            com.paicli.skill.SkillContextBuffer skillContextBuffer = new com.paicli.skill.SkillContextBuffer();
+            hitlToolRegistry.setSkillRegistry(skillRegistry);
+            hitlToolRegistry.setSkillContextBuffer(skillContextBuffer);
+            System.out.println(SkillCommandHandler.startupSummary(skillRegistry));
+
             Agent reactAgent = new Agent(llmClient, hitlToolRegistry);
             reactAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
+            reactAgent.setSkillRegistry(skillRegistry);
+            reactAgent.setSkillContextBuffer(skillContextBuffer);
             System.out.println("🔄 使用 ReAct 模式\n");
             boolean nextTaskUsePlanMode = false;
             boolean nextTaskUseTeamMode = false;
@@ -389,6 +410,29 @@ public class Main {
                                 hitlHandler));
                         continue;
                     }
+                    case SKILL_LIST -> {
+                        System.out.println(SkillCommandHandler.list(skillRegistry));
+                        continue;
+                    }
+                    case SKILL_SHOW -> {
+                        System.out.println(SkillCommandHandler.show(skillRegistry, command.payload()));
+                        continue;
+                    }
+                    case SKILL_ON -> {
+                        System.out.println(SkillCommandHandler.enable(skillRegistry, skillStateStore, command.payload()));
+                        continue;
+                    }
+                    case SKILL_OFF -> {
+                        System.out.println(SkillCommandHandler.disable(skillRegistry, skillStateStore, command.payload()));
+                        continue;
+                    }
+                    case SKILL_RELOAD -> {
+                        skillRegistry.reload();
+                        System.out.println("🔄 已重新扫描 skill 目录");
+                        System.out.println(SkillCommandHandler.startupSummary(skillRegistry));
+                        System.out.println("✅ 下一轮 LLM 调用生效");
+                        continue;
+                    }
                     case INDEX_CODE -> {
                         String indexPath = command.payload() != null ? command.payload() : ".";
                         System.out.println("📦 正在索引代码库: " + indexPath);
@@ -473,6 +517,8 @@ public class Main {
                     runTask = () -> {
                         PlanExecuteAgent planAgent = createPlanAgent(activeClient, reactAgent, terminal, lineReader);
                         planAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
+                        planAgent.setSkillRegistry(skillRegistry);
+                        planAgent.setSkillContextBuffer(skillContextBuffer);
                         return planAgent.run(taskInput);
                     };
                 } else if (nextTaskUseTeamMode || command.type() == CliCommandParser.CommandType.SWITCH_TEAM) {
@@ -480,6 +526,7 @@ public class Main {
                     runTask = () -> {
                         AgentOrchestrator orchestrator = createTeamAgent(activeClient, reactAgent);
                         orchestrator.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
+                        orchestrator.setSkillSystem(skillRegistry, skillContextBuffer);
                         return orchestrator.run(taskInput);
                     };
                 } else {
@@ -856,6 +903,7 @@ public class Main {
                 "输入你的问题或任务",
                 "输入 '/' 查看命令",
                 "输入 '@server:protocol://path' 可显式引用 MCP resource",
+                "输入 '/skill list' 查看可用 skill；任务匹配时 LLM 会自动 load_skill 加载完整指引",
                 "任务运行中按 ESC 取消当前任务",
                 "默认模式是 ReAct"
         );
@@ -901,6 +949,12 @@ public class Main {
                 new SlashCommandHint("/memory", "/memory", "查看记忆状态"),
                 new SlashCommandHint("/memory clear", "/memory clear", "清空长期记忆"),
                 new SlashCommandHint("/save ", "/save <事实内容>", "手动保存关键事实到长期记忆"),
+                new SlashCommandHint("/skill", "/skill", "查看 skill 列表"),
+                new SlashCommandHint("/skill list", "/skill list", "查看 skill 列表"),
+                new SlashCommandHint("/skill show ", "/skill show <name>", "查看 SKILL.md 全文"),
+                new SlashCommandHint("/skill on ", "/skill on <name>", "启用 skill"),
+                new SlashCommandHint("/skill off ", "/skill off <name>", "禁用 skill"),
+                new SlashCommandHint("/skill reload", "/skill reload", "重新扫描 skill 目录"),
                 new SlashCommandHint("/exit", "/exit", "退出 PaiCLI"),
                 new SlashCommandHint("/quit", "/quit", "退出 PaiCLI")
         );
@@ -1334,7 +1388,7 @@ public class Main {
         System.out.println("║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║");
         System.out.println("║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║");
         System.out.println("║                                                          ║");
-        System.out.printf("║      Session-Aware Browser Agent CLI %-17s║%n", "v" + VERSION);
+        System.out.printf("║      Skill-Driven Agent CLI %-26s║%n", "v" + VERSION);
         System.out.println("║                                                          ║");
         System.out.println("╚══════════════════════════════════════════════════════════╝");
         System.out.println();

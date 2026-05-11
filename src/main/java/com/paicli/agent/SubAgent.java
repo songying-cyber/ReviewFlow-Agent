@@ -4,6 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.context.TokenUsageFormatter;
 import com.paicli.llm.LlmClient;
+import com.paicli.memory.ConversationHistoryCompactor;
+import com.paicli.context.ContextProfile;
+import com.paicli.skill.SkillContextBuffer;
+import com.paicli.skill.SkillIndexFormatter;
+import com.paicli.skill.SkillRegistry;
 import com.paicli.tool.ToolRegistry;
 import com.paicli.tool.ToolRegistry.ToolExecutionResult;
 import com.paicli.tool.ToolRegistry.ToolInvocation;
@@ -36,6 +41,9 @@ public class SubAgent {
     private final ToolRegistry toolRegistry;
     private final List<LlmClient.Message> conversationHistory;
     private Supplier<String> externalContextSupplier = () -> "";
+    private SkillRegistry skillRegistry;
+    private SkillContextBuffer skillContextBuffer;
+    private final ConversationHistoryCompactor historyCompactor;
 
     // 各角色的系统提示词
     private static final String PLANNER_PROMPT = """
@@ -139,12 +147,22 @@ public class SubAgent {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
         this.conversationHistory = new ArrayList<>();
+        this.historyCompactor = new ConversationHistoryCompactor(llmClient);
         this.conversationHistory.add(LlmClient.Message.system(getSystemPrompt()));
     }
 
     public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
         this.externalContextSupplier = externalContextSupplier == null ? () -> "" : externalContextSupplier;
         refreshSystemPrompt();
+    }
+
+    public void setSkillRegistry(SkillRegistry skillRegistry) {
+        this.skillRegistry = skillRegistry;
+        refreshSystemPrompt();
+    }
+
+    public void setSkillContextBuffer(SkillContextBuffer skillContextBuffer) {
+        this.skillContextBuffer = skillContextBuffer;
     }
 
     /**
@@ -156,8 +174,49 @@ public class SubAgent {
             case WORKER -> WORKER_PROMPT;
             case REVIEWER -> REVIEWER_PROMPT;
         };
+        StringBuilder sb = new StringBuilder(base);
         String external = buildExternalContext();
-        return external.isEmpty() ? base : base + "\n" + external;
+        if (!external.isEmpty()) {
+            sb.append('\n').append(external);
+        }
+        String skillIndex = buildSkillIndex();
+        if (!skillIndex.isEmpty()) {
+            sb.append('\n').append(skillIndex);
+        }
+        return sb.toString();
+    }
+
+    private void maybeCompactHistory(PrintStream out) {
+        if (historyCompactor == null) return;
+        ContextProfile profile = toolRegistry == null ? null : toolRegistry.getContextProfile();
+        if (profile == null) return;
+        try {
+            boolean compacted = historyCompactor.compactIfNeeded(conversationHistory, profile.compressionTriggerTokens());
+            if (compacted && out != null) {
+                out.println("📦 [" + name + "] 上下文接近窗口上限，已把早期对话压缩为摘要后继续。");
+            }
+        } catch (Exception e) {
+            log.warn("[{}] conversationHistory compaction failed", name, e);
+        }
+    }
+
+    private String buildSkillIndex() {
+        if (skillRegistry == null) return "";
+        try {
+            return SkillIndexFormatter.format(skillRegistry.enabledSkills());
+        } catch (Exception e) {
+            log.warn("[{}] failed to build skill index", name, e);
+            return "";
+        }
+    }
+
+    private String prependSkillBodies(String content) {
+        if (skillContextBuffer == null || skillContextBuffer.isEmpty()) {
+            return content;
+        }
+        String drained = skillContextBuffer.drain();
+        if (drained.isEmpty()) return content;
+        return drained + "\n" + content;
     }
 
     private void refreshSystemPrompt() {
@@ -193,7 +252,7 @@ public class SubAgent {
     public AgentMessage execute(AgentMessage task, PrintStream out) {
         log.info("[{}] executing task from {}: type={}", name, task.fromAgent(), task.type());
         refreshSystemPrompt();
-        String taskContent = task.content();
+        String taskContent = prependSkillBodies(task.content());
 
         // 将任务注入对话
         conversationHistory.add(LlmClient.Message.user(taskContent));
@@ -217,6 +276,9 @@ public class SubAgent {
             }
 
             budget.beginIteration();
+
+            // 调 LLM 前评估 conversationHistory 是否接近 window 上限；超阈值压缩早期消息为摘要。
+            maybeCompactHistory(out);
 
             try {
                 LlmClient.ChatResponse response = llmClient.chat(

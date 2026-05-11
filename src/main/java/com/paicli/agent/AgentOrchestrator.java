@@ -107,6 +107,23 @@ public class AgentOrchestrator {
     }
 
     /**
+     * 把 Skill 系统下发给所有 SubAgent。Multi-Agent 三个角色共享同一 SkillRegistry（索引一致），
+     * 但共享同一 SkillContextBuffer——简化实现，避免角色级 buffer 隔离的工程开销。
+     * 任务书 §3.6 描述的"角色独立 buffer"作为可观察的优化项暂未启用。
+     */
+    public void setSkillSystem(com.paicli.skill.SkillRegistry skillRegistry,
+                               com.paicli.skill.SkillContextBuffer skillContextBuffer) {
+        planner.setSkillRegistry(skillRegistry);
+        planner.setSkillContextBuffer(skillContextBuffer);
+        for (SubAgent worker : workers) {
+            worker.setSkillRegistry(skillRegistry);
+            worker.setSkillContextBuffer(skillContextBuffer);
+        }
+        reviewer.setSkillRegistry(skillRegistry);
+        reviewer.setSkillContextBuffer(skillContextBuffer);
+    }
+
+    /**
      * 运行多 Agent 协作任务
      */
     public String run(String userInput) {

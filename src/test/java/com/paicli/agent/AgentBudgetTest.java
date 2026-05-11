@@ -90,10 +90,12 @@ class AgentBudgetTest {
     }
 
     @Test
-    void defaultTokenBudgetUsesCurrentModelWindow() {
+    void defaultTokenBudgetIsUnlimited() {
+        // 默认不再用 80% × window 当硬限——长上下文 + 套餐用户场景下太容易撞墙。
+        // 死循环防护交给 stagnation + hardMaxIterations 两道兜底。
         AgentBudget budget = AgentBudget.fromLlmClient(new GLMClient("test-key"));
 
-        assertEquals(160_000, budget.tokenBudget());
+        assertEquals(Integer.MAX_VALUE, budget.tokenBudget());
     }
 
     @Test

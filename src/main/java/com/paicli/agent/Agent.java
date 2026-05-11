@@ -3,9 +3,13 @@ package com.paicli.agent;
 import com.paicli.llm.LlmClient;
 import com.paicli.context.ContextProfile;
 import com.paicli.context.TokenUsageFormatter;
+import com.paicli.memory.ConversationHistoryCompactor;
 import com.paicli.memory.ExplicitMemoryHints;
 import com.paicli.memory.MemoryManager;
 import com.paicli.runtime.CancellationContext;
+import com.paicli.skill.SkillContextBuffer;
+import com.paicli.skill.SkillIndexFormatter;
+import com.paicli.skill.SkillRegistry;
 import com.paicli.util.AnsiStyle;
 import com.paicli.tool.ToolRegistry;
 import com.paicli.tool.ToolRegistry.ToolExecutionResult;
@@ -33,7 +37,10 @@ public class Agent {
     private final ToolRegistry toolRegistry;
     private final List<LlmClient.Message> conversationHistory;
     private final MemoryManager memoryManager;
+    private final ConversationHistoryCompactor historyCompactor;
     private Supplier<String> externalContextSupplier = () -> "";
+    private SkillRegistry skillRegistry;
+    private SkillContextBuffer skillContextBuffer;
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     // 系统提示词
@@ -107,6 +114,7 @@ public class Agent {
         this.toolRegistry = toolRegistry;
         this.conversationHistory = new ArrayList<>();
         this.memoryManager = new MemoryManager(llmClient);
+        this.historyCompactor = new ConversationHistoryCompactor(llmClient);
         this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
         this.toolRegistry.setMemorySaver(memoryManager::storeFact);
         conversationHistory.add(LlmClient.Message.system(SYSTEM_PROMPT));
@@ -115,11 +123,20 @@ public class Agent {
     public void setLlmClient(LlmClient llmClient) {
         this.llmClient = llmClient;
         this.memoryManager.setLlmClient(llmClient);
+        this.historyCompactor.setLlmClient(llmClient);
         this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
     }
 
     public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
         this.externalContextSupplier = externalContextSupplier == null ? () -> "" : externalContextSupplier;
+    }
+
+    public void setSkillRegistry(SkillRegistry skillRegistry) {
+        this.skillRegistry = skillRegistry;
+    }
+
+    public void setSkillContextBuffer(SkillContextBuffer skillContextBuffer) {
+        this.skillContextBuffer = skillContextBuffer;
     }
 
     /**
@@ -136,8 +153,9 @@ public class Agent {
         String memoryContext = memoryManager.buildContextForQuery(userInput, contextProfile.memoryContextTokens());
         updateSystemPromptWithMemory(memoryContext);
 
-        // 添加用户输入到历史（保持原文，不污染 user message）
-        conversationHistory.add(LlmClient.Message.user(userInput));
+        // 添加用户输入到历史（如有 skill body 注入，前置到原文之前）
+        String userMessageContent = prependSkillBodies(userInput);
+        conversationHistory.add(LlmClient.Message.user(userMessageContent));
         StringBuilder reasoningTranscript = new StringBuilder();
         StreamRenderer streamRenderer = new StreamRenderer();
 
@@ -151,6 +169,10 @@ public class Agent {
                 log.info("ReAct run cancelled before iteration");
                 return "⏹️ 已取消当前任务。";
             }
+            // 调 LLM 前评估 conversationHistory 是否接近 window 上限；超阈值就把早期消息压缩成摘要。
+            // 这是与第 3 期 Memory 短期记忆压缩并行的另一道压缩——后者只压 shortTermMemory，
+            // 真正决定下一轮 LLM input token 的是这里。
+            maybeCompactHistory();
             AgentBudget.ExitReason exitReason = budget.check();
             if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
                 String statsLine = formatTokenStats(budget, startNanos);
@@ -260,19 +282,58 @@ public class Agent {
      */
     private void updateSystemPromptWithMemory(String memoryContext) {
         String externalContext = buildExternalContext();
-        if ((memoryContext == null || memoryContext.isEmpty()) && externalContext.isEmpty()) {
+        String skillIndex = buildSkillIndex();
+        boolean hasMemory = memoryContext != null && !memoryContext.isEmpty();
+        boolean hasExternal = !externalContext.isEmpty();
+        boolean hasSkill = !skillIndex.isEmpty();
+        if (!hasMemory && !hasExternal && !hasSkill) {
             // 恢复原始 system prompt
             conversationHistory.set(0, LlmClient.Message.system(SYSTEM_PROMPT));
-        } else {
-            StringBuilder enrichedPrompt = new StringBuilder(SYSTEM_PROMPT);
-            if (memoryContext != null && !memoryContext.isEmpty()) {
-                enrichedPrompt.append("\n").append(memoryContext);
-            }
-            if (!externalContext.isEmpty()) {
-                enrichedPrompt.append("\n").append(externalContext);
-            }
-            conversationHistory.set(0, LlmClient.Message.system(enrichedPrompt.toString()));
+            return;
         }
+        StringBuilder enrichedPrompt = new StringBuilder(SYSTEM_PROMPT);
+        if (hasMemory) {
+            enrichedPrompt.append("\n").append(memoryContext);
+        }
+        if (hasExternal) {
+            enrichedPrompt.append("\n").append(externalContext);
+        }
+        if (hasSkill) {
+            enrichedPrompt.append("\n").append(skillIndex);
+        }
+        conversationHistory.set(0, LlmClient.Message.system(enrichedPrompt.toString()));
+    }
+
+    private void maybeCompactHistory() {
+        if (historyCompactor == null) return;
+        int trigger = memoryManager.getContextProfile().compressionTriggerTokens();
+        try {
+            boolean compacted = historyCompactor.compactIfNeeded(conversationHistory, trigger);
+            if (compacted) {
+                System.out.println("📦 上下文接近窗口上限，已把早期对话压缩为摘要后继续。");
+            }
+        } catch (Exception e) {
+            log.warn("conversationHistory compaction failed", e);
+        }
+    }
+
+    private String buildSkillIndex() {
+        if (skillRegistry == null) return "";
+        try {
+            return SkillIndexFormatter.format(skillRegistry.enabledSkills());
+        } catch (Exception e) {
+            log.warn("Failed to build skill index", e);
+            return "";
+        }
+    }
+
+    private String prependSkillBodies(String userInput) {
+        if (skillContextBuffer == null || skillContextBuffer.isEmpty()) {
+            return userInput;
+        }
+        String drained = skillContextBuffer.drain();
+        if (drained.isEmpty()) return userInput;
+        return drained + "\n用户输入：\n" + userInput;
     }
 
     private String buildExternalContext() {
