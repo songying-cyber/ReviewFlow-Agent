@@ -10,10 +10,16 @@ import com.paicli.browser.BrowserMode;
 import com.paicli.browser.BrowserSession;
 import com.paicli.browser.SensitivePagePolicy;
 import com.paicli.config.PaiCliConfig;
+import com.paicli.hitl.HitlHandler;
 import com.paicli.hitl.HitlToolRegistry;
+import com.paicli.hitl.SwitchableHitlHandler;
+import com.paicli.hitl.RendererHitlHandler;
 import com.paicli.hitl.TerminalHitlHandler;
 import com.paicli.llm.LlmClient;
 import com.paicli.llm.LlmClientFactory;
+import com.paicli.render.Renderer;
+import com.paicli.render.RendererFactory;
+import com.paicli.render.inline.InlineRenderer;
 import com.paicli.mcp.McpServer;
 import com.paicli.mcp.McpServerManager;
 import com.paicli.mcp.McpServerStatus;
@@ -56,13 +62,18 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * PaiCLI v15.0.0 - Skill-Driven Agent CLI
+ * PaiCLI v16.1.0 - Terminal-First Agent IDE
  * 支持 ReAct、Plan-and-Execute、Memory、RAG、Multi-Agent、HITL、并行工具调用、多模型切换、MCP、CDP 会话复用
  * 第 15 期新增：Skill 系统（三层加载 + load_skill 工具 + SkillContextBuffer 注入）、内置 web-access skill
+ * 第 16 期新增：TUI 界面（Lanterna 3）、文件树浏览、代码高亮、对话历史可视化、配置管理面板
+ * 第 16.1 期形态修正：抽出 Renderer 接口 + 三个实现（inline/lanterna/plain），默认形态切换为 inline 流式 TUI（Claude Code 风格）
+ *   - inline 流式：底部 DECSTBM 状态栏、行内可折叠工具块、行内 git diff、单字符 HITL 提示、命令 palette
+ *   - lanterna：保留 phase-16 全屏窗口（向后兼容 PAICLI_TUI=true）
+ *   - plain：纯 println 兜底
  * HITL 增强：路径围栏（PathGuard）、命令快速拒绝（CommandGuard）、操作审计链（AuditLog）—— 见 com.paicli.policy
  */
 public class Main {
-    private static final String VERSION = "15.0.0";
+    private static final String VERSION = "16.1.0";
     private static final String ENV_FILE = ".env";
     private static final String LOG_DIR_PROPERTY = "paicli.log.dir";
     private static final String LOG_LEVEL_PROPERTY = "paicli.log.level";
@@ -146,8 +157,9 @@ public class Main {
 
         System.out.println("✅ 已加载模型: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")\n");
 
-        try (Terminal terminal = TerminalBuilder.builder().system(true).build()) {
-            TerminalHitlHandler hitlHandler = new TerminalHitlHandler(false);
+        try (Terminal terminal = TerminalBuilder.builder().system(true).dumb(true).build()) {
+            TerminalHitlHandler terminalHitlHandler = new TerminalHitlHandler(false);
+            SwitchableHitlHandler hitlHandler = new SwitchableHitlHandler(terminalHitlHandler);
             HitlToolRegistry hitlToolRegistry = new HitlToolRegistry(hitlHandler);
             BrowserSession browserSession = new BrowserSession();
             BrowserConnectivityCheck browserConnectivityCheck = new BrowserConnectivityCheck();
@@ -225,6 +237,33 @@ public class Main {
             System.out.println("🔄 使用 ReAct 模式\n");
             boolean nextTaskUsePlanMode = false;
             boolean nextTaskUseTeamMode = false;
+
+            // === TUI / CLI 分支判断 ===
+            // 旧 PAICLI_TUI=true 路径仍走 Lanterna 全屏 TUI（Day 5 后由 LanternaRenderer 接管）。
+            if (com.paicli.tui.TuiBootstrap.shouldUseTui(terminal)) {
+                try {
+                    com.paicli.tui.TuiBootstrap.launch(config, llmClient, reactAgent, hitlHandler);
+                    return;  // TUI 启动成功，不进入 CLI 循环
+                } catch (Exception e) {
+                    hitlHandler.setDelegate(terminalHitlHandler);
+                    System.err.println("❌ TUI 启动失败，降级到 CLI: " + e.getMessage());
+                    e.printStackTrace();
+                    // 降级到 CLI 继续执行
+                }
+            }
+
+            // === 渲染器抽象（Day 1） ===
+            // PlainRenderer 是 Day 1 的兜底实现；inline / lanterna 在 Day 2 / Day 5 各自落地后接入。
+            Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal);
+            RendererHitlHandler rendererHitl = new RendererHitlHandler(renderer, hitlHandler.isEnabled());
+            hitlHandler.setDelegate(rendererHitl);
+            reactAgent.setRenderer(renderer);
+            renderer.start();
+
+            // Day 3：inline 模式绑 Ctrl+O 到 BlockRegistry.toggleLast 实现折叠块展开/收起
+            if (renderer instanceof InlineRenderer inline) {
+                bindCtrlOToFoldableBlocks(lineReader, inline);
+            }
 
             printStartupHints();
 
@@ -993,6 +1032,24 @@ public class Main {
         }
     }
 
+    static void bindCtrlOToFoldableBlocks(LineReader lineReader, InlineRenderer inline) {
+        if (lineReader == null || inline == null) {
+            return;
+        }
+        lineReader.getWidgets().put("paicli-toggle-foldable", () -> {
+            inline.blockRegistry().toggleLast();
+            return true;
+        });
+        Reference ref = new Reference("paicli-toggle-foldable");
+        String ctrlO = String.valueOf((char) 15);  // Ctrl+O
+        for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
+            KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
+            if (map != null) {
+                map.bind(ref, ctrlO);
+            }
+        }
+    }
+
     private static void printPolicyStatus(Agent reactAgent) {
         System.out.println("🛡️ 安全策略状态：");
         System.out.println("   项目根: " + reactAgent.getToolRegistry().getProjectPath());
@@ -1010,7 +1067,7 @@ public class Main {
                                        BrowserConnectivityCheck connectivityCheck,
                                        McpServerManager mcpServerManager,
                                        HitlToolRegistry registry,
-                                       TerminalHitlHandler hitlHandler) {
+                                       HitlHandler hitlHandler) {
         String normalized = payload == null || payload.isBlank() ? "status" : payload.trim();
         String[] parts = normalized.split("\\s+");
         String subCommand = parts[0].toLowerCase();
@@ -1060,7 +1117,7 @@ public class Main {
 
     private static String browserAutoConnect(BrowserSession browserSession,
                                              McpServerManager mcpServerManager,
-                                             TerminalHitlHandler hitlHandler) {
+                                             HitlHandler hitlHandler) {
         McpServer server = mcpServerManager.server("chrome-devtools");
         if (server == null) {
             return "❌ 未配置 chrome-devtools MCP server，请先检查 ~/.paicli/mcp.json";
@@ -1083,7 +1140,7 @@ public class Main {
                                                BrowserSession browserSession,
                                                BrowserConnectivityCheck connectivityCheck,
                                                McpServerManager mcpServerManager,
-                                               TerminalHitlHandler hitlHandler) {
+                                               HitlHandler hitlHandler) {
         if (port < 1024 || port > 65535) {
             return "❌ /browser connect 端口必须在 1024-65535 之间。默认 /browser connect 使用 --autoConnect；旧式 CDP 端口连接可用 /browser connect 9222。";
         }
@@ -1112,7 +1169,7 @@ public class Main {
 
     private static String browserDisconnect(BrowserSession browserSession,
                                             McpServerManager mcpServerManager,
-                                            TerminalHitlHandler hitlHandler) {
+                                            HitlHandler hitlHandler) {
         McpServer server = mcpServerManager.server("chrome-devtools");
         if (server == null) {
             browserSession.switchToIsolated();
@@ -1388,7 +1445,7 @@ public class Main {
         System.out.println("║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║");
         System.out.println("║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║");
         System.out.println("║                                                          ║");
-        System.out.printf("║      Skill-Driven Agent CLI %-26s║%n", "v" + VERSION);
+        System.out.printf("║      Terminal-First Agent IDE %-23s║%n", "v" + VERSION);
         System.out.println("║                                                          ║");
         System.out.println("╚══════════════════════════════════════════════════════════╝");
         System.out.println();

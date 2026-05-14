@@ -1,6 +1,21 @@
 # PaiCLI
 
-一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十五期的 `Skill 系统 + 内置 web-access skill`。
+一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十六期的 `TUI 产品化`。
+
+## 测试策略
+
+日常开发不需要每次都跑全量测试。推荐按改动范围选择：
+
+```bash
+# 第 16 期终端 / TUI / inline renderer 冒烟
+mvn test -Pphase16-smoke
+
+# 常规快速回归，跳过外部进程 / 网络超时 / 命令超时类慢测试
+mvn test -Pquick
+
+# 发版或大范围重构前再跑全量
+mvn test
+```
 
 ## 演进历程
 
@@ -132,6 +147,24 @@
 
 设计意图：从「写工具」演进到「打包专家手册」。当工具堆成山（PaiCLI 当前内置 9 个 + MCP 60+ 工具），用 Skill 给 LLM 一份按场景展开的"专家手册"，比往 system prompt 里塞更多规则更可扩展。
 
+### 第十六期：TUI 产品化（v16.1 形态修正后：双形态可切换）
+
+v16.1 抽出 `Renderer` 接口 + 三个实现：
+
+| 形态 | 启用方式 | 视觉风格 |
+|---|---|---|
+| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code 风格：主屏直出、底部 DECSTBM 状态栏、行内可折叠工具块（`Read 3 files (ctrl+o to expand)`）、行内 git diff、HITL 单字符 `[y/n/a/s/m]` 提示 |
+| **lanterna 全屏 TUI** | `PAICLI_RENDERER=lanterna`（或兼容旧 `PAICLI_TUI=true`） | v16 三栏全屏：文件树 + 对话流 + 状态栏 + 底部输入栏，HITL 模态弹窗 |
+| **plain 兜底** | `PAICLI_RENDERER=plain` | 纯 println，无折叠 / 状态栏，等价 v15 行为 |
+
+- 三种形态共享同一套 `Agent` / `ToolRegistry` / `MemoryManager` / MCP server / SkillRegistry / HITL handler，不创建孤立空会话
+- 普通输入走 ReAct；`/plan <任务>` 走 Plan-and-Execute；`/team <任务>` 走 Multi-Agent；`/cancel` 可取消运行中任务
+- 通用命令：`/clear`、`/context`、`/memory`、`/memory clear`、`/save <事实>`、`/hitl`、`/hitl on`、`/hitl off`、`/config`、`/exit`
+- 对话历史保存到 `~/.paicli/history/session_*.jsonl`
+- 兼容旧设置：`PAICLI_TUI=true` 自动映射为 `PAICLI_RENDERER=lanterna`（已 deprecated）
+- `PAICLI_NO_STATUSBAR=true` 在 inline 模式下禁用底部状态栏（不支持 DECSTBM 的终端）
+- `NO_COLOR=1` 禁用所有 ANSI 颜色，保留布局
+
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
 `com.paicli.policy` 包，作为 HITL 之外的辅助层（不是沙箱、不提供进程隔离）：
@@ -160,7 +193,7 @@
 ║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
 ║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
 ║                                                          ║
-║      Session-Aware Browser Agent CLI v14.0.0          ║
+║      Terminal-First Agent IDE v16.1.0                ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 

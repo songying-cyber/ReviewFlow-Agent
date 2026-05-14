@@ -6,6 +6,8 @@ import com.paicli.context.TokenUsageFormatter;
 import com.paicli.memory.ConversationHistoryCompactor;
 import com.paicli.memory.ExplicitMemoryHints;
 import com.paicli.memory.MemoryManager;
+import com.paicli.render.PlainRenderer;
+import com.paicli.render.Renderer;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.skill.SkillContextBuffer;
 import com.paicli.skill.SkillIndexFormatter;
@@ -15,7 +17,6 @@ import com.paicli.tool.ToolRegistry;
 import com.paicli.tool.ToolRegistry.ToolExecutionResult;
 import com.paicli.tool.ToolRegistry.ToolInvocation;
 import com.paicli.util.TerminalMarkdownRenderer;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,9 +24,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -41,7 +40,7 @@ public class Agent {
     private Supplier<String> externalContextSupplier = () -> "";
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
-    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+    private Renderer renderer;
 
     // 系统提示词
     private static final String SYSTEM_PROMPT = """
@@ -139,6 +138,21 @@ public class Agent {
         this.skillContextBuffer = skillContextBuffer;
     }
 
+    public void setRenderer(Renderer renderer) {
+        this.renderer = renderer;
+    }
+
+    /**
+     * 获取渲染器；首次调用时如果未设置，懒加载一个 {@link PlainRenderer} 兜底，
+     * 保证旧调用方（构造 Agent 后没有 setRenderer 的代码、单测等）行为不变。
+     */
+    private Renderer renderer() {
+        if (renderer == null) {
+            renderer = new PlainRenderer();
+        }
+        return renderer;
+    }
+
     /**
      * 运行 Agent 循环
      */
@@ -157,7 +171,7 @@ public class Agent {
         String userMessageContent = prependSkillBodies(userInput);
         conversationHistory.add(LlmClient.Message.user(userMessageContent));
         StringBuilder reasoningTranscript = new StringBuilder();
-        StreamRenderer streamRenderer = new StreamRenderer();
+        StreamRenderer streamRenderer = new StreamRenderer(renderer().stream());
 
         long startNanos = System.nanoTime();
         AgentBudget budget = AgentBudget.fromLlmClient(llmClient);
@@ -204,7 +218,7 @@ public class Agent {
                     appendReasoning(reasoningTranscript, response.reasoningContent());
                     log.info("LLM requested {} tool call(s) in iteration {}", response.toolCalls().size(), iteration);
                     budget.recordToolCalls(response.toolCalls());
-                    printToolCalls(System.out, response.toolCalls());
+                    renderer().appendToolCalls(response.toolCalls());
                     // 添加助手消息（包含工具调用）
                     conversationHistory.add(LlmClient.Message.assistant(
                             response.reasoningContent(),
@@ -252,7 +266,7 @@ public class Agent {
 
                 if (streamRenderer.hasStreamedOutput()) {
                     streamRenderer.finish();
-                    System.out.println(statsLine);
+                    renderer().stream().println(statsLine);
                     return "";
                 }
                 return formatUserFacingResponse(reasoningTranscript.toString(), response.content())
@@ -532,74 +546,6 @@ public class Agent {
         return normalized.substring(0, maxLength) + "...";
     }
 
-    private static void printToolCalls(PrintStream out, List<LlmClient.ToolCall> toolCalls) {
-        Map<String, List<LlmClient.ToolCall>> grouped = new LinkedHashMap<>();
-        for (LlmClient.ToolCall tc : toolCalls) {
-            grouped.computeIfAbsent(tc.function().name(), k -> new ArrayList<>()).add(tc);
-        }
-        for (var group : grouped.entrySet()) {
-            String toolName = group.getKey();
-            List<LlmClient.ToolCall> calls = group.getValue();
-            out.println(AnsiStyle.subtle("  " + toolLabel(toolName, calls.size())));
-            for (LlmClient.ToolCall tc : calls) {
-                String detail = extractKeyParam(toolName, tc.function().arguments());
-                if (!detail.isEmpty()) {
-                    out.println(AnsiStyle.subtle("    └ " + detail));
-                }
-            }
-        }
-    }
-
-    private static String toolLabel(String toolName, int count) {
-        return switch (toolName) {
-            case "read_file" -> "📖 读取 " + count + " 个文件";
-            case "write_file" -> "✏️ 写入 " + count + " 个文件";
-            case "list_dir" -> "📂 列出 " + count + " 个目录";
-            case "execute_command" -> "⚡ 执行 " + count + " 条命令";
-            case "create_project" -> "🏗️ 创建 " + count + " 个项目";
-            case "search_code" -> "🔍 搜索代码 " + count + " 次";
-            case "web_search" -> "🌐 联网搜索 " + count + " 次";
-            case "web_fetch" -> "📰 抓取 " + count + " 个网页";
-            case "save_memory" -> "💾 保存长期记忆 " + count + " 条";
-            default -> toolName != null && toolName.startsWith("mcp__")
-                    ? formatMcpLabel(toolName, count)
-                    : "🔧 " + toolName + " × " + count;
-        };
-    }
-
-    private static String formatMcpLabel(String toolName, int count) {
-        String[] parts = toolName.split("__", 3);
-        String display = parts.length == 3 ? parts[1] + "." + parts[2] : toolName;
-        return count == 1
-                ? "🔌 调用 MCP 工具 " + display
-                : "🔌 调用 MCP 工具 " + display + " × " + count;
-    }
-
-    private static String extractKeyParam(String toolName, String argsJson) {
-        try {
-            JsonNode node = JSON_MAPPER.readTree(argsJson);
-            String key = switch (toolName) {
-                case "read_file", "write_file", "list_dir" -> "path";
-                case "execute_command" -> "command";
-                case "create_project" -> "name";
-                case "search_code", "web_search" -> "query";
-                case "web_fetch" -> "url";
-                case "save_memory" -> "fact";
-                default -> null;
-            };
-            if (key == null) {
-                return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
-            }
-            String value = node.path(key).asText("");
-            if (value.length() > 80) {
-                value = value.substring(0, 77) + "...";
-            }
-            return value;
-        } catch (Exception e) {
-            return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
-        }
-    }
-
     /**
      * 流式输出渲染器，将 reasoning_content 与 content 分区展示。
      *
@@ -616,6 +562,7 @@ public class Agent {
      *    缓冲到 lateReasoning，最终在 finish() 用"🧠 补充思考"标题独立展示，不会污染回复区
      */
     private static final class StreamRenderer implements LlmClient.StreamListener {
+        private final PrintStream boundOut;  // null 表示延迟读取 System.out（保持旧测试兼容）
         private final StringBuilder pendingReasoning = new StringBuilder();
         private final StringBuilder lateReasoning = new StringBuilder();
         private TerminalMarkdownRenderer reasoningRenderer;
@@ -624,6 +571,18 @@ public class Agent {
         private boolean reasoningStarted;
         private boolean contentStarted;
         private boolean streamedOutput;
+
+        StreamRenderer() {
+            this.boundOut = null;
+        }
+
+        StreamRenderer(PrintStream out) {
+            this.boundOut = out;
+        }
+
+        private PrintStream out() {
+            return boundOut != null ? boundOut : System.out;
+        }
 
         @Override
         public void onReasoningDelta(String delta) {
@@ -644,7 +603,7 @@ public class Agent {
                     return;  // 避免先打印一个空标题，等有完整行或迭代切换时再 flush
                 }
                 printReasoningHeadingIfNeeded();
-                reasoningRenderer = new TerminalMarkdownRenderer(System.out);
+                reasoningRenderer = new TerminalMarkdownRenderer(out());
                 reasoningRenderer.append(pendingReasoning.toString());
                 pendingReasoning.setLength(0);
                 reasoningStarted = true;
@@ -652,7 +611,7 @@ public class Agent {
             } else {
                 reasoningRenderer.append(delta);
             }
-            System.out.flush();
+            out().flush();
         }
 
         @Override
@@ -663,37 +622,29 @@ public class Agent {
             if (!contentStarted) {
                 if (reasoningStarted && reasoningRenderer != null) {
                     reasoningRenderer.finish();
-                    System.out.println();
+                    out().println();
                 } else if (pendingReasoning.length() > 0 && !pendingReasoning.toString().isBlank()) {
-                    // 有实质 reasoning 但之前没攒够阈值就被 content 打断：先补打思考过程
                     printReasoningHeadingIfNeeded();
-                    TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(System.out);
+                    TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(out());
                     r.append(pendingReasoning.toString());
                     r.finish();
-                    System.out.println();
+                    out().println();
                     pendingReasoning.setLength(0);
                     reasoningStarted = true;
                 }
-                System.out.println(AnsiStyle.section("🤖 回复"));
-                contentRenderer = new TerminalMarkdownRenderer(System.out);
+                out().println(AnsiStyle.section("🤖 回复"));
+                contentRenderer = new TerminalMarkdownRenderer(out());
                 contentStarted = true;
                 streamedOutput = true;
             }
             contentRenderer.append(delta);
-            System.out.flush();
+            out().flush();
         }
 
         private boolean hasStreamedOutput() {
             return streamedOutput;
         }
 
-        /**
-         * 在一次迭代（通常是一次 tool-call 分支执行完后）和下一次迭代之间调用，
-         * 收尾当前的 reasoning/content 渲染器并重置所有状态。
-         *
-         * 这样下一轮迭代的 reasoning/content 到达时会重新初始化渲染器，
-         * 避免出现"上一轮的标题在屏幕高处、下一轮的内容出现在 HITL 块下方"的错位。
-         */
         private void resetBetweenIterations() {
             if (reasoningRenderer != null) {
                 reasoningRenderer.finish();
@@ -705,12 +656,11 @@ public class Agent {
                 contentRenderer.finish();
                 contentRenderer = null;
             }
-            // 迭代间的 late reasoning 当场 flush（独立一段「补充思考」），不拖到 run() 结束
             String late = lateReasoning.toString().trim();
             if (!late.isEmpty()) {
-                System.out.println();
-                System.out.println(AnsiStyle.heading("🧠 补充思考"));
-                TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(System.out);
+                out().println();
+                out().println(AnsiStyle.heading("🧠 补充思考"));
+                TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(out());
                 r.append(late);
                 r.finish();
                 lateReasoning.setLength(0);
@@ -720,7 +670,7 @@ public class Agent {
             reasoningStarted = false;
             contentStarted = false;
             if (streamedOutput) {
-                System.out.println();
+                out().println();
             }
         }
 
@@ -735,16 +685,16 @@ public class Agent {
             }
             String late = lateReasoning.toString().trim();
             if (!late.isEmpty()) {
-                System.out.println();
-                System.out.println(AnsiStyle.heading("🧠 补充思考"));
-                TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(System.out);
+                out().println();
+                out().println(AnsiStyle.heading("🧠 补充思考"));
+                TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(out());
                 r.append(late);
                 r.finish();
                 lateReasoning.setLength(0);
                 streamedOutput = true;
             }
             if (streamedOutput) {
-                System.out.println();
+                out().println();
             }
         }
 
@@ -765,7 +715,7 @@ public class Agent {
                 return;
             }
             printReasoningHeadingIfNeeded();
-            TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(System.out);
+            TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(out());
             renderer.append(pending);
             renderer.finish();
             pendingReasoning.setLength(0);
@@ -774,7 +724,7 @@ public class Agent {
 
         private void printReasoningHeadingIfNeeded() {
             if (!reasoningHeadingPrinted) {
-                System.out.println(AnsiStyle.heading("🧠 思考过程"));
+                out().println(AnsiStyle.heading("🧠 思考过程"));
                 reasoningHeadingPrinted = true;
             }
         }

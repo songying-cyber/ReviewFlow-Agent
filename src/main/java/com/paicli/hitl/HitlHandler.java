@@ -41,4 +41,10 @@ public interface HitlHandler {
     default boolean isApprovedAllByServer(String serverName) {
         return false;
     }
+
+    default void clearApprovedAll() {
+    }
+
+    default void clearApprovedAllForServer(String serverName) {
+    }
 }

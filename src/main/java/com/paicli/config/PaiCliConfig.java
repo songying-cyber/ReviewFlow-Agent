@@ -28,6 +28,8 @@ public class PaiCliConfig {
         private String apiKey;
         private String baseUrl;
         private String model;
+        private double temperature = 0.7;  // 默认温度
+        private int maxTokens = 8192;      // 默认最大 token 数
 
         public ProviderConfig() {}
 
@@ -43,6 +45,10 @@ public class PaiCliConfig {
         public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
         public String getModel() { return model; }
         public void setModel(String model) { this.model = model; }
+        public double getTemperature() { return temperature; }
+        public void setTemperature(double temperature) { this.temperature = temperature; }
+        public int getMaxTokens() { return maxTokens; }
+        public void setMaxTokens(int maxTokens) { this.maxTokens = maxTokens; }
     }
 
     public String getDefaultProvider() { return defaultProvider; }

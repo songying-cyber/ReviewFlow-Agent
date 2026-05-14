@@ -395,7 +395,7 @@
 
 ---
 
-## 第16期：TUI界面 + 产品化
+## 第16期：TUI界面 + 产品化 ✅
 
 **目标**：从CLI到完整产品体验
 
@@ -403,14 +403,22 @@
 - 终端TUI界面（Lanterna/JLine）
 - 文件树浏览
 - 代码高亮显示
-- 对话历史可视化
-- 配置文件管理
+- 对话历史可视化（`~/.paicli/history/session_*.jsonl`）
+- 配置文件管理（TUI `/config` 面板）
+- TUI 输入桥接真实 ReAct / Plan / Team 执行链
+- TUI HITL 模态审批（批准 / 拒绝 / 跳过）
 - 安装包分发
+
+**第 16.1 期形态修正（v16.1.0）**：
+- 抽出 `Renderer` 接口 + 三个实现：inline 流式（默认）/ lanterna 全屏（保留）/ plain 兜底
+- 默认形态切换为 **inline 流式 TUI**（Claude Code 风格），主屏直出 + 底部 DECSTBM 状态栏 + 行内可折叠工具块（`ctrl+o`）+ 行内 diff
+- HITL 改为单字符 `[y/n/a/s/m]` 提示；`/config` 改为浮起 palette
+- 切换：`PAICLI_RENDERER=inline|lanterna|plain`，旧 `PAICLI_TUI=true` 兼容映射到 lanterna
 
 **核心知识点**：
 - TUI开发
-- 终端渲染
-- 产品工程化
+- 终端渲染（DECSTBM、ANSI 局部重绘、JLine widget 绑定）
+- 产品工程化（接口抽象 + 多形态切换）
 
 **教程标题候选**：《CLI太简陋？做个漂亮的TUI界面，体验不输Claude Code》
 
@@ -495,4 +503,4 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ---
 
-*已完成第 15 期 Skill 系统 + 内置 web-access skill。下一步进入第 16 期 TUI 产品化，OAuth / sampling / recovery 留给后续 MCP 增强期。*
+*已完成第 16 期 TUI 产品化（含 16.1 形态修正：默认切换为 inline 流式 TUI，Lanterna 全屏 TUI 通过 `PAICLI_RENDERER=lanterna` 保留）。下一步进入第 17 期多模态 LLM 输入，OAuth / sampling / recovery 留给后续 MCP 增强期。*
