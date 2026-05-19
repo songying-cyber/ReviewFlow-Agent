@@ -9,8 +9,9 @@ import java.util.Deque;
  * <p>维护一个双端队列，新注册的块成为"队尾活跃块"，之前的块被 freeze
  * （因为新输出意味着它们已经向上滚走，无法再覆盖重绘）。
  *
- * <p>{@link #toggleLast()} 永远只 toggle 队尾的活跃块——这是 inline 流式 TUI 的固有约束，
- * 与 Claude Code 的 Ctrl+O 行为一致。
+ * <p>{@link #toggleLast()} 永远只 toggle 队尾且尚未被后续输出污染的活跃块。
+ * 一旦普通输出继续写入，调用方必须 {@link #freezeAll()}，避免用相对光标覆盖
+ * 已经滚走的历史内容。
  */
 public final class BlockRegistry {
 
@@ -31,6 +32,22 @@ public final class BlockRegistry {
             return false;
         }
         return last.toggle();
+    }
+
+    /** Toggle 队尾块的内存态，由 transcript 重绘负责真正输出。 */
+    public synchronized boolean toggleLastForRedraw() {
+        FoldableBlock last = blocks.peekLast();
+        if (last == null) {
+            return false;
+        }
+        return last.toggleForRedraw();
+    }
+
+    /** 后续普通输出已经出现，所有现存块都不能再做原地覆盖重绘。 */
+    public synchronized void freezeAll() {
+        for (FoldableBlock block : blocks) {
+            block.freeze();
+        }
     }
 
     /** 清空注册表（如 /clear 时）。 */

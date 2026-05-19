@@ -258,11 +258,16 @@ public class Main {
             RendererHitlHandler rendererHitl = new RendererHitlHandler(renderer, hitlHandler.isEnabled());
             hitlHandler.setDelegate(rendererHitl);
             reactAgent.setRenderer(renderer);
+            reactAgent.setHitlEnabledSupplier(hitlHandler::isEnabled);
+            reactAgent.getToolRegistry().setWriteFileObserver(
+                    (path, ba) -> renderer.appendDiff(path, ba[0], ba[1]));
             renderer.start();
 
             // Day 3：inline 模式绑 Ctrl+O 到 BlockRegistry.toggleLast 实现折叠块展开/收起
+            boolean spaciousPrompt = false;
             if (renderer instanceof InlineRenderer inline) {
                 bindCtrlOToFoldableBlocks(lineReader, inline);
+                spaciousPrompt = inline.hasStatusBar();
             }
 
             printStartupHints();
@@ -270,7 +275,8 @@ public class Main {
             while (true) {
                 PromptInput promptInput;
                 try {
-                    promptInput = readPromptInput(terminal, lineReader, nextTaskUsePlanMode || nextTaskUseTeamMode);
+                    promptInput = readPromptInput(terminal, lineReader,
+                            nextTaskUsePlanMode || nextTaskUseTeamMode, spaciousPrompt);
                 } catch (UserInterruptException e) {
                     continue;  // Ctrl+C 跳过
                 } catch (EndOfFileException e) {
@@ -404,6 +410,10 @@ public class Main {
                     }
                     case POLICY_STATUS -> {
                         printPolicyStatus(reactAgent);
+                        continue;
+                    }
+                    case CONFIG -> {
+                        handleConfigPalette(renderer, config, llmClient, hitlHandler, skillRegistry);
                         continue;
                     }
                     case AUDIT_TAIL -> {
@@ -549,6 +559,7 @@ public class Main {
                 // 运行 Agent
                 input = mentionExpander.expand(input);
                 System.out.println();
+                renderer.beginTurn();
                 final String taskInput = input;
                 Callable<String> runTask;
                 if (nextTaskUsePlanMode || command.type() == CliCommandParser.CommandType.SWITCH_PLAN) {
@@ -717,8 +728,14 @@ public class Main {
         return classifyEscapeSequence(escTail) == EscapeSequenceType.STANDALONE_ESC;
     }
 
-    private static PromptInput readPromptInput(Terminal terminal, LineReader lineReader, boolean allowEscCancel)
+    private static PromptInput readPromptInput(Terminal terminal,
+                                               LineReader lineReader,
+                                               boolean allowEscCancel,
+                                               boolean spaciousPrompt)
             throws UserInterruptException, EndOfFileException {
+        if (spaciousPrompt) {
+            System.out.println();
+        }
         if (!allowEscCancel) {
             return PromptInput.submitted(lineReader.readLine("👤 你: "));
         }
@@ -977,6 +994,7 @@ public class Main {
                 new SlashCommandHint("/mcp resources ", "/mcp resources <name>", "查看 MCP resources"),
                 new SlashCommandHint("/mcp prompts ", "/mcp prompts <name>", "查看 MCP prompts"),
                 new SlashCommandHint("/policy", "/policy", "查看安全策略状态"),
+                new SlashCommandHint("/config", "/config", "打开配置 palette（只读视图 + 切换提示）"),
                 new SlashCommandHint("/audit", "/audit", "查看今日最近 10 条危险工具审计"),
                 new SlashCommandHint("/audit ", "/audit [N]", "查看今日最近 N 条危险工具审计"),
                 new SlashCommandHint("/index", "/index", "索引当前代码库"),
@@ -1015,7 +1033,12 @@ public class Main {
             boolean atPromptStart = lineReader.getBuffer().length() == 0;
             lineReader.getBuffer().write("/");
             if (atPromptStart) {
-                lineReader.callWidget(LineReader.LIST_CHOICES);
+                int width = 100;
+                if (lineReader.getTerminal() != null && lineReader.getTerminal().getSize() != null) {
+                    width = Math.max(40, lineReader.getTerminal().getSize().getColumns());
+                }
+                lineReader.printAbove(formatSlashCommandChoices(width));
+                lineReader.callWidget(LineReader.REDISPLAY);
             }
             return true;
         });
@@ -1032,12 +1055,75 @@ public class Main {
         }
     }
 
+    static String formatSlashCommandChoices(int terminalWidth) {
+        List<String> commands = slashCommandHints().stream()
+                .map(SlashCommandHint::display)
+                .distinct()
+                .toList();
+        int maxLen = commands.stream().mapToInt(String::length).max().orElse(12);
+        int colWidth = Math.min(Math.max(maxLen + 4, 18), Math.max(18, terminalWidth));
+        int columns = Math.max(1, Math.min(4, terminalWidth / colWidth));
+        int rows = (int) Math.ceil(commands.size() / (double) columns);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("可用命令（Tab 补全，Enter 执行）：\n");
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < columns; col++) {
+                int index = col * rows + row;
+                if (index >= commands.size()) {
+                    continue;
+                }
+                String command = commands.get(index);
+                sb.append(command);
+                if (col < columns - 1) {
+                    sb.append(" ".repeat(Math.max(2, colWidth - command.length())));
+                }
+            }
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
+    /**
+     * /config 命令处理：用 renderer.openPalette 展示当前配置项列表。
+     * 当前是只读视图——选中一项后提示对应的 CLI 命令，由用户自己执行。
+     */
+    private static void handleConfigPalette(Renderer renderer,
+                                            PaiCliConfig config,
+                                            LlmClient llmClient,
+                                            SwitchableHitlHandler hitlHandler,
+                                            com.paicli.skill.SkillRegistry skillRegistry) {
+        var items = java.util.List.of(
+                "模型: " + (llmClient == null ? "(none)" : llmClient.getModelName() + " / " + llmClient.getProviderName()),
+                "默认 Provider: " + (config == null ? "(none)" : config.getDefaultProvider()),
+                "HITL: " + (hitlHandler.isEnabled() ? "ON" : "OFF"),
+                "Skill 启用数: " + (skillRegistry == null ? 0 : skillRegistry.enabledSkills().size()),
+                "渲染器: " + renderer.getClass().getSimpleName(),
+                "配置文件: ~/.paicli/config.json (只读视图，编辑请用编辑器)"
+        );
+        int selected = renderer.openPalette("配置 / config", items);
+        if (selected < 0) {
+            System.out.println("(已关闭)");
+            return;
+        }
+        String hint = switch (selected) {
+            case 0, 1 -> "💡 切换模型: /model glm 或 /model deepseek";
+            case 2 -> "💡 切换 HITL: /hitl on / /hitl off";
+            case 3 -> "💡 管理 Skill: /skill list / /skill on <name> / /skill off <name>";
+            case 4 -> "💡 切换渲染器（重启后生效）: PAICLI_RENDERER=inline|lanterna|plain";
+            case 5 -> "💡 当前不在 TUI 内编辑 config.json，建议在编辑器里改完重启";
+            default -> "(unknown)";
+        };
+        System.out.println(hint);
+    }
+
     static void bindCtrlOToFoldableBlocks(LineReader lineReader, InlineRenderer inline) {
         if (lineReader == null || inline == null) {
             return;
         }
         lineReader.getWidgets().put("paicli-toggle-foldable", () -> {
-            inline.blockRegistry().toggleLast();
+            inline.toggleLastBlock();
+            lineReader.callWidget(LineReader.REDISPLAY);
             return true;
         });
         Reference ref = new Reference("paicli-toggle-foldable");

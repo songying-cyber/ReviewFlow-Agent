@@ -71,6 +71,7 @@ public class ToolRegistry {
     private java.util.function.Consumer<String> memorySaver;
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
+    private java.util.function.BiConsumer<String, String[]> writeFileObserver = (p, ba) -> {};
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -152,6 +153,16 @@ public class ToolRegistry {
     }
 
     /**
+     * 注册 write_file 写入观察者：参数 (path, [before, after])，
+     * before == null 表示新建文件或读不出原文。
+     * 用于把 write_file 接到行内 diff 渲染等只读副作用里；
+     * 观察者抛异常不影响 write_file 主路径。
+     */
+    public void setWriteFileObserver(java.util.function.BiConsumer<String, String[]> observer) {
+        this.writeFileObserver = observer == null ? (p, ba) -> {} : observer;
+    }
+
+    /**
      * 注册文件操作工具
      */
     private void registerFileTools() {
@@ -187,12 +198,25 @@ public class ToolRegistry {
                                 + (MAX_WRITE_FILE_BYTES / 1024 / 1024) + "MB 上限");
                     }
                     Path safe = pathGuard.resolveSafe(path);
+                    String before = null;
+                    try {
+                        if (Files.exists(safe) && Files.isRegularFile(safe)) {
+                            before = Files.readString(safe);
+                        }
+                    } catch (Exception ignored) {
+                        // 二进制 / 大文件 / 编码错读不出来时，前文当 null 处理（diff 退化为长度提示）
+                    }
                     try {
                         Path parent = safe.getParent();
                         if (parent != null) {
                             Files.createDirectories(parent);
                         }
                         Files.writeString(safe, content);
+                        try {
+                            writeFileObserver.accept(path, new String[]{before, content});
+                        } catch (Exception ignored) {
+                            // observer 失败不能影响 write_file 主路径
+                        }
                         return "文件已写入: " + path;
                     } catch (Exception e) {
                         return "写入文件失败: " + e.getMessage();

@@ -10,14 +10,15 @@ import org.jline.terminal.Terminal;
  * <p>选型规则：
  * <ul>
  *   <li>{@code -Dpaicli.renderer} > {@code PAICLI_RENDERER} 环境变量 > 默认 inline</li>
- *   <li>{@code lanterna} → Lanterna 全屏 TUI（Day 5 落地，先返回 plain 占位）</li>
+ *   <li>{@code lanterna} → Lanterna 全屏 TUI（由 {@code TuiBootstrap} 在 CLI 循环前接管）</li>
  *   <li>{@code plain} → {@link PlainRenderer}</li>
  *   <li>{@code inline}（默认）→ Inline 流式（Day 2 落地，先返回 plain 占位）</li>
  *   <li>兼容：{@code PAICLI_TUI=true} → 等价 {@code lanterna}，打 deprecation 提示</li>
  * </ul>
  *
- * <p>当目标渲染器初始化失败（如终端不支持 DECSTBM、Lanterna 启动异常），
- * 自动 fallback 到 {@link PlainRenderer}，并在 stderr 打日志。
+ * <p>当 inline 目标渲染器初始化失败（如终端不支持 ANSI），自动 fallback 到
+ * {@link PlainRenderer}，并在 stderr 打日志。Lanterna 模式不经由本工厂创建，
+ * 而是在 {@code Main} 里进入 {@code TuiBootstrap}。
  */
 public final class RendererFactory {
 
@@ -59,8 +60,9 @@ public final class RendererFactory {
     }
 
     /**
-     * 创建渲染器。inline 模式如果终端不支持 ANSI（如 dumb 终端），回退到 plain。
-     * lanterna 模式 Day 5 接入；当前落到 inline。
+     * 创建 CLI 循环内使用的渲染器。inline 模式如果终端不支持 ANSI（如 dumb 终端），
+     * 回退到 plain。lanterna 模式应在进入 CLI 循环前由 TuiBootstrap 接管；如果走到
+     * 这里，说明 TUI 因 NO_TUI、终端尺寸或启动失败被降级。
      *
      * @param terminal JLine terminal，用于 inline / lanterna 模式探测能力。可为 null。
      */

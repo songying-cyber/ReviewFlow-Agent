@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 public final class BottomStatusBar implements AutoCloseable {
 
     private static final long REDRAW_PERIOD_MS = 200L;
+    private static final int RESERVED_BOTTOM_ROWS = 2;
 
     private final PrintStream out;
     private final Terminal terminal;
@@ -55,9 +56,10 @@ public final class BottomStatusBar implements AutoCloseable {
             return;
         }
         int rows = TerminalCapabilities.safeSize(terminal).getRows();
+        int contentBottomRow = Math.max(1, rows - RESERVED_BOTTOM_ROWS);
         synchronized (out) {
-            out.print(AnsiSeq.setScrollRegion(1, rows - 1));
-            out.print(AnsiSeq.moveCursor(rows - 1, 1));
+            out.print(AnsiSeq.setScrollRegion(1, contentBottomRow));
+            out.print(AnsiSeq.moveCursor(contentBottomRow, 1));
             out.flush();
         }
         scheduler.scheduleAtFixedRate(this::redraw,
@@ -88,9 +90,7 @@ public final class BottomStatusBar implements AutoCloseable {
             out.print(AnsiSeq.SAVE_CURSOR);
             out.print(AnsiSeq.moveCursor(rows, 1));
             out.print(AnsiSeq.CLEAR_LINE);
-            out.print(AnsiSeq.REVERSE_ON);
             out.print(formatStatusLine(info, cols));
-            out.print(AnsiSeq.REVERSE_OFF);
             out.print(AnsiSeq.RESTORE_CURSOR);
             out.flush();
         }
@@ -109,6 +109,8 @@ public final class BottomStatusBar implements AutoCloseable {
         int rows = TerminalCapabilities.safeSize(terminal).getRows();
         synchronized (out) {
             out.print(AnsiSeq.RESET_SCROLL_REGION);
+            out.print(AnsiSeq.moveCursor(Math.max(1, rows - 1), 1));
+            out.print(AnsiSeq.CLEAR_LINE);
             out.print(AnsiSeq.moveCursor(rows, 1));
             out.print(AnsiSeq.CLEAR_LINE);
             out.flush();
@@ -125,12 +127,9 @@ public final class BottomStatusBar implements AutoCloseable {
         if (info.elapsedMillis() > 0) {
             sb.append(" │ ").append(formatElapsed(info.elapsedMillis()));
         }
-        sb.append(" ");
-        // 简单按字符数 pad / 截断（状态栏内容预期都是 ASCII）
+        // 不做整行 padding，避免反白/空白块污染主屏；状态栏所在行已由 CLEAR_LINE 清空。
         int len = sb.length();
-        if (len < cols) {
-            sb.append(" ".repeat(cols - len));
-        } else if (len > cols) {
+        if (len > cols) {
             sb.setLength(cols);
         }
         return sb.toString();

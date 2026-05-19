@@ -33,7 +33,8 @@ final class CliCommandParser {
         SKILL_SHOW,
         SKILL_ON,
         SKILL_OFF,
-        SKILL_RELOAD
+        SKILL_RELOAD,
+        CONFIG
     }
 
     record ParsedCommand(CommandType type, String payload) {
@@ -152,6 +153,10 @@ final class CliCommandParser {
 
         if (trimmed.equalsIgnoreCase("/policy")) {
             return new ParsedCommand(CommandType.POLICY_STATUS, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/config")) {
+            return new ParsedCommand(CommandType.CONFIG, null);
         }
 
         if (trimmed.equalsIgnoreCase("/audit")) {

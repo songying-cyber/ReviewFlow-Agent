@@ -65,6 +65,18 @@ class BlockRegistryTest {
     }
 
     @Test
+    void freezeAllPreventsLaterRelativeRepaint() {
+        BlockRegistry registry = new BlockRegistry();
+        FoldableBlock block = newBlock();
+        registry.register(block);
+
+        registry.freezeAll();
+
+        assertTrue(block.isFrozen());
+        assertFalse(registry.toggleLast());
+    }
+
+    @Test
     void clearRemovesAllBlocks() {
         BlockRegistry registry = new BlockRegistry();
         registry.register(newBlock());

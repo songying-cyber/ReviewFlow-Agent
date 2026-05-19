@@ -60,6 +60,17 @@ class MainInputNormalizationTest {
     }
 
     @Test
+    void slashCommandChoicesAreRenderedDirectlyWithoutJLineConfirmationText() {
+        String choices = Main.formatSlashCommandChoices(120);
+
+        assertTrue(choices.contains("/model glm"), choices);
+        assertTrue(choices.contains("/browser status"), choices);
+        assertFalse(choices.contains("do you wish"), choices);
+        assertTrue(choices.lines().count() < Main.slashCommandHints().size(),
+                "choices should be compact multi-column output");
+    }
+
+    @Test
     void classifiesStandaloneEscapeAsCancelIntent() {
         assertEquals(Main.EscapeSequenceType.STANDALONE_ESC, Main.classifyEscapeSequence(""));
     }

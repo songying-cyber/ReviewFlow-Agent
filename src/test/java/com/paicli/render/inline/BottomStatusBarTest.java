@@ -26,10 +26,10 @@ class BottomStatusBarTest {
     }
 
     @Test
-    void formatStatusLinePadsToColumnWidth() {
+    void formatStatusLineDoesNotPadToColumnWidth() {
         StatusInfo info = new StatusInfo("glm-5.1", 0L, 200_000L, false, 0L);
         String line = BottomStatusBar.formatStatusLine(info, 80);
-        assertTrue(line.length() == 80, "padding to column width: " + line.length());
+        assertTrue(line.length() < 80, "status line should stay compact: " + line.length());
     }
 
     @Test
@@ -77,7 +77,7 @@ class BottomStatusBarTest {
         bar.start();
         try {
             String emitted = sink.toString(StandardCharsets.UTF_8);
-            assertTrue(emitted.contains("[1;23r"), "scroll region should be set: " + emitted);
+            assertTrue(emitted.contains("[1;22r"), "scroll region should reserve status and gap rows: " + emitted);
         } finally {
             bar.close();
         }
@@ -109,7 +109,7 @@ class BottomStatusBarTest {
             bar.flushNow();
             String emitted = sink.toString(StandardCharsets.UTF_8);
             assertTrue(emitted.contains("glm-5.1"), "should render model name: " + emitted);
-            assertTrue(emitted.contains("[7m"), "should use reverse video: " + emitted);
+            assertFalse(emitted.contains("[7m"), "should not use reverse video: " + emitted);
         } finally {
             bar.close();
         }

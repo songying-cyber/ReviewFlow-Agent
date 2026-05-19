@@ -194,6 +194,10 @@
                                 <include>**/hitl/RendererHitlHandlerTest.java</include>
                                 <include>**/hitl/SwitchableHitlHandlerTest.java</include>
                                 <include>**/render/*Test.java</include>
+                                <include>**/render/inline/BottomStatusBarTest.java</include>
+                                <include>**/render/inline/BlockRegistryTest.java</include>
+                                <include>**/render/inline/FoldableBlockTest.java</include>
+                                <include>**/render/inline/SlashPaletteTest.java</include>
                                 <include>**/tui/TuiBootstrapTest.java</include>
                                 <include>**/tui/highlight/CodeHighlighterTest.java</include>
                                 <include>**/tui/history/ConversationSnapshotTest.java</include>

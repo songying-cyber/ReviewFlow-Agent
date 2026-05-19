@@ -24,6 +24,10 @@ public interface Renderer extends AutoCloseable {
     /** 启动渲染器（例如设置滚动区域、启动 GUI 主循环）。Main 必须先调用一次。 */
     void start();
 
+    /** 开始一次用户任务输出。默认 no-op；inline renderer 用它重置本轮可重绘 transcript。 */
+    default void beginTurn() {
+    }
+
     @Override
     void close();
 

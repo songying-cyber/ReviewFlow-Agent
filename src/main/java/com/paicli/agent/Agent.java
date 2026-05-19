@@ -8,6 +8,7 @@ import com.paicli.memory.ExplicitMemoryHints;
 import com.paicli.memory.MemoryManager;
 import com.paicli.render.PlainRenderer;
 import com.paicli.render.Renderer;
+import com.paicli.render.StatusInfo;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.skill.SkillContextBuffer;
 import com.paicli.skill.SkillIndexFormatter;
@@ -41,6 +42,7 @@ public class Agent {
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
     private Renderer renderer;
+    private Supplier<Boolean> hitlEnabledSupplier = () -> false;
 
     // 系统提示词
     private static final String SYSTEM_PROMPT = """
@@ -143,6 +145,14 @@ public class Agent {
     }
 
     /**
+     * 注入 HITL 启用状态的快照源，用于状态栏 / StatusInfo 显示。
+     * Main 启动后用 {@code reactAgent.setHitlEnabledSupplier(hitlHandler::isEnabled)} 接进来。
+     */
+    public void setHitlEnabledSupplier(Supplier<Boolean> supplier) {
+        this.hitlEnabledSupplier = supplier == null ? () -> false : supplier;
+    }
+
+    /**
      * 获取渲染器；首次调用时如果未设置，懒加载一个 {@link PlainRenderer} 兜底，
      * 保证旧调用方（构造 Agent 后没有 setRenderer 的代码、单测等）行为不变。
      */
@@ -175,6 +185,7 @@ public class Agent {
 
         long startNanos = System.nanoTime();
         AgentBudget budget = AgentBudget.fromLlmClient(llmClient);
+        pushStatus(budget, startNanos);
 
         // 主退出条件 = LLM 自己决定（不再调用工具就返回）；
         // budget 仅在 token 用尽 / 检测到死循环 / 超出硬轮数时兜底。
@@ -212,6 +223,7 @@ public class Agent {
                 }
 
                 budget.recordTokens(response.inputTokens(), response.outputTokens(), response.cachedInputTokens());
+                pushStatus(budget, startNanos);
 
                 // 如果有工具调用
                 if (response.hasToolCalls()) {
@@ -481,6 +493,21 @@ public class Agent {
      */
     public ToolRegistry getToolRegistry() {
         return toolRegistry;
+    }
+
+    /** 把当前预算/耗时/HITL 状态推送给 renderer 状态栏。 */
+    private void pushStatus(AgentBudget budget, long startNanos) {
+        try {
+            String model = llmClient == null ? "—" : llmClient.getModelName();
+            long totalTokens = budget == null ? 0L
+                    : (long) (budget.totalInputTokens() + budget.totalOutputTokens());
+            long contextWindow = llmClient == null ? 0L : llmClient.maxContextWindow();
+            boolean hitl = Boolean.TRUE.equals(hitlEnabledSupplier.get());
+            long elapsed = (System.nanoTime() - startNanos) / 1_000_000L;
+            renderer().updateStatus(new StatusInfo(model, totalTokens, contextWindow, hitl, elapsed));
+        } catch (Exception e) {
+            log.debug("status push failed", e);
+        }
     }
 
     private String formatTokenStats(AgentBudget budget, long startNanos) {

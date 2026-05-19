@@ -23,7 +23,8 @@ import java.util.Objects;
  * 3. TUI 模式时创建 {@link LanternaWindow} 并启动主循环
  *
  * <p>TUI 触发条件：
- * - {@code PAICLI_TUI=true} 环境变量或 {@code -Dpaicli.tui=true} 系统属性
+ * - {@code PAICLI_RENDERER=lanterna|tui} 环境变量或 {@code -Dpaicli.renderer=lanterna|tui}
+ * - 兼容旧入口：{@code PAICLI_TUI=true} 环境变量或 {@code -Dpaicli.tui=true} 系统属性
  *
  * <p>即使显式启用，以下情况仍降级：
  * - {@code NO_TUI=true} 环境变量
@@ -33,6 +34,8 @@ public final class TuiBootstrap {
 
     private static final String TUI_ENV = "PAICLI_TUI";
     private static final String TUI_PROPERTY = "paicli.tui";
+    private static final String RENDERER_ENV = "PAICLI_RENDERER";
+    private static final String RENDERER_PROPERTY = "paicli.renderer";
     private static final int MIN_COLS = 80;
     private static final int MIN_ROWS = 24;
 
@@ -67,7 +70,7 @@ public final class TuiBootstrap {
         if (Boolean.parseBoolean(Objects.requireNonNullElse(
                 System.getenv("NO_TUI"), "false"))) {
             System.out.println(AnsiStyle.heading("💡 提示: NO_TUI=true，已切换为 CLI 模式。"
-                    + "要启用 TUI 请清除 NO_TUI 环境变量，并保留 PAICLI_TUI=true 或 -Dpaicli.tui=true。"));
+                    + "要启用 TUI 请清除 NO_TUI 环境变量，并使用 PAICLI_RENDERER=lanterna。"));
             return false;
         }
 
@@ -94,11 +97,24 @@ public final class TuiBootstrap {
     }
 
     private static boolean isTuiRequested() {
+        String rendererProperty = System.getProperty(RENDERER_PROPERTY);
+        if (rendererProperty != null && !rendererProperty.isBlank()) {
+            return isLanternaRenderer(rendererProperty);
+        }
+        String rendererEnv = System.getenv(RENDERER_ENV);
+        if (rendererEnv != null && !rendererEnv.isBlank()) {
+            return isLanternaRenderer(rendererEnv);
+        }
         String property = System.getProperty(TUI_PROPERTY);
         if (property != null && !property.isBlank()) {
             return Boolean.parseBoolean(property);
         }
         return Boolean.parseBoolean(Objects.requireNonNullElse(System.getenv(TUI_ENV), "false"));
+    }
+
+    private static boolean isLanternaRenderer(String value) {
+        String normalized = value.trim().toLowerCase();
+        return "lanterna".equals(normalized) || "tui".equals(normalized);
     }
 
     /**
@@ -125,6 +141,9 @@ public final class TuiBootstrap {
             LanternaWindow window = new LanternaWindow(config, llmClient);
             LanternaRenderer renderer = new LanternaRenderer(window);
             reactAgent.setRenderer(renderer);
+            reactAgent.setHitlEnabledSupplier(hitlHandler::isEnabled);
+            reactAgent.getToolRegistry().setWriteFileObserver(
+                    (path, ba) -> renderer.appendDiff(path, ba[0], ba[1]));
             RendererHitlHandler rendererHitl = new RendererHitlHandler(renderer, hitlHandler.isEnabled());
             hitlHandler.setDelegate(rendererHitl);
             TuiSessionController controller = new TuiSessionController(

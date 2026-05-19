@@ -97,6 +97,26 @@ public final class FoldableBlock {
         return true;
     }
 
+    /** 只切换内存态，不直接写终端；用于 transcript 级重绘。 */
+    public boolean toggleForRedraw() {
+        expanded = !expanded;
+        renderedLineCount = currentLines().size();
+        return true;
+    }
+
+    /** 当前状态下应渲染的完整行。 */
+    public List<String> currentLines() {
+        if (!expanded) {
+            return List.of(collapsedHeader);
+        }
+        if (collapseFooter == null || collapseFooter.isEmpty()) {
+            return expandedLines;
+        }
+        java.util.ArrayList<String> lines = new java.util.ArrayList<>(expandedLines);
+        lines.add(collapseFooter);
+        return lines;
+    }
+
     /** 测试可见：返回当前折叠态文案。 */
     String collapsedHeader() {
         return collapsedHeader;
