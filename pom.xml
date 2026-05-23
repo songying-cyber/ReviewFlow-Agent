@@ -76,6 +76,13 @@
             <version>3.28.0</version>
         </dependency>
 
+        <!-- Side-Git 快照（纯 Java，不依赖系统 git） -->
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>7.6.0.202603022253-r</version>
+        </dependency>
+
         <!-- HTML 解析（用于 web_fetch 正文提取） -->
         <dependency>
             <groupId>org.jsoup</groupId>

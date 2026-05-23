@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PaiCLI · Terminal-First Agent IDE</title>
+  <meta name="description" content="一个面向商业使用的 Java Agent CLI 产品，对标 Claude Code。从 ReAct 循环持续演进到完整 Agent 产品形态。">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🅿️</text></svg>">
+</head>
+<body>
+  <div class="noise-overlay"></div>
+
+  <!-- Navigation -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">
+        <span class="logo-bracket">{</span>
+        <span class="logo-text">PaiCLI</span>
+        <span class="logo-bracket">}</span>
+        <span class="logo-version">v16.1</span>
+      </a>
+      <div class="nav-links">
+        <a href="#features">特性</a>
+        <a href="#evolution">演进</a>
+        <a href="#install">安装</a>
+        <a href="#architecture">架构</a>
+        <a href="https://github.com/itwanger/paicli" target="_blank" class="nav-gh" title="GitHub">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/></svg>
+          <span>Star</span>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero" id="hero">
+    <div class="hero-grid">
+      <div class="hero-content">
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          第 17 期进行中 · LSP 诊断注入
+        </div>
+        <h1 class="hero-title">
+          <span class="title-line">一个住在终端里的</span>
+          <span class="title-line title-accent">Java Agent IDE</span>
+        </h1>
+        <p class="hero-subtitle">
+          PaiCLI 是一款基于 Java 的开源命令行智能体，对标 Claude Code。
+          从 ReAct 循环出发，已完成 <strong>16.1 期迭代</strong>，演进为支持
+          多模型、多 Agent 协作、MCP 协议、浏览器自动化的完整 Agent 产品。
+        </p>
+        <div class="hero-actions">
+          <a href="#install" class="btn btn-primary">
+            <span class="btn-icon">↓</span>
+            快速安装
+          </a>
+          <a href="https://github.com/itwanger/paicli" target="_blank" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/></svg>
+            GitHub
+          </a>
+        </div>
+        <div class="hero-stats">
+          <div class="stat">
+            <span class="stat-number">17</span>
+            <span class="stat-label">迭代期数</span>
+          </div>
+          <div class="stat">
+            <span class="stat-number">3+</span>
+            <span class="stat-label">LLM 模型</span>
+          </div>
+          <div class="stat">
+            <span class="stat-number">60+</span>
+            <span class="stat-label">MCP 工具</span>
+          </div>
+          <div class="stat">
+            <span class="stat-number">v16.1</span>
+            <span class="stat-label">最新版本</span>
+          </div>
+        </div>
+      </div>
+      <div class="hero-terminal">
+        <div class="terminal-window">
+          <div class="terminal-header">
+            <span class="terminal-dot dot-red"></span>
+            <span class="terminal-dot dot-yellow"></span>
+            <span class="terminal-dot dot-green"></span>
+            <span class="terminal-title">paiCLI — zsh</span>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-line"><span class="t-prompt">$</span> java -jar paicli.jar</div>
+            <div class="terminal-line t-dim">╔══════════════════════════════════╗</div>
+            <div class="terminal-line t-dim">║   <span class="t-accent">██████╗  █████╗ ██╗ ██████╗██╗</span> ║</div>
+            <div class="terminal-line t-dim">║   <span class="t-accent">██╔══██╗██╔══██╗██║██╔════╝██║</span> ║</div>
+            <div class="terminal-line t-dim">║   <span class="t-accent">██████╔╝███████║██║██║     ██║</span> ║</div>
+            <div class="terminal-line t-dim">║   <span class="t-accent">██╔═══╝ ██╔══██║██║██║     ██║</span> ║</div>
+            <div class="terminal-line t-dim">║   <span class="t-accent">██║     ██║  ██║██║╚██████╗██║</span> ║</div>
+            <div class="terminal-line t-dim">╚══════════════════════════════════╝</div>
+            <div class="terminal-line t-green">✅ API Key 已加载</div>
+            <div class="terminal-line t-green">🔄 使用 ReAct 模式</div>
+            <div class="terminal-line"><span class="t-prompt">👤 你:</span> <span class="t-cursor">▊</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- What is PaiCLI -->
+  <section class="section section-about" id="about">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-label">// 关于</span>
+        <h2>什么是 PaiCLI？</h2>
+      </div>
+      <div class="about-grid">
+        <div class="about-card">
+          <div class="about-icon">🎯</div>
+          <h3>对标 Claude Code</h3>
+          <p>以 Claude Code 为产品标杆，打造 Java 生态下最强大的终端 Agent。从第 1 期 ReAct 单代理循环，一路演进到第 16 期 TUI 产品化。</p>
+        </div>
+        <div class="about-card">
+          <div class="about-icon">☕</div>
+          <h3>纯 Java 实现</h3>
+          <p>基于 Java 17 + Maven 构建，零外部运行时依赖。OkHttp 做 HTTP 通信，Jackson 序列化，JLine3 做终端交互，SQLite 持久化。</p>
+        </div>
+        <div class="about-card">
+          <div class="about-icon">🧠</div>
+          <h3>多模型支持</h3>
+          <p>内置 GLM-5.1（200K）、DeepSeek V4（1M）、StepFun（256K）三个 LLM 客户端，<code>/model</code> 命令运行时热切换。</p>
+        </div>
+        <div class="about-card">
+          <div class="about-icon">🛡️</div>
+          <h3>安全可审计</h3>
+          <p>HITL 人工审批 + 路径围栏 + 命令黑名单 + 操作审计。不是沙箱，但提供生产可用的安全模型。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section section-features" id="features">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-label">// 能力</span>
+        <h2>核心特性</h2>
+        <p class="section-desc">16.1 期已完成，21 期路线持续扩展 Agent 产品能力矩阵</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-number">01</div>
+          <h3>ReAct 循环</h3>
+          <p>思考 → 行动 → 观察，支持流式推理展示、工具调用、对话历史管理、长上下文自动压缩。</p>
+          <div class="feature-tags">
+            <span>流式输出</span><span>工具调用</span><span>上下文压缩</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">02</div>
+          <h3>Plan & Execute</h3>
+          <p>复杂任务先规划再执行，DAG 依赖拓扑排序，并行批次推进，支持用户审阅与补充。</p>
+          <div class="feature-tags">
+            <span>DAG</span><span>并行执行</span><span>人工审阅</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">03</div>
+          <h3>Multi-Agent 协作</h3>
+          <p>规划者 + 执行者 + 检查者，主从架构编排，审查不过自动重试，Worker 并发执行。</p>
+          <div class="feature-tags">
+            <span>编排器</span><span>角色分工</span><span>质量审查</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">04</div>
+          <h3>Memory 系统</h3>
+          <p>短期记忆 + 长期记忆 + 摘要压缩 + 事实提取。跨会话复用稳定知识，智能检索相关上下文。</p>
+          <div class="feature-tags">
+            <span>长期记忆</span><span>摘要压缩</span><span>事实提取</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">05</div>
+          <h3>RAG 检索</h3>
+          <p>代码向量化 + SQLite 向量存储 + 语义检索 + AST 关系图谱。自然语言搜代码，理解代码结构。</p>
+          <div class="feature-tags">
+            <span>Embedding</span><span>语义搜索</span><span>代码图谱</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">06</div>
+          <h3>HITL 审批</h3>
+          <p>危险操作（写文件 / 执行命令 / 创建项目）人工审批。单字符交互：批准 / 放行 / 拒绝 / 跳过 / 改参。</p>
+          <div class="feature-tags">
+            <span>安全审批</span><span>路径围栏</span><span>操作审计</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">07</div>
+          <h3>MCP 协议</h3>
+          <p>支持 stdio 子进程 + Streamable HTTP 双传输。自动注册 60+ MCP 工具，resources 双轨与 @-mention。</p>
+          <div class="feature-tags">
+            <span>stdio</span><span>Streamable HTTP</span><span>resources</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">08</div>
+          <h3>Chrome DevTools</h3>
+          <p>集成 chrome-devtools-mcp，支持导航 / 快照 / 点击 / 填表 / 脚本执行。CDP 会话复用，登录态访问。</p>
+          <div class="feature-tags">
+            <span>浏览器自动化</span><span>登录态复用</span><span>SPA 渲染</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">09</div>
+          <h3>联网能力</h3>
+          <p>web_search（智谱 / SerpAPI / SearXNG）+ web_fetch（readability 提取 → Markdown）。安全策略内置。</p>
+          <div class="feature-tags">
+            <span>联网搜索</span><span>网页抓取</span><span>安全策略</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">10</div>
+          <h3>TUI 产品化</h3>
+          <p>三种 Renderer：inline 流式（默认）/ lanterna 全屏 / plain 兜底。行内折叠、diff、状态栏。</p>
+          <div class="feature-tags">
+            <span>inline TUI</span><span>lanterna</span><span>行内 diff</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">11</div>
+          <h3>Skill 系统</h3>
+          <p>从硬编码提示词中抽出可复用单元。SKILL.md 决策手册 + references 资料库 + 内置 web-access skill。</p>
+          <div class="feature-tags">
+            <span>可复用</span><span>三层加载</span><span>站点经验</span>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-number">12</div>
+          <h3>长上下文工程</h3>
+          <p>short / balanced / long 三种模式，自适应 RAG topK、MCP 索引注入。1M token window 支持。</p>
+          <div class="feature-tags">
+            <span>1M context</span><span>自适应</span><span>prompt cache</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Evolution -->
+  <section class="section section-evolution" id="evolution">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-label">// 演进</span>
+        <h2>21 期路线进度</h2>
+        <p class="section-desc">从 ReAct 到完整 Agent 产品，每一期都是质的飞跃</p>
+      </div>
+      <div class="timeline">
+        <div class="timeline-line"></div>
+        <div class="timeline-items">
+          <div class="tl-item">
+            <div class="tl-marker"><span>01</span></div>
+            <div class="tl-content">
+              <h4>ReAct Agent CLI</h4>
+              <p>单轮对话驱动的 ReAct 循环，支持文件操作、Shell 命令、项目创建。基础工具集建立。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>02</span></div>
+            <div class="tl-content">
+              <h4>Plan-and-Execute + DAG</h4>
+              <p>复杂任务规划能力。先拆解、再按依赖顺序执行，支持计划确认与补充。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>03</span></div>
+            <div class="tl-content">
+              <h4>Memory + 上下文工程</h4>
+              <p>短期 / 长期记忆、摘要压缩、事实提取、Token 预算管理。跨会话知识复用。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>04</span></div>
+            <div class="tl-content">
+              <h4>RAG 检索 + 代码库理解</h4>
+              <p>代码向量化、SQLite 向量存储、语义检索、AST 关系图谱。自然语言搜代码。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>05</span></div>
+            <div class="tl-content">
+              <h4>Multi-Agent 协作</h4>
+              <p>规划者 + 执行者 + 检查者，主从编排。审查未通过自动重试，Worker 并发。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>06</span></div>
+            <div class="tl-content">
+              <h4>HITL 人工审批</h4>
+              <p>危险操作审批流。路径围栏、命令黑名单、操作审计。三级危险等级。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>07</span></div>
+            <div class="tl-content">
+              <h4>异步执行 + 并行工具</h4>
+              <p>同一轮多工具并行执行。Plan / Team 按依赖批次并发。统一超时与取消。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>08</span></div>
+            <div class="tl-content">
+              <h4>多模型适配</h4>
+              <p>GLM-5.1 / DeepSeek V4 / StepFun 三模型。<code>/model</code> 运行时热切换。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>09</span></div>
+            <div class="tl-content">
+              <h4>联网能力</h4>
+              <p>web_search（三 provider）+ web_fetch（readability 提取）。内置安全策略。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>10</span></div>
+            <div class="tl-content">
+              <h4>MCP 协议核心</h4>
+              <p>stdio + Streamable HTTP 双传输。自动注册工具，schema 清洗。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>11</span></div>
+            <div class="tl-content">
+              <h4>MCP 高级能力</h4>
+              <p>resources 双轨、prompts 查看、@-mention、被动通知、运行中取消。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>12</span></div>
+            <div class="tl-content">
+              <h4>长上下文工程</h4>
+              <p>三种上下文模式、动态预算、prompt cache 可见化。DeepSeek V4 1M window。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>13</span></div>
+            <div class="tl-content">
+              <h4>Chrome DevTools MCP</h4>
+              <p>集成 chrome-devtools-mcp。浏览器导航、快照、点击、填表。SPA / 防爬墙覆盖。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>14</span></div>
+            <div class="tl-content">
+              <h4>CDP 会话复用</h4>
+              <p>登录态访问、敏感页面策略、<code>/browser</code> 命令组。复用日常 Chrome。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>15</span></div>
+            <div class="tl-content">
+              <h4>Skill 系统</h4>
+              <p>SKILL.md 决策手册 + references 资料库。内置 web-access skill，站点经验可积累。</p>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-marker"><span>16</span></div>
+            <div class="tl-content">
+              <h4>TUI 产品化</h4>
+              <p>Renderer 接口 + 三种实现（inline / lanterna / plain）。行内折叠、diff、状态栏。</p>
+            </div>
+          </div>
+          <div class="tl-item tl-item-next">
+            <div class="tl-marker tl-marker-next"><span>17</span></div>
+            <div class="tl-content">
+              <h4>LSP 诊断注入 <span class="tl-badge">进行中</span></h4>
+              <p>Agent 改完代码后，自动收集编译诊断并在下一轮推理前注入。</p>
+            </div>
+          </div>
+          <div class="tl-item tl-item-planned">
+            <div class="tl-marker tl-marker-planned"><span>18</span></div>
+            <div class="tl-content">
+              <h4>Git Side-History 快照与回滚 <span class="tl-badge tl-badge-planned">计划</span></h4>
+              <p>Turn 粒度自动快照，支持不污染用户 Git 历史的一键恢复。</p>
+            </div>
+          </div>
+          <div class="tl-item tl-item-planned">
+            <div class="tl-marker tl-marker-planned"><span>19</span></div>
+            <div class="tl-content">
+              <h4>Prompt 分层架构 <span class="tl-badge tl-badge-planned">计划</span></h4>
+              <p>把硬编码 system prompt 拆成可维护、可覆盖的 Markdown 分层。</p>
+            </div>
+          </div>
+          <div class="tl-item tl-item-planned">
+            <div class="tl-marker tl-marker-planned"><span>20</span></div>
+            <div class="tl-content">
+              <h4>异步后台任务 + Runtime API <span class="tl-badge tl-badge-planned">计划</span></h4>
+              <p>持久化任务队列与 HTTP/SSE Runtime API，面向无头和集成场景。</p>
+            </div>
+          </div>
+          <div class="tl-item tl-item-planned">
+            <div class="tl-marker tl-marker-planned"><span>21</span></div>
+            <div class="tl-content">
+              <h4>多模态 LLM 输入 <span class="tl-badge tl-badge-planned">计划</span></h4>
+              <p>在安全网和架构就绪后，再接通截图、图片和图表的 vision 输入。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Install -->
+  <section class="section section-install" id="install">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-label">// 开始</span>
+        <h2>快速安装</h2>
+        <p class="section-desc">Java 17 + Maven，三分钟跑起来</p>
+      </div>
+      <div class="install-steps">
+        <div class="install-step">
+          <div class="step-number">1</div>
+          <div class="step-content">
+            <h4>配置 API Key</h4>
+            <div class="code-block">
+              <div class="code-header"><span>terminal</span></div>
+              <pre><code>cp .env.example .env
+<span class="c-comment"># 编辑 .env，填入 API Key</span>
+<span class="c-key">GLM_API_KEY</span>=your_api_key_here
+<span class="c-key">DEEPSEEK_API_KEY</span>=your_deepseek_key_here
+<span class="c-key">STEP_API_KEY</span>=your_step_key_here</code></pre>
+            </div>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="step-number">2</div>
+          <div class="step-content">
+            <h4>编译运行</h4>
+            <div class="code-block">
+              <div class="code-header"><span>terminal</span></div>
+              <pre><code><span class="c-comment"># 编译打包</span>
+mvn clean package
+
+<span class="c-comment"># 启动 PaiCLI</span>
+java -jar target/paicli-1.0-SNAPSHOT.jar
+
+<span class="c-comment"># 或直接运行（无需先 package）</span>
+mvn clean compile exec:java \
+  -Dexec.mainClass=<span class="c-string">"com.paicli.cli.Main"</span></code></pre>
+            </div>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="step-number">3</div>
+          <div class="step-content">
+            <h4>开始使用</h4>
+            <div class="code-block">
+              <div class="code-header"><span>paiCLI session</span></div>
+              <pre><code><span class="c-dim">╔══════════════════════════════════╗
+║   PaiCLI  v16.1.0              ║
+╚══════════════════════════════════╝</span>
+
+✅ <span class="c-green">API Key 已加载</span>
+🔄 <span class="c-green">使用 ReAct 模式</span>
+
+<span class="c-prompt">👤 你:</span> 创建一个 Java 项目叫 myapp
+
+<span class="c-prompt">🤖 回复:</span>
+已成功创建 Java 项目 "myapp"，
+包含完整的 Maven 结构。</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="install-extra">
+        <p>可选：配置 MCP server（默认自动创建 chrome-devtools 配置）</p>
+        <div class="code-block">
+          <div class="code-header"><span>~/.paicli/mcp.json</span></div>
+          <pre><code>{
+  <span class="c-key">"mcpServers"</span>: {
+    <span class="c-key">"chrome-devtools"</span>: {
+      <span class="c-key">"command"</span>: <span class="c-string">"npx"</span>,
+      <span class="c-key">"args"</span>: [<span class="c-string">"-y"</span>, <span class="c-string">"chrome-devtools-mcp@latest"</span>]
+    }
+  }
+}</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Architecture -->
+  <section class="section section-arch" id="architecture">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-label">// 架构</span>
+        <h2>技术架构</h2>
+        <p class="section-desc">清晰的分层设计，每个模块职责明确</p>
+      </div>
+      <div class="arch-diagram">
+        <div class="arch-layer arch-layer-top">
+          <div class="arch-box arch-cli">CLI · TUI</div>
+          <div class="arch-arrow">→</div>
+          <div class="arch-box arch-agent">Agent 核心</div>
+        </div>
+        <div class="arch-layer arch-layer-mid">
+          <div class="arch-box arch-plan">Plan</div>
+          <div class="arch-box arch-tool">Tool</div>
+          <div class="arch-box arch-memory">Memory</div>
+          <div class="arch-box arch-rag">RAG</div>
+          <div class="arch-box arch-skill">Skill</div>
+          <div class="arch-box arch-hitl">HITL</div>
+        </div>
+        <div class="arch-layer arch-layer-bot">
+          <div class="arch-box arch-mcp">MCP</div>
+          <div class="arch-box arch-web">Web</div>
+          <div class="arch-box arch-llm">LLM</div>
+          <div class="arch-box arch-context">Context</div>
+          <div class="arch-box arch-policy">Policy</div>
+          <div class="arch-box arch-browser">Browser</div>
+        </div>
+      </div>
+      <div class="tech-stack">
+        <h4>技术栈</h4>
+        <div class="tech-tags">
+          <span>Java 17</span><span>Maven</span><span>OkHttp</span><span>Jackson</span>
+          <span>JLine3</span><span>SQLite</span><span>JavaParser</span><span>Ollama</span>
+          <span>GLM-5.1</span><span>DeepSeek V4</span><span>StepFun</span><span>MCP</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Commands Reference -->
+  <section class="section section-commands" id="commands">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-label">// 命令</span>
+        <h2>CLI 命令速查</h2>
+      </div>
+      <div class="commands-grid">
+        <div class="cmd-card">
+          <code>/plan</code>
+          <span>Plan-and-Execute 模式</span>
+        </div>
+        <div class="cmd-card">
+          <code>/team</code>
+          <span>Multi-Agent 协作</span>
+        </div>
+        <div class="cmd-card">
+          <code>/cancel</code>
+          <span>取消当前任务</span>
+        </div>
+        <div class="cmd-card">
+          <code>/model</code>
+          <span>切换 LLM 模型</span>
+        </div>
+        <div class="cmd-card">
+          <code>/hitl on|off</code>
+          <span>审批开关</span>
+        </div>
+        <div class="cmd-card">
+          <code>/mcp</code>
+          <span>MCP server 管理</span>
+        </div>
+        <div class="cmd-card">
+          <code>/memory</code>
+          <span>记忆系统状态</span>
+        </div>
+        <div class="cmd-card">
+          <code>/save &lt;事实&gt;</code>
+          <span>保存长期记忆</span>
+        </div>
+        <div class="cmd-card">
+          <code>/index</code>
+          <span>索引代码库</span>
+        </div>
+        <div class="cmd-card">
+          <code>/search</code>
+          <span>语义检索代码</span>
+        </div>
+        <div class="cmd-card">
+          <code>/browser</code>
+          <span>浏览器会话管理</span>
+        </div>
+        <div class="cmd-card">
+          <code>/skill</code>
+          <span>Skill 管理</span>
+        </div>
+        <div class="cmd-card">
+          <code>/policy</code>
+          <span>安全策略状态</span>
+        </div>
+        <div class="cmd-card">
+          <code>/audit</code>
+          <span>操作审计日志</span>
+        </div>
+        <div class="cmd-card">
+          <code>/clear</code>
+          <span>清空对话历史</span>
+        </div>
+        <div class="cmd-card">
+          <code>/exit</code>
+          <span>退出程序</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="footer-logo">
+            <span class="logo-bracket">{</span>
+            <span>PaiCLI</span>
+            <span class="logo-bracket">}</span>
+          </div>
+          <p>Terminal-First Agent IDE<br>作者：<a href="https://github.com/itwanger" target="_blank">沉默王二</a></p>
+        </div>
+        <div class="footer-links">
+          <h5>项目</h5>
+          <a href="https://github.com/itwanger/paicli" target="_blank">GitHub</a>
+          <a href="https://github.com/itwanger/paicli/blob/main/README.md" target="_blank">README</a>
+          <a href="https://github.com/itwanger/paicli/blob/main/ROADMAP.md" target="_blank">路线图</a>
+          <a href="https://github.com/itwanger/paicli/blob/main/AGENTS.md" target="_blank">开发者指南</a>
+        </div>
+        <div class="footer-links">
+          <h5>文档</h5>
+          <a href="#features">核心特性</a>
+          <a href="#evolution">演进历程</a>
+          <a href="#install">快速安装</a>
+          <a href="#architecture">技术架构</a>
+        </div>
+        <div class="footer-links">
+          <h5>技术栈</h5>
+          <span>Java 17</span>
+          <span>Maven</span>
+          <span>GLM-5.1</span>
+          <span>DeepSeek V4</span>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2025 PaiCLI · MIT License · Built with ☕ in Java</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -72,6 +72,14 @@ public class PaiCliConfig {
         return loadModelFromEnv(provider);
     }
 
+    public String getBaseUrl(String provider) {
+        ProviderConfig providerConfig = providers.get(provider);
+        if (providerConfig != null && providerConfig.getBaseUrl() != null && !providerConfig.getBaseUrl().isBlank()) {
+            return providerConfig.getBaseUrl();
+        }
+        return loadBaseUrlFromEnv(provider);
+    }
+
     public static PaiCliConfig load() {
         if (Files.exists(CONFIG_FILE)) {
             try {
@@ -116,7 +124,27 @@ public class PaiCliConfig {
         String envKey = switch (provider.toLowerCase()) {
             case "glm" -> "GLM_API_KEY";
             case "deepseek" -> "DEEPSEEK_API_KEY";
+            case "step" -> "STEP_API_KEY";
             default -> provider.toUpperCase() + "_API_KEY";
+        };
+
+        String envValue = System.getenv(envKey);
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue.trim();
+        }
+
+        String dotEnvValue = readFromDotEnv(envKey);
+        if (dotEnvValue != null && !dotEnvValue.isBlank()) {
+            return dotEnvValue.trim();
+        }
+
+        return null;
+    }
+
+    private static String loadBaseUrlFromEnv(String provider) {
+        String envKey = switch (provider.toLowerCase()) {
+            case "step" -> "STEP_BASE_URL";
+            default -> provider.toUpperCase() + "_BASE_URL";
         };
 
         String envValue = System.getenv(envKey);

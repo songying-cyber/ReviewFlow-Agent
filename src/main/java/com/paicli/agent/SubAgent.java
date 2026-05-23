@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.context.TokenUsageFormatter;
 import com.paicli.llm.LlmClient;
+import com.paicli.lsp.LspDiagnosticReport;
 import com.paicli.memory.ConversationHistoryCompactor;
 import com.paicli.context.ContextProfile;
 import com.paicli.skill.SkillContextBuffer;
@@ -278,6 +279,7 @@ public class SubAgent {
             budget.beginIteration();
 
             // 调 LLM 前评估 conversationHistory 是否接近 window 上限；超阈值压缩早期消息为摘要。
+            injectPendingLspDiagnostics(out);
             maybeCompactHistory(out);
 
             try {
@@ -372,6 +374,16 @@ public class SubAgent {
      */
     private boolean shouldUseTools() {
         return role == AgentRole.WORKER;
+    }
+
+    private void injectPendingLspDiagnostics(PrintStream out) {
+        LspDiagnosticReport report = toolRegistry.flushPendingLspDiagnostics();
+        if (report == null || report.isEmpty()) {
+            return;
+        }
+        conversationHistory.add(LlmClient.Message.user(report.promptText()));
+        out.println(report.displayText());
+        log.info("[{}] injected LSP diagnostics into sub-agent conversation", name);
     }
 
     private List<ToolExecutionResult> executeToolCalls(List<LlmClient.ToolCall> toolCalls) {

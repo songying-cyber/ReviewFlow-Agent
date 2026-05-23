@@ -9,6 +9,8 @@ import com.paicli.browser.BrowserCheckResult;
 import com.paicli.browser.BrowserConnector;
 import com.paicli.browser.BrowserGuard;
 import com.paicli.context.ContextProfile;
+import com.paicli.lsp.LspDiagnosticReport;
+import com.paicli.lsp.LspManager;
 import com.paicli.mcp.protocol.McpToolDescriptor;
 import com.paicli.rag.CodeRetriever;
 import com.paicli.rag.SearchResultFormatter;
@@ -18,6 +20,8 @@ import com.paicli.policy.CommandGuard;
 import com.paicli.policy.PathGuard;
 import com.paicli.policy.PolicyException;
 import com.paicli.runtime.CancellationContext;
+import com.paicli.snapshot.RestoreResult;
+import com.paicli.snapshot.SnapshotService;
 import com.paicli.skill.Skill;
 import com.paicli.skill.SkillContextBuffer;
 import com.paicli.skill.SkillRegistry;
@@ -52,7 +56,7 @@ public class ToolRegistry {
     // 5MB 对常规代码生成 / 文档撰写完全够用，超过即拒，避免磁盘灌满与误覆盖。
     private static final int MAX_WRITE_FILE_BYTES = 5 * 1024 * 1024;
     // 需要审计的内置工具（与 ApprovalPolicy 的 DANGEROUS_TOOLS 保持一致）；MCP 工具按前缀动态纳入审计。
-    private static final Set<String> AUDIT_TOOLS = Set.of("write_file", "execute_command", "create_project");
+    private static final Set<String> AUDIT_TOOLS = Set.of("write_file", "execute_command", "create_project", "revert_turn");
     private final Map<String, Tool> tools = new ConcurrentHashMap<>();
     private final Map<String, McpRegisteredTool> mcpTools = new ConcurrentHashMap<>();
     private final long commandTimeoutSeconds;
@@ -72,6 +76,9 @@ public class ToolRegistry {
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
     private java.util.function.BiConsumer<String, String[]> writeFileObserver = (p, ba) -> {};
+    private LspManager lspManager = new LspManager(projectPath);
+    private SnapshotService snapshotService = SnapshotService.forProject(Path.of(projectPath));
+    private boolean customSnapshotService;
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -93,6 +100,7 @@ public class ToolRegistry {
         registerBrowserTools();
         registerMemoryTools();
         registerSkillTools();
+        registerSnapshotTools();
     }
 
     /**
@@ -101,6 +109,11 @@ public class ToolRegistry {
     public void setProjectPath(String projectPath) {
         this.projectPath = projectPath;
         this.pathGuard = new PathGuard(projectPath);
+        this.lspManager.setProjectPath(projectPath);
+        if (!customSnapshotService) {
+            this.snapshotService.close();
+            this.snapshotService = SnapshotService.forProject(Path.of(projectPath));
+        }
     }
 
     /**
@@ -162,6 +175,24 @@ public class ToolRegistry {
         this.writeFileObserver = observer == null ? (p, ba) -> {} : observer;
     }
 
+    public void setLspManager(LspManager lspManager) {
+        this.lspManager = lspManager == null ? new LspManager(projectPath) : lspManager;
+        this.lspManager.setProjectPath(projectPath);
+    }
+
+    public LspDiagnosticReport flushPendingLspDiagnostics() {
+        return lspManager == null ? LspDiagnosticReport.EMPTY : lspManager.flushPendingDiagnostics();
+    }
+
+    public SnapshotService getSnapshotService() {
+        return snapshotService;
+    }
+
+    public void setSnapshotService(SnapshotService snapshotService) {
+        this.snapshotService = snapshotService == null ? SnapshotService.forProject(Path.of(projectPath)) : snapshotService;
+        this.customSnapshotService = snapshotService != null;
+    }
+
     /**
      * 注册文件操作工具
      */
@@ -217,6 +248,7 @@ public class ToolRegistry {
                         } catch (Exception ignored) {
                             // observer 失败不能影响 write_file 主路径
                         }
+                        runPostEditLspHook(path, safe);
                         return "文件已写入: " + path;
                     } catch (Exception e) {
                         return "写入文件失败: " + e.getMessage();
@@ -464,6 +496,23 @@ public class ToolRegistry {
         ));
     }
 
+    private void registerSnapshotTools() {
+        tools.put("revert_turn", new Tool(
+                "revert_turn",
+                "恢复到 Side-Git 记录的最近第 N 个 pre-turn 快照。会先记录 pre-restore 快照；属于高危写入操作，必须经 HITL 审批。",
+                createParameters(new Param("offset", "integer", "要恢复的 pre-turn 快照序号，1 表示最近一次任务开始前", false)),
+                args -> {
+                    int offset = parseInt(args.get("offset"), 1);
+                    try {
+                        RestoreResult result = snapshotService.restorePreTurn(Math.max(1, offset));
+                        return result.formatForCli();
+                    } catch (Exception e) {
+                        return "恢复快照失败: " + e.getMessage();
+                    }
+                }
+        ));
+    }
+
     private static int parseInt(String value, int fallback) {
         if (value == null || value.isBlank()) return fallback;
         try {
@@ -514,6 +563,16 @@ public class ToolRegistry {
             return formatSearchResults(provider.name(), query, results);
         } catch (Exception e) {
             return "搜索失败 (" + provider.name() + "): " + e.getMessage();
+        }
+    }
+
+    private void runPostEditLspHook(String displayPath, Path safePath) {
+        try {
+            if (lspManager != null) {
+                lspManager.runPostEditLspHook(displayPath, safePath);
+            }
+        } catch (Exception ignored) {
+            // LSP 诊断是 post-edit 辅助信号，失败不能影响工具主结果。
         }
     }
 

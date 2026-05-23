@@ -9,17 +9,19 @@ public class LlmClientFactory {
     public static LlmClient create(String provider, PaiCliConfig config) {
         if (provider == null) return null;
 
-        String normalized = provider.toLowerCase();
+        String normalized = normalizeProvider(provider);
         String apiKey = config.getApiKey(normalized);
         if (apiKey == null || apiKey.isBlank()) {
             return null;
         }
 
         String model = config.getModel(normalized);
+        String baseUrl = config.getBaseUrl(normalized);
 
         return switch (normalized) {
             case "glm" -> new GLMClient(apiKey, model);
             case "deepseek" -> new DeepSeekClient(apiKey, model);
+            case "step" -> new StepClient(apiKey, model, baseUrl);
             default -> null;
         };
     }
@@ -30,7 +32,7 @@ public class LlmClientFactory {
             return client;
         }
 
-        for (String provider : new String[]{"glm", "deepseek"}) {
+        for (String provider : new String[]{"glm", "deepseek", "step"}) {
             client = create(provider, config);
             if (client != null) {
                 return client;
@@ -38,5 +40,13 @@ public class LlmClientFactory {
         }
 
         return null;
+    }
+
+    private static String normalizeProvider(String provider) {
+        String normalized = provider.trim().toLowerCase();
+        return switch (normalized) {
+            case "stepfun", "step-fun" -> "step";
+            default -> normalized;
+        };
     }
 }

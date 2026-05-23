@@ -64,6 +64,7 @@ class MainInputNormalizationTest {
         String choices = Main.formatSlashCommandChoices(120);
 
         assertTrue(choices.contains("/model glm"), choices);
+        assertTrue(choices.contains("/model step"), choices);
         assertTrue(choices.contains("/browser status"), choices);
         assertFalse(choices.contains("do you wish"), choices);
         assertTrue(choices.lines().count() < Main.slashCommandHints().size(),

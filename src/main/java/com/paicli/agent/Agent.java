@@ -3,6 +3,7 @@ package com.paicli.agent;
 import com.paicli.llm.LlmClient;
 import com.paicli.context.ContextProfile;
 import com.paicli.context.TokenUsageFormatter;
+import com.paicli.lsp.LspDiagnosticReport;
 import com.paicli.memory.ConversationHistoryCompactor;
 import com.paicli.memory.ExplicitMemoryHints;
 import com.paicli.memory.MemoryManager;
@@ -197,6 +198,7 @@ public class Agent {
             // 调 LLM 前评估 conversationHistory 是否接近 window 上限；超阈值就把早期消息压缩成摘要。
             // 这是与第 3 期 Memory 短期记忆压缩并行的另一道压缩——后者只压 shortTermMemory，
             // 真正决定下一轮 LLM input token 的是这里。
+            injectPendingLspDiagnostics();
             maybeCompactHistory();
             AgentBudget.ExitReason exitReason = budget.check();
             if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
@@ -341,6 +343,16 @@ public class Agent {
         } catch (Exception e) {
             log.warn("conversationHistory compaction failed", e);
         }
+    }
+
+    private void injectPendingLspDiagnostics() {
+        LspDiagnosticReport report = toolRegistry.flushPendingLspDiagnostics();
+        if (report == null || report.isEmpty()) {
+            return;
+        }
+        conversationHistory.add(LlmClient.Message.user(report.promptText()));
+        renderer().stream().println(report.displayText());
+        log.info("Injected LSP diagnostics into ReAct conversation");
     }
 
     private String buildSkillIndex() {

@@ -84,7 +84,7 @@
 - take_snapshot 返回结构化 DOM 文本，LLM 直接能理解
 - 90% 浏览器自动化场景（操作 SPA、读动态内容、提交表单）take_snapshot 就够
 - screenshot 只在用户明确要看页面时才用，结果由 LLM 向用户口头描述
-- 真 multimodal 涉及 LlmClient.Message 协议升级（content 从 String → List<ContentPart>），各 LlmClient 实现适配，工作量大，**留作独立期次（暂定第 17 期"多模态 LLM 输入"）**
+- 真 multimodal 涉及 LlmClient.Message 协议升级（content 从 String → List<ContentPart>），各 LlmClient 实现适配，工作量大，**留作第 21 期"多模态 LLM 输入（vision）"**
 
 ### 3.3 HITL「全部放行」改为 server 维度
 
@@ -468,7 +468,7 @@ LLM 应该调 take_screenshot，但 PaiCLI 把 image fallback 给 LLM 后，LLM 
 
 ## 11. 明确不做（留给后续期次）
 
-- **真 multimodal LLM 输入**（Message.content 升级为 List<ContentPart>，含 image_base64 / image_url；各 LlmClient 适配 vision API）→ **拆到独立第 17 期「多模态 LLM 输入」**
+- **真 multimodal LLM 输入**（Message.content 升级为 List<ContentPart>，含 image_base64 / image_url；各 LlmClient 适配 vision API）→ **拆到第 21 期「多模态 LLM 输入（vision）」**
 - **CDP 会话复用 / 登录态访问**（chrome-devtools-mcp 已原生支持 `--browser-url`，但接入 + 登录态识别 + 敏感页面 HITL 留给第 14 期）
 - **Playwright / Firefox / WebKit 跨浏览器** —— chrome-devtools-mcp 专精 Chrome，不并行
 - **浏览器自动化 DSL / 工作流**（连续操作打包成可复用 Skill 留第 15 期）
@@ -521,7 +521,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 | Chrome DevTools MCP server 选哪个 | Google 官方 `chrome-devtools-mcp@latest` |
 | 默认 enabled / disabled | **enabled** |
 | image content 处理 | 路线 B：fallback 文案引导 take_snapshot 优先；不做 multimodal |
-| 多模态 LLM 输入 | **拆到独立第 17 期**，本期不做 |
+| 多模态 LLM 输入 | **拆到第 21 期**，本期不做 |
 | HITL「全部放行」维度 | 改 server 维度，但保留 tool 维度兼容；用户选 `a` 时进子菜单 |
 | 第 14 期范围 | **保持原计划**（CDP 会话复用 + 登录态识别），不缩减 |
 | 启动延迟容忍 | initialize 超时 60s + 进度打印 |

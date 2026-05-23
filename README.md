@@ -2,6 +2,8 @@
 
 一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十六期的 `TUI 产品化`。
 
+当前进度：已完成第 16.1 期 inline 流式 TUI 形态修正、第 17 期 `LSP 诊断注入` MVP，并开始落地第 18 期 `Git Side-History 快照与回滚`。第 19–20 期依次推进 Prompt 分层架构、异步后台任务 + Runtime API，第 21 期再做 `多模态 LLM 输入（vision）`。
+
 ## 测试策略
 
 日常开发不需要每次都跑全量测试。推荐按改动范围选择：
@@ -60,7 +62,7 @@ mvn test
 
 ### 第六期：Human-in-the-Loop + 审批流
 
-- 危险操作静态规则识别：`write_file`、`execute_command`、`create_project`
+- 危险操作静态规则识别：`write_file`、`execute_command`、`create_project`、`revert_turn`
 - 三级危险等级：高危（`execute_command`）、中危（`write_file` / `create_project`）
 - 审批决策：批准 / 全部放行 / 拒绝 / 跳过 / 修改参数后执行
 - HITL 默认关闭，通过 `/hitl on` 启用
@@ -77,9 +79,9 @@ mvn test
 ### 第八期：多模型适配 + 运行时切换
 
 - `LlmClient` 接口抽象 + `AbstractOpenAiCompatibleClient` 模板基类
-- 内置 `GLMClient`、`DeepSeekClient` 两个瘦实现，各约 20 行
-- `/model glm` / `/model deepseek` 运行时切换当前对话模型
-- 配置持久化到 `~/.paicli/config.json`，API Key 从 `.env` 回退读取
+- 内置 `GLMClient`、`DeepSeekClient`、`StepClient` 三个瘦实现
+- `/model glm` / `/model deepseek` / `/model step` 运行时切换当前对话模型
+- 配置持久化到 `~/.paicli/config.json`，API Key 可从配置、环境变量或 `.env` 读取
 
 ### 第九期：联网能力 + Web 工具
 
@@ -104,7 +106,7 @@ mvn test
 ### 第十二期：长上下文工程
 
 - `LlmClient` 声明模型能力：`maxContextWindow()`、`supportsPromptCaching()`、`promptCacheMode()`
-- GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window
+- GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window，StepFun 默认 256k window
 - `AgentBudget` 按当前模型动态计算预算，默认 `80% * maxContextWindow`，仍可用系统属性覆盖
 - short / balanced / long 三种上下文模式：长上下文模式跳过摘要压缩，RAG 默认 topK 提升到 20
 - `search_code` 未显式传 `top_k` 时按上下文模式自适应
@@ -118,7 +120,7 @@ mvn test
 - `~/.paicli/mcp.json` 不存在时启动自动创建模板，默认使用 `--isolated=true` 临时浏览器 profile
 - 用于处理 SPA / JS 渲染 / 防爬墙 / 表单交互页面；微信公众号文章、知乎专栏、推特、小红书等 `web_fetch` 失败站点会引导走浏览器 MCP
 - HITL 的“全部放行”支持 MCP server 维度，连续浏览器操作可对 `chrome-devtools` 一次确认
-- `image` 类型结果仍不进入多模态模型输入，fallback 文案会引导优先使用 `take_snapshot` 获取 DOM 文本
+- `image` 类型结果仍不进入多模态模型输入（已后移到第 21 期 vision），fallback 文案会引导优先使用 `take_snapshot` 获取 DOM 文本
 - MCP initialize 默认超时提升到 60 秒，并在长启动期间打印等待进度
 
 ### 第十四期：CDP 会话复用 + 登录态访问
@@ -165,13 +167,31 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - `PAICLI_NO_STATUSBAR=true` 在 inline 模式下禁用底部状态栏（不支持 DECSTBM 的终端）
 - `NO_COLOR=1` 禁用所有 ANSI 颜色，保留布局
 
+### 第十七期：LSP 诊断注入（MVP）
+
+- `write_file` 成功后触发 post-edit 诊断，诊断结果不会阻塞工具主流程
+- 当前 MVP 对 Java 文件使用 JavaParser 做轻量语法诊断，不依赖本机安装 JDT LS
+- ReAct、Plan-and-Execute、Multi-Agent 三条路径都会在下一轮 LLM 请求前注入 pending 诊断
+- 诊断按 error / warning / info、文件、行列号、message 格式化，默认最多注入 20 条
+- 配置：`PAICLI_LSP_ENABLED=false` 可关闭，`PAICLI_LSP_MAX_DIAGNOSTICS=20` 可调整注入上限
+- 后续增强：接入 JDT LS / rust-analyzer / pyright / gopls 的 stdio JSON-RPC transport
+
+### 第十八期：Git Side-History 快照与回滚（MVP）
+
+- 每个 ReAct / Plan / Team turn 开始前创建 `pre-turn` 快照，结束后异步创建 `post-turn` 快照
+- 快照仓库使用 JGit 纯 Java 实现，默认位于 `~/.paicli/snapshots/<project_hash>/<worktree_hash>/.git`，不写用户项目 `.git`
+- `/snapshot` 查看最近快照，`/snapshot status` 查看配置与 side-git 目录，`/snapshot clean` 清理当前项目快照目录
+- `/restore <N>` 恢复到最近第 N 个 `pre-turn` 快照；恢复前会先创建 `pre-restore` 快照
+- Agent 内置 `revert_turn` 工具，纳入 HITL 与 AuditLog 危险工具链
+- 配置：`PAICLI_SNAPSHOT_ENABLED=false` 可关闭，`PAICLI_SNAPSHOT_MAX=50`、`PAICLI_SNAPSHOT_EXCLUDES=...`、`PAICLI_SNAPSHOT_DIR=...` 可调整策略
+
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
 `com.paicli.policy` 包，作为 HITL 之外的辅助层（不是沙箱、不提供进程隔离）：
 
 - `PathGuard` 路径围栏：文件类工具强制限定在项目根之内，拦截绝对路径外逃 / `..` 穿越 / 符号链接逃逸
 - `CommandGuard` 命令快速拒绝：HITL 之前的 fast-fail 黑名单（`sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` / `find /` / `chmod 777 /` / `shutdown`），减少 HITL 弹窗骚扰
-- `AuditLog` 结构化审计：危险工具调用按天写 JSONL 到 `~/.paicli/audit/`，含 `outcome (allow|deny|error)` 与 `approver (hitl|policy|none)`
+- `AuditLog` 结构化审计：危险工具调用按天写 JSONL 到 `~/.paicli/audit/`，含 `outcome (allow|deny|error)` 与 `approver (hitl|policy|none)`；`revert_turn` 也纳入危险工具链
 - `write_file` 单文件 5MB 上限
 - CLI 命令：`/policy` 查看安全策略状态、`/audit [N]` 看最近 N 条审计
 
@@ -241,7 +261,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 ### 第六期
 
-- 🔒 危险操作静态规则识别（`write_file` / `execute_command` / `create_project`）
+- 🔒 危险操作静态规则识别（`write_file` / `execute_command` / `create_project` / `revert_turn`）
 - ⚠️ 三级危险等级展示（高危 / 中危 / 安全）
 - ✅ 审批决策：批准、全部放行、拒绝、跳过、修改参数后执行
 - 🔓 HITL 默认关闭，`/hitl on` 启用、`/hitl off` 关闭
@@ -255,7 +275,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 ### 第八期
 
-- 🔄 GLM-5.1 与 DeepSeek V4 双模型，`/model glm` / `/model deepseek` 运行时切换
+- 🔄 GLM-5.1、DeepSeek V4 与阶跃星辰 StepFun 多模型，`/model glm` / `/model deepseek` / `/model step` 运行时切换
 - 🧱 `LlmClient` 接口 + 模板方法基类，新增 provider 只需 ~20 行
 - 💾 默认模型持久化到 `~/.paicli/config.json`
 
@@ -278,7 +298,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 ### 1. 配置 API Key
 
-复制 `.env.example` 为 `.env`，并填入你的 GLM API Key：
+复制 `.env.example` 为 `.env`，并填入你的 GLM、DeepSeek 或 StepFun API Key：
 
 ```bash
 cp .env.example .env
@@ -289,6 +309,9 @@ cp .env.example .env
 
 ```bash
 export GLM_API_KEY=your_api_key_here
+# 或
+export STEP_API_KEY=your_step_api_key_here
+export STEP_MODEL=step-3.5-flash
 ```
 
 长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
@@ -519,12 +542,13 @@ I
 - `search_code` - 语义检索代码库（自然语言查询）
 - `web_search` - 搜索互联网获取实时信息
 - `web_fetch` - 抓取已知 URL 并提取正文 Markdown
+- `revert_turn` - 恢复到最近第 N 个 pre-turn 快照（走 HITL 与审计）
 - `mcp__{server}__{tool}` - MCP server 动态提供的外部工具
 - `mcp__{server}__list_resources` / `mcp__{server}__read_resource` - 支持 resources 的 MCP server 自动注册的虚拟工具
 
 同一轮模型返回多个工具调用时，PaiCLI 会并行执行这些工具；如果工具之间有依赖关系，模型应分多轮调用。
 
-文件类工具（`read_file` / `write_file` / `list_dir` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。所有 `mcp__` 前缀工具默认触发 HITL 和审计。详见 `/policy`。
+文件类工具（`read_file` / `write_file` / `list_dir` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。`revert_turn` 会批量回写工作区，默认触发 HITL 和审计。所有 `mcp__` 前缀工具默认触发 HITL 和审计。详见 `/policy`。
 
 ## 命令
 
@@ -545,6 +569,10 @@ I
 - `/mcp prompts <name>` - 查看 MCP server 暴露的 prompts（只查看，不注入对话）
 - `/policy` - 查看安全策略状态（路径围栏 / 命令黑名单 / 资源上限 / 审计目录）
 - `/audit [N]` - 查看今日最近 N 条危险工具审计记录（默认 10）
+- `/snapshot` - 查看最近 Side-Git 快照
+- `/snapshot status` - 查看 Side-Git 快照状态
+- `/snapshot clean` - 清理当前项目 Side-Git 快照目录
+- `/restore <N>` - 恢复到最近第 N 个 pre-turn 快照
 - `/memory` / `/mem` - 查看记忆系统状态
 - `/memory clear` - 清空长期记忆
 - `/save <事实>` - 手动保存关键事实到长期记忆
@@ -643,7 +671,9 @@ src/main/java/com/paicli
 │   ├── CliCommandParser.java   # 命令解析
 │   └── PlanReviewInputParser.java  # 计划审核输入
 ├── llm/
-│   └── GLMClient.java          # GLM-5.1 API 客户端
+│   ├── GLMClient.java          # GLM-5.1 API 客户端
+│   ├── DeepSeekClient.java     # DeepSeek API 客户端
+│   └── StepClient.java         # 阶跃星辰 StepFun API 客户端
 ├── context/
 │   ├── ContextMode.java        # short / balanced / long 模式
 │   ├── ContextProfile.java     # 模型窗口与上下文策略

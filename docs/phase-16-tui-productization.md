@@ -371,7 +371,7 @@ dist
 
 - `AGENTS.md`：项目快照里把第 16 期标已完成；新增「14. TUI 界面」段说明三栏布局、快捷键、主题系统
 - `README.md`：新增「第十六期 TUI 产品化」段，含截图示例、快捷键表、配置字段说明
-- `ROADMAP.md`：第 16 期标 ✅；末尾状态行更新为「下一步进入第 17 期多模态 LLM 输入」
+- `ROADMAP.md`：第 16 期标 ✅；末尾状态行更新为「下一步进入第 17 期 LSP 诊断注入」
 - `.env.example`：见 §3.3
 
 ---
@@ -1046,7 +1046,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 | 文件树忽略规则 | `~/.paicli/filetree-ignore.txt`（每行一个 glob），不存在用内置默认 |
 | 安装包分发 | **fat jar**（`maven-shade-plugin`），GitHub Actions Release workflow 留作后续增强 |
 | `CodeChunker` 无后缀文件识别 | **内置扩展表**（`Makefile` / `Dockerfile` / `Jenkinsfile` 等） |
-| 第 17 期范围 | **保持原计划**（多模态 LLM 输入），TUI 不碰 |
+| 第 17 期范围 | **按 ROADMAP 更新为 LSP 诊断注入**，TUI 不碰；多模态 LLM 输入后移第 21 期 |
 | Lanterna 线程安全 | **所有 GUI 操作走 `screen.getEventThread().postRunnable()`** |
 | Windows ConEmu / Cmder 颜色 fallback | **检测到非 TrueColor 终端降级为 16 色** |
 

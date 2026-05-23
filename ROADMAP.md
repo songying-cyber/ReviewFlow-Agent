@@ -1,4 +1,4 @@
-# PaiCLI 迭代路线图（17 期）
+# PaiCLI 迭代路线图（21 期）
 
 从零开始，逐步构建生产级 Java Agent CLI
 
@@ -317,7 +317,7 @@
 
 - 接入 Google 官方 `chrome-devtools-mcp@latest`（28 个工具：导航 / 输入 / 调试 / 网络 / 性能 / 模拟 / 扩展 / 内存）
 - **默认 enabled**：`~/.paicli/mcp.json` 不存在时启动自动创建模板，含 chrome-devtools 条目
-- `image` content 处理走**路线 B**：fallback 文案引导 LLM 优先用 `take_snapshot`（DOM 文本快照）而非 `take_screenshot`；不做真 multimodal LLM 输入（拆到第 17 期）
+- `image` content 处理走**路线 B**：fallback 文案引导 LLM 优先用 `take_snapshot`（DOM 文本快照）而非 `take_screenshot`；不做真 multimodal LLM 输入（拆到第 21 期）
 - HITL「全部放行」改为 **server 维度**：用户对 chrome-devtools 选 `a → server` 后，连续浏览器操作只需确认一次（`approvedAllByServer` 集合 + 子菜单）
 - `Agent` / `PlanExecuteAgent` / `SubAgent` 系统提示词加「web_fetch vs 浏览器 MCP」决策表，明示微信公众号 / 知乎 / 推特等典型 web_fetch 失败站点直接走浏览器
 - `McpClient.initialize` 超时 30s → 60s（chrome-devtools 首次启动需 npx 拉包 + Chrome 冷启 ≈ 20s+），可被 `paicli.mcp.initialize.timeout.seconds` 覆盖
@@ -325,7 +325,7 @@
 - 必跑端到端测试：微信公众号文章（`https://mp.weixin.qq.com/s/RB7kF_BbsJZ5_Hmu9PxWdg`），验证 web_fetch 失败 → LLM 自动 fallback 到浏览器 → take_snapshot 拿正文
 
 **不做（明确边界）**：
-- 真 multimodal LLM 输入（拆到第 17 期「多模态 LLM 输入」）
+- 真 multimodal LLM 输入（拆到第 21 期「多模态 LLM 输入」）
 - CDP 会话复用 / 登录态识别（第 14 期）
 - Playwright / Firefox / WebKit 跨浏览器
 - 浏览器执行隔离（默认 `--isolated=true` 临时 user-data-dir，第 14 期通过 `--autoConnect` 或旧式 `--browser-url` 复用已开 Chrome）
@@ -424,11 +424,136 @@
 
 ---
 
-## 第17期：多模态 LLM 输入（vision）
+## 第17期：LSP 诊断注入（开发体验安全网）
+
+**前置依赖**：第 6 期 HITL 审批流、第 16 期 TUI 产品化
+
+**目标**：Agent 改完代码后，立即注入编译诊断，而不是等用户手跑 `mvn compile` 再告诉 Agent。对标 Claude Code / DeepSeek TUI 的招牌功能。
+
+**功能迭代**：
+
+- `LspManager`：按语言惰性启动 LSP server（JDT LS for Java、rust-analyzer for Rust、pyright for Python、gopls for Go），通过 stdio JSON-RPC 通信，per-language transport pool 复用连接
+- 最小 LSP 协议子集：`initialize` → `textDocument/didOpen` → `textDocument/didChange` → 收集 `textDocument/publishDiagnostics`
+- `LspHooks`：挂接在 `ToolRegistry.executeTool()` 的执行后路径上——`edit_file` / `apply_patch` / `write_file` 成功后，对编辑的文件调 `runPostEditLspHook()`
+- `flushPendingLspDiagnostics()`：在每轮 LLM 请求前，把收集到的诊断作为合成 user message 注入——模型在下一轮推理前就能看到编译错误
+- 诊断格式化：按 severity（error / warning / info）+ 文件路径 + 行号 + message 渲染为内联诊断块，限制单次注入条数（默认最多 20 条 diagnosis）
+- TUI 展示：inline 模式下诊断块以红色/黄色 ANSI 渲染，用户可以直观看到 Agent 引入的编译问题
+- 优雅降级：LSP server 启动失败或超时时只打 trace 日志，不阻塞 Agent 主流程；没有对应 LSP server 的语言跳过
+
+**设计参考**：DeepSeek TUI `crates/tui/src/lsp/`——`LspManager`（惰性 transport pool）+ `lsp_hooks.rs`（post-edit 挂钩）+ `diagnostics.rs`（诊断类型与渲染）。PaiCLI 的 Java 生态可以用 Eclipse JDT LS（`org.eclipse.jdt.ls`）或直接复用已有的 `CodeAnalyzer` 做轻量版。
+
+**核心知识点**：
+- LSP（Language Server Protocol）的 JSON-RPC 子集
+- 外部进程生命周期管理（ProcessBuilder + stdio 流分离）
+- Post-edit hook 注入模式（Agent 执行链的扩展点）
+- 合成消息注入（在 tool_result 之后、下一轮 LLM 请求之前）
+
+**教程标题候选**：《Agent 改完代码就报错？给它接上 LSP，编译错误当场发现》
+
+---
+
+---
+
+## 第18期：Git Side-History 快照与回滚（文件安全网）
+
+**前置依赖**：第 7 期异步执行、第 16 期 TUI 产品化
+
+**目标**：Agent 每次 turn 前后自动做 workspace 快照，用户可以一键回滚到任意 turn 之前的状态，不污染用户的 `.git` 历史。对标 DeepSeek TUI 的 `snapshot/` 系统。
+
+**功能迭代**：
+- `SideGitManager`：在 `~/.paicli/snapshots/<project_hash>/<worktree_hash>/.git` 维护独立 side-git 仓库，通过 JGit 纯 Java 实现，与用户的工作区 `.git` 完全隔离
+- `preTurnSnapshot()`：每个 turn 开始前，对 workspace 执行 JGit add/commit 并标记 `"pre-turn <turn_id>"`；MVP 采用同步 pre 快照，确保 Agent 改文件前已经保存基线
+- `postTurnSnapshot()`：turn 结束后异步执行第二次快照，commit message 标记 `"post-turn <turn_id>"`
+- `/restore <N>` 命令：从最近 N 个 turn 的 pre-turn 快照中恢复文件到工作区，不改变用户 `.git` 和对话历史
+- `revert_turn` 工具：LLM 可调用的回滚工具，让 Agent 自己能判断"改坏了需要撤销"
+- 快照策略可配：`max_snapshots`（默认保留最近 50 个 turn）、`snapshot_excludes`（默认排除 `.git/`、`node_modules/`、`target/`）
+
+**设计参考**：DeepSeek TUI `crates/tui/src/core/engine.rs` 的 `pre_turn_snapshot()` / `post_turn_snapshot()` + `crates/tui/src/core/turn.rs` 的 `pre_tool_snapshot()`。
+
+**核心知识点**：
+- Git 内部对象模型（tree / commit / blob）与 JGit API
+- Side-git 仓库隔离技术（独立 `.git` 目录 + `--work-tree` 等价操作）
+- Turn 粒度的自动快照策略
+- 异步快照不阻塞主流程的 fire-and-forget 模式
+
+**教程标题候选**：《Agent 改坏文件怎么办？自动 Git 快照 + 一键回滚，放心让它改》
+
+---
+
+## 第19期：Prompt 分层架构（可维护性重构）
+
+**前置依赖**：第 1–16 期全链路（所有 system prompt 的累积）
+
+**目标**：把分散在 `Agent.java` / `PlanExecuteAgent.java` / `SubAgent.java` 三处的硬编码 system prompt 重构为编译时嵌入的 Markdown 分层，支持用户级覆盖，让 prompt 调优从"改 Java 源码 + 重编译"变成"改 Markdown 文件"。
+
+**功能迭代**：
+- 分层 prompt 文件（`resources/prompts/`）：
+  - `base.md`：核心规则（工具使用、输出格式、子 Agent 协议、上下文管理）
+  - `modes/agent.md` / `modes/plan.md` / `modes/team.md`：各模式的工作流预期和权限
+  - `approvals/suggest.md` / `approvals/auto.md` / `approvals/never.md`：审批策略
+  - `personalities/calm.md`：语调（保留现有 `AGENTS.md` 中的 Personality 规范）
+- `PromptAssembler`：按固定顺序组装（base → personality → mode → approval → project_context → environment → instructions → skills → context_mgmt → handoff），遵循"volatile content last"原则以最大化 KV prefix cache 命中率
+- 用户级覆盖：`~/.paicli/prompts/base.md` 可整体替换内置 base.md；`~/.paicli/prompts/modes/agent.md` 可覆盖特定模式
+- 启动时校验：必含 `## Language` section（保证 reasoning_content 语言跟随）
+- 兼容旧有 API：`Agent.java` / `PlanExecuteAgent.java` / `SubAgent.java` 不再手写 prompt，改为调 `PromptAssembler.assemble(mode, approvalMode, context)`
+- 自带 prompt 质量审计模板（参考 DeepSeek TUI `PROMPT_ANALYSIS.md`）：每次改 prompt 都应该写 Gap 分析
+
+**设计参考**：DeepSeek TUI `crates/tui/src/prompts.rs` + `crates/tui/src/prompts/*.md` 的分层架构，以及 `PROMPT_ANALYSIS.md` 的自我批判方法论。
+
+**核心知识点**：
+- Prompt Engineering 的工程化管理
+- 编译时资源嵌入（Java `Class.getResourceAsStream` + 缓存）
+- KV prefix cache 友好的 prompt 布局（稳定内容在前，volatile 在后）
+- 用户可覆盖的配置层次（jar 内置 → 用户级 → 项目级）
+
+**教程标题候选**：《System prompt 写得像意大利面？用分层架构，一个 Markdown 文件管一种职责》
+
+---
+
+## 第20期：异步后台任务 + Runtime API（异步 & 无头场景）
 
 **前置依赖**：第 13 期 Chrome DevTools MCP 已能产出截图等 image content；第 12 期长上下文工程已就绪。
 
-**目标**：让 PaiCLI 真正"看见"图片——浏览器截图、用户粘贴的图片、文档中的图表，都能直接喂给 LLM 让它理解，而不是 fallback 成"[此工具返回了 image]"占位。
+**目标**：用户可以在 TUI 里提交后台任务（如"重构整个模块"），关掉终端走人，回来查看结果。同时暴露 HTTP/SSE Runtime API，让 PaiCLI 可以嵌入 CI/CD、IDE 插件、Web 面板。
+
+**功能迭代**：
+
+**后台任务（Task Manager）**：
+- `DurableTaskManager`：SQLite 持久化的任务队列，复用已有的 `VectorStore` SQLite 基础设施
+- 任务生命周期：`enqueued` → `running` → `completed` / `failed` / `canceled`
+- Worker Pool：可配并发数（默认 2），每个 Worker 启动独立 Agent 线程执行任务
+- `/task add <prompt>`：提交后台任务，返回 task_id
+- `/task list`：列出所有任务（含状态、耗时、进度）
+- `/task cancel <id>`：取消运行中任务
+- `/task log <id>`：查看任务执行摘要
+- 持久化恢复：进程重启后未完成的任务自动重入队
+
+**Runtime API**：
+- `RuntimeApiServer`：嵌入式 HTTP/SSE 服务端（`paicli serve --http --port 8080`），基于已有的 OkHttp / Javalin 或 Spring Boot 内嵌
+- 兼容 OpenAI Assistants API 的端点：
+  - `POST /v1/threads`：创建对话线程
+  - `POST /v1/threads/{id}/turns`：发起一轮 Agent 交互
+  - `GET /v1/threads/{id}/events`：SSE 流式事件（MessageDelta / ToolCall / TurnComplete）
+- `RuntimeThreadStore`：thread/turn 的持久化记录 + 可重放事件时间线
+- 安全：仅监听 localhost，API key header 校验
+
+**设计参考**：DeepSeek TUI `crates/tui/src/task_manager.rs`（SQLite 任务队列）+ `crates/tui/src/runtime_api.rs`（HTTP/SSE）+ `crates/tui/src/runtime_threads.rs`（thread 持久化）。
+
+**核心知识点**：
+- 持久化任务队列（SQLite schema + 状态机）
+- Worker Pool 并发模型
+- HTTP/SSE 服务端嵌入（Javalin / Spring Boot 内嵌 + SSE emitter）
+- OpenAI Assistants API 兼容层设计
+
+**教程标题候选**：《不想守在终端前？后台任务 + HTTP API，Agent 可以在后台跑》
+
+---
+
+## 第21期：多模态 LLM 输入（vision）
+
+**前置依赖**：第 13 期 Chrome DevTools MCP 已能产出截图等 image content；第 12 期长上下文工程已就绪；第 17–20 期安全网与架构已就绪。
+
+**目标**：让 PaiCLI 真正"看见"图片——浏览器截图、用户粘贴的图片、文档中的图表，都能直接喂给 LLM 让它理解，而不是 fallback 成"[此工具返回了 image]"占位。此期排在安全网（LSP + 快照）和架构重构（Prompt + Task）之后，确保模型生态成熟时再做。
 
 **功能迭代**：
 
@@ -459,7 +584,6 @@
 **估算**：5–6 天
 
 ---
-
 ## 技术栈演进图
 
 ```
@@ -468,15 +592,21 @@
 ReAct    执行     上下文    检索       协作      协同      并行      切换
 
 第9期 ──► 第10期 ──► 第11期 ──► 第12期 ──► 第13期 ──► 第14期 ──► 第15期 ──► 第16期 ──► 第17期
-联网     MCP核心    MCP高级     长上下文    Chrome     CDP        Skill      TUI       多模态
-能力     stdio+HTTP rsc/sample  200k-1M    DevTools   会话复用    系统       产品化     vision
+联网     MCP核心    MCP高级     长上下文    Chrome     CDP        Skill      TUI       LSP
+能力     stdio+HTTP rsc/sample  200k-1M    DevTools   会话复用    系统       产品化     诊断注入
+
+第18期 ──► 第19期 ──► 第20期 ──► 第21期
+Git       Prompt    异步后台    多模态
+快照回滚   分层架构    Runtime API  vision
 ```
 
 ## 学习路径建议
 
 **入门**：按顺序 1 → 2 → 3 → 6 → 16，掌握核心即可
 **进阶**：1 → 2 → 3 → 4 → 7 → 8 → 9 → 10 → 12 → 13 → 15，深入技术细节
-**全套**：全部 17 期
+**全套**：全部 21 期
+**安全优先**：6（HITL）→ 17（LSP）→ 18（Git快照）→ 其他按需
+**架构优先**：19（Prompt重构）→ 20（Task Manager）→ 其他按需
 
 ## 参考项目
 
@@ -490,9 +620,9 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ## Pro 升级版本（独立分支）
 
-主线 17 期完成后，将开启独立分支做框架重构，作为「手写版 → 框架版」的对照实现。不并入主分支，主线手写版保持稳定基线。
+主线 21 期完成后，将开启独立分支做框架重构，作为「手写版 → 框架版」的对照实现。不并入主分支，主线手写版保持稳定基线。
 
-**触发时机**：主线 1–17 期全部交付后启动
+**触发时机**：主线 1–21 期全部交付后启动
 
 **候选实现**：
 
@@ -503,4 +633,4 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 
 ---
 
-*已完成第 16 期 TUI 产品化（含 16.1 形态修正：默认切换为 inline 流式 TUI，Lanterna 全屏 TUI 通过 `PAICLI_RENDERER=lanterna` 保留）。下一步进入第 17 期多模态 LLM 输入，OAuth / sampling / recovery 留给后续 MCP 增强期。*
+*已完成第 16 期 TUI 产品化（含 16.1 形态修正：默认切换为 inline 流式 TUI，Lanterna 全屏 TUI 通过 `PAICLI_RENDERER=lanterna` 保留）、第 17 期 LSP 诊断注入 MVP，并开始落地第 18 期 Git Side-History 快照与回滚 MVP。后续第 19–20 期依次做 Prompt 分层、异步后台任务，第 21 期（原 17 期）多模态 vision 排在安全网与架构就绪之后。*

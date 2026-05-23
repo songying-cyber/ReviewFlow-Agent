@@ -168,6 +168,16 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesSnapshotCommands() {
+        assertEquals(CliCommandParser.CommandType.SNAPSHOT, CliCommandParser.parse("/snapshot").type());
+        assertEquals("list", CliCommandParser.parse("/snapshot").payload());
+        assertEquals(CliCommandParser.CommandType.SNAPSHOT, CliCommandParser.parse("/snapshot status").type());
+        assertEquals("status", CliCommandParser.parse("/snapshot status").payload());
+        assertEquals(CliCommandParser.CommandType.RESTORE_SNAPSHOT, CliCommandParser.parse("/restore 2").type());
+        assertEquals("2", CliCommandParser.parse("/restore 2").payload());
+    }
+
+    @Test
     void parsesMcpCommands() {
         assertEquals(CliCommandParser.CommandType.MCP_LIST, CliCommandParser.parse("/mcp").type());
         assertEquals(CliCommandParser.CommandType.MCP_RESTART, CliCommandParser.parse("/mcp restart filesystem").type());

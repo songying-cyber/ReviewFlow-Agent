@@ -3,7 +3,7 @@
 > 本文是给执行 Agent 的方案说明，不是新一期需求。
 > 它修正 `docs/phase-16-tui-productization.md` 里"Lanterna 三栏"的形态选型：
 > 抽出 `Renderer` 接口、两个实现并存——**inline 流式为默认、Lanterna 为可切换形态**。
-> 不延伸到 phase-17（多模态 LLM 输入仍按原计划）。
+> 不延伸到 phase-17（当前按 ROADMAP 为 LSP 诊断注入；多模态 LLM 输入后移到 phase-21）。
 
 ---
 
@@ -386,7 +386,7 @@ public final class LanternaRenderer implements Renderer {
 - `docs/phase-16-tui-productization.md`：在文档顶部加注 "本文档形态选型已被 inline-tui-pivot.md 修正：phase-16 工作以 Lanterna 实现的形式保留，但默认形态切换为 inline 流式"
 - `AGENTS.md`：第 16 期描述更新为"双形态可切换：默认 inline 流式，可切换 Lanterna 全屏"
 - `README.md`：新增"渲染器形态切换"段，说明 `PAICLI_RENDERER` 三档
-- `ROADMAP.md`：第 16 期标 ✅，下一步 phase-17 多模态保持不变
+- `ROADMAP.md`：第 16 期标 ✅，下一步 phase-17 为 LSP 诊断注入，多模态后移 phase-21
 - `.env.example`：把 `PAICLI_TUI=true` 标 deprecated，新增 `PAICLI_RENDERER=inline|lanterna|plain`
 
 ---
@@ -506,7 +506,7 @@ public final class LanternaRenderer implements Renderer {
 | 输入框 | JLine `LineReader`（双形态共用），可选 vi-mode |
 | 旧 `PAICLI_TUI=true` | 兼容映射到 `PAICLI_RENDERER=lanterna`，打 deprecation |
 | 启动失败 fallback | Lanterna 启动失败自动回退 inline |
-| phase-17 计划 | **不变**（多模态 LLM 输入） |
+| phase-17 计划 | **按 ROADMAP 更新为 LSP 诊断注入**；多模态 LLM 输入后移 phase-21 |
 
 ---
 

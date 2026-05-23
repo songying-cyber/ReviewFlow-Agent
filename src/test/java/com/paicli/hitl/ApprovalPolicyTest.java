@@ -81,7 +81,8 @@ class ApprovalPolicyTest {
         assertTrue(tools.contains("write_file"));
         assertTrue(tools.contains("execute_command"));
         assertTrue(tools.contains("create_project"));
-        assertEquals(3, tools.size());
+        assertTrue(tools.contains("revert_turn"));
+        assertEquals(4, tools.size());
     }
 
     @Test
@@ -89,6 +90,7 @@ class ApprovalPolicyTest {
         assertFalse(ApprovalPolicy.getRiskDescription("write_file").isBlank());
         assertFalse(ApprovalPolicy.getRiskDescription("execute_command").isBlank());
         assertFalse(ApprovalPolicy.getRiskDescription("create_project").isBlank());
+        assertFalse(ApprovalPolicy.getRiskDescription("revert_turn").isBlank());
     }
 
     @Test
@@ -124,7 +126,7 @@ class ApprovalPolicyTest {
     @Test
     void mcpToolStaysOutsideOfBuiltinDangerousTools() {
         // mcp__ 前缀不应污染 DANGEROUS_TOOLS 集合本身（保证 set 含义清晰）
-        assertEquals(3, ApprovalPolicy.getDangerousTools().size());
+        assertEquals(4, ApprovalPolicy.getDangerousTools().size());
         assertFalse(ApprovalPolicy.getDangerousTools().contains("mcp__demo__tool"));
     }
 }
