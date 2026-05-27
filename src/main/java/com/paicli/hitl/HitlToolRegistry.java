@@ -2,6 +2,7 @@ package com.paicli.hitl;
 
 import com.paicli.browser.BrowserCheckResult;
 import com.paicli.policy.AuditLog;
+import com.paicli.tool.ToolOutput;
 import com.paicli.tool.ToolRegistry;
 
 import java.util.concurrent.TimeUnit;
@@ -28,26 +29,31 @@ public class HitlToolRegistry extends ToolRegistry {
 
     @Override
     public String executeTool(String name, String argumentsJson) {
+        return executeToolOutput(name, argumentsJson).text();
+    }
+
+    @Override
+    public ToolOutput executeToolOutput(String name, String argumentsJson) {
         // HITL 未启用或该工具不需要审批，直接执行
         if (!hitlHandler.isEnabled() || !ApprovalPolicy.requiresApproval(name)) {
-            return super.executeTool(name, argumentsJson);
+            return super.doExecuteTool(name, argumentsJson);
         }
         BrowserCheckResult browserCheck = checkBrowserTool(name, argumentsJson, true);
         if (browserCheck.blocked()) {
-            return super.executeTool(name, argumentsJson);
+            return super.doExecuteTool(name, argumentsJson);
         }
         if (browserCheck.requiresPerCallApproval()) {
             return executeAfterExplicitApproval(name, argumentsJson, browserCheck.sensitiveNotice());
         }
         String mcpServer = ApprovalPolicy.mcpServerName(name);
         if (hitlHandler.isApprovedAllByTool(name) || hitlHandler.isApprovedAllByServer(mcpServer)) {
-            return super.executeTool(name, argumentsJson);
+            return super.doExecuteTool(name, argumentsJson);
         }
 
         return executeAfterExplicitApproval(name, argumentsJson, null);
     }
 
-    private String executeAfterExplicitApproval(String name, String argumentsJson, String sensitiveNotice) {
+    private ToolOutput executeAfterExplicitApproval(String name, String argumentsJson, String sensitiveNotice) {
         long start = System.nanoTime();
         ApprovalRequest request = ApprovalRequest.of(name, argumentsJson, null, null, sensitiveNotice);
         ApprovalResult result = hitlHandler.requestApproval(request);
@@ -58,18 +64,18 @@ public class HitlToolRegistry extends ToolRegistry {
                     : "用户拒绝了此操作";
             getAuditLog().record(AuditLog.AuditEntry.denyByHitl(
                     name, argumentsJson, reason, elapsedMillis(start)));
-            return "[HITL] 操作已被拒绝：" + reason;
+            return ToolOutput.text("[HITL] 操作已被拒绝：" + reason);
         }
 
         if (result.isSkipped()) {
             getAuditLog().record(AuditLog.AuditEntry.denyByHitl(
                     name, argumentsJson, "用户跳过", elapsedMillis(start)));
-            return "[HITL] 操作已被跳过";
+            return ToolOutput.text("[HITL] 操作已被跳过");
         }
 
-        // 批准（含修改参数）- 使用 effectiveArguments 获取最终参数；父类 executeTool 会负责 allow audit
+        // 批准（含修改参数）- 使用 effectiveArguments 获取最终参数；父类执行路径会负责 allow audit
         String effectiveArgs = result.effectiveArguments(argumentsJson);
-        return super.executeTool(name, effectiveArgs);
+        return super.doExecuteTool(name, effectiveArgs);
     }
 
     private static long elapsedMillis(long startNanos) {

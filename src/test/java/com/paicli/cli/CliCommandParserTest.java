@@ -24,6 +24,41 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesConcreteModelNameAsSwitchModelPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/model step-custom-model");
+
+        assertEquals(CliCommandParser.CommandType.SWITCH_MODEL, command.type());
+        assertEquals("step-custom-model", command.payload());
+    }
+
+    @Test
+    void resolvesConcreteModelNameToProviderAndModel() {
+        Main.ModelSelection step = Main.resolveModelSelection("step-custom-model");
+        assertEquals("step", step.provider());
+        assertEquals("step-custom-model", step.model());
+        assertEquals(true, step.explicitModel());
+
+        Main.ModelSelection glm = Main.resolveModelSelection("glm-4v-plus");
+        assertEquals("glm", glm.provider());
+        assertEquals("glm-4v-plus", glm.model());
+
+        Main.ModelSelection provider = Main.resolveModelSelection("step");
+        assertEquals("step", provider.provider());
+        assertNull(provider.model());
+        assertEquals(false, provider.explicitModel());
+
+        Main.ModelSelection kimi = Main.resolveModelSelection("kimi-k2.6");
+        assertEquals("kimi", kimi.provider());
+        assertEquals("kimi-k2.6", kimi.model());
+        assertEquals(true, kimi.explicitModel());
+
+        Main.ModelSelection moonshot = Main.resolveModelSelection("moonshot");
+        assertEquals("kimi", moonshot.provider());
+        assertNull(moonshot.model());
+        assertEquals(false, moonshot.explicitModel());
+    }
+
+    @Test
     void parsesClearSlashCommand() {
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("/clear");
 
@@ -201,6 +236,15 @@ class CliCommandParserTest {
         assertEquals("connect 9333", CliCommandParser.parse("/browser connect 9333").payload());
         assertEquals("disconnect", CliCommandParser.parse("/browser disconnect").payload());
         assertEquals("tabs", CliCommandParser.parse("/browser tabs").payload());
+    }
+
+    @Test
+    void parsesTaskCommands() {
+        assertEquals(CliCommandParser.CommandType.TASK, CliCommandParser.parse("/task").type());
+        assertEquals("list", CliCommandParser.parse("/task").payload());
+        assertEquals("add 重构模块", CliCommandParser.parse("/task add 重构模块").payload());
+        assertEquals("cancel task_123", CliCommandParser.parse("/task cancel task_123").payload());
+        assertEquals("log task_123", CliCommandParser.parse("/task log task_123").payload());
     }
 
     @Test

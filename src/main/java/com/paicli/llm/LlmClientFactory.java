@@ -10,18 +10,25 @@ public class LlmClientFactory {
         if (provider == null) return null;
 
         String normalized = normalizeProvider(provider);
+        String configuredProvider = provider.trim().toLowerCase();
         String apiKey = config.getApiKey(normalized);
+        if ((apiKey == null || apiKey.isBlank()) && !configuredProvider.equals(normalized)) {
+            apiKey = config.getApiKey(configuredProvider);
+        }
         if (apiKey == null || apiKey.isBlank()) {
             return null;
         }
 
-        String model = config.getModel(normalized);
-        String baseUrl = config.getBaseUrl(normalized);
+        String model = firstConfigured(config.getModel(normalized),
+                configuredProvider.equals(normalized) ? null : config.getModel(configuredProvider));
+        String baseUrl = firstConfigured(config.getBaseUrl(normalized),
+                configuredProvider.equals(normalized) ? null : config.getBaseUrl(configuredProvider));
 
         return switch (normalized) {
             case "glm" -> new GLMClient(apiKey, model);
             case "deepseek" -> new DeepSeekClient(apiKey, model);
             case "step" -> new StepClient(apiKey, model, baseUrl);
+            case "kimi" -> new KimiClient(apiKey, model, baseUrl);
             default -> null;
         };
     }
@@ -32,7 +39,7 @@ public class LlmClientFactory {
             return client;
         }
 
-        for (String provider : new String[]{"glm", "deepseek", "step"}) {
+        for (String provider : new String[]{"glm", "deepseek", "step", "kimi"}) {
             client = create(provider, config);
             if (client != null) {
                 return client;
@@ -46,7 +53,15 @@ public class LlmClientFactory {
         String normalized = provider.trim().toLowerCase();
         return switch (normalized) {
             case "stepfun", "step-fun" -> "step";
+            case "moonshot", "moonshotai", "moonshot-ai" -> "kimi";
             default -> normalized;
         };
+    }
+
+    private static String firstConfigured(String primary, String fallback) {
+        if (primary != null && !primary.isBlank()) {
+            return primary;
+        }
+        return fallback;
     }
 }

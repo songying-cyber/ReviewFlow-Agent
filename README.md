@@ -2,7 +2,7 @@
 
 一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十六期的 `TUI 产品化`。
 
-当前进度：已完成第 16.1 期 inline 流式 TUI 形态修正、第 17 期 `LSP 诊断注入` MVP，并开始落地第 18 期 `Git Side-History 快照与回滚`。第 19–20 期依次推进 Prompt 分层架构、异步后台任务 + Runtime API，第 21 期再做 `多模态 LLM 输入（vision）`。
+当前进度：已完成第 16.1 期 inline 流式 TUI 形态修正、第 17 期 `LSP 诊断注入` MVP、第 18 期 `Git Side-History 快照与回滚` MVP、第 19 期 `Prompt 分层架构` MVP、第 20 期 `异步后台任务 + Runtime API` MVP、第 21 期 `图片复制粘贴输入` MVP。
 
 ## 测试策略
 
@@ -79,8 +79,8 @@ mvn test
 ### 第八期：多模型适配 + 运行时切换
 
 - `LlmClient` 接口抽象 + `AbstractOpenAiCompatibleClient` 模板基类
-- 内置 `GLMClient`、`DeepSeekClient`、`StepClient` 三个瘦实现
-- `/model glm` / `/model deepseek` / `/model step` 运行时切换当前对话模型
+- 内置 `GLMClient`、`DeepSeekClient`、`StepClient`、`KimiClient` 四个瘦实现
+- `/model glm` / `/model glm-5v-turbo` / `/model deepseek` / `/model step` / `/model kimi` 运行时切换当前对话模型
 - 配置持久化到 `~/.paicli/config.json`，API Key 可从配置、环境变量或 `.env` 读取
 
 ### 第九期：联网能力 + Web 工具
@@ -106,7 +106,7 @@ mvn test
 ### 第十二期：长上下文工程
 
 - `LlmClient` 声明模型能力：`maxContextWindow()`、`supportsPromptCaching()`、`promptCacheMode()`
-- GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window，StepFun 默认 256k window
+- GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window，StepFun 默认 256k window，Kimi K2.6 默认 256k window
 - `AgentBudget` 按当前模型动态计算预算，默认 `80% * maxContextWindow`，仍可用系统属性覆盖
 - short / balanced / long 三种上下文模式：长上下文模式跳过摘要压缩，RAG 默认 topK 提升到 20
 - `search_code` 未显式传 `top_k` 时按上下文模式自适应
@@ -120,7 +120,7 @@ mvn test
 - `~/.paicli/mcp.json` 不存在时启动自动创建模板，默认使用 `--isolated=true` 临时浏览器 profile
 - 用于处理 SPA / JS 渲染 / 防爬墙 / 表单交互页面；微信公众号文章、知乎专栏、推特、小红书等 `web_fetch` 失败站点会引导走浏览器 MCP
 - HITL 的“全部放行”支持 MCP server 维度，连续浏览器操作可对 `chrome-devtools` 一次确认
-- `image` 类型结果仍不进入多模态模型输入（已后移到第 21 期 vision），fallback 文案会引导优先使用 `take_snapshot` 获取 DOM 文本
+- `image` 类型结果会作为图片输入附加到下一轮；文本 fallback 仍保留，用于日志、人类可读摘要和 API 不接受图片时的上下文
 - MCP initialize 默认超时提升到 60 秒，并在长启动期间打印等待进度
 
 ### 第十四期：CDP 会话复用 + 登录态访问
@@ -184,6 +184,38 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - `/restore <N>` 恢复到最近第 N 个 `pre-turn` 快照；恢复前会先创建 `pre-restore` 快照
 - Agent 内置 `revert_turn` 工具，纳入 HITL 与 AuditLog 危险工具链
 - 配置：`PAICLI_SNAPSHOT_ENABLED=false` 可关闭，`PAICLI_SNAPSHOT_MAX=50`、`PAICLI_SNAPSHOT_EXCLUDES=...`、`PAICLI_SNAPSHOT_DIR=...` 可调整策略
+
+### 第十九期：Prompt 分层架构（MVP）
+
+- ReAct、Plan task executor、Multi-Agent 三角色、Planner 的 system prompt 已从 Java 硬编码抽离到 `src/main/resources/prompts/`
+- `PromptAssembler` 按 `base -> personality -> mode -> approval -> project_context -> skills -> context_mgmt -> handoff` 组装，动态上下文靠后注入
+- 支持用户级覆盖 `~/.paicli/prompts/...`，支持项目级覆盖 `.paicli/prompts/...`，项目级优先级最高
+- 覆盖是整文件替换；`base.md` 和最终 prompt 必须包含 `## Language`
+- Prompt 改动审计模板见 `docs/prompt-analysis-template.md`
+
+### 第二十期：异步后台任务 + Runtime API（MVP）
+
+- `DurableTaskManager` 使用 SQLite 持久化后台任务队列，默认位置 `~/.paicli/tasks/tasks.db`
+- 任务生命周期：`enqueued -> running -> completed / failed / canceled`
+- `/task`、`/task add <任务内容>`、`/task cancel <task_id>`、`/task log <task_id>` 提供 CLI 闭环
+- Worker Pool 默认 2 个后台 worker，可通过 `PAICLI_TASK_WORKERS` 调整
+- `java -jar target/paicli-1.0-SNAPSHOT.jar serve --http --port 8080` 启动 localhost Runtime API
+- Runtime API 端点：`POST /v1/threads`、`POST /v1/threads/{id}/turns`、`GET /v1/threads/{id}/events`
+- Runtime API 强制要求 `PAICLI_RUNTIME_API_KEY` 或 `-Dpaicli.runtime.api.key`
+- 详细文档见 `docs/phase-20-runtime-api.md`
+
+### 第二十一期：图片复制粘贴输入（MVP）
+
+- `LlmClient.Message` 支持 `ContentPart`，包括 `text`、`image_base64`、`image_url`
+- 请求体在含图片时输出带图片块的 content array，纯文本仍保持 string content
+- `LlmClient` 公共接口不做图片能力声明；输入层只负责读取、压缩、附加图片，provider API 负责最终接收或返回错误
+- GLM 套餐用户可通过 `/model glm-5v-turbo` 切换到 GLM-5V-Turbo 多模态模型，再用 Ctrl+V 或 `@image:` 输入图片；本地 base64 图片会按智谱格式写入 `image_url.url`
+- MCP `image` content 会保留 base64 与 `mimeType`，在 ReAct / Plan / SubAgent 工具结果后作为图片 user message 回灌
+- 用户可通过 `@image:file:///abs/path.png`、`@image:/abs/path.png` 或 `@image:relative/path.png` 引用本地图片
+- 本地图片和 MCP 图片都会按 Claude Code 同类策略预处理：不是 OCR 成文本，而是压缩 / 缩放后作为图片块发送；带 alpha 的 PNG 会铺白底重编码；额外注入来源、尺寸和坐标映射元信息
+- 本地 `@image:` 消息会要求模型优先分析本轮图片；除非用户明确要求结合历史，历史对话和历史工具结果不能替代当前图片内容
+- 新一轮 ReAct / SubAgent 任务开始前会省略历史 image payload，仅保留文本元信息，避免旧截图反复进入上下文；模型 `reasoning_content` 只写日志 / 展示，不回传进下一轮请求历史
+- 当前边界：不做视频 / 音频、图像生成、TUI sixel 图片预览
 
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
@@ -275,7 +307,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 ### 第八期
 
-- 🔄 GLM-5.1、DeepSeek V4 与阶跃星辰 StepFun 多模型，`/model glm` / `/model deepseek` / `/model step` 运行时切换
+- 🔄 GLM-5.1、GLM-5V-Turbo、DeepSeek V4、阶跃星辰 StepFun 与 Kimi K2.6 多模型，`/model glm` / `/model glm-5v-turbo` / `/model deepseek` / `/model step` / `/model kimi` 运行时切换
 - 🧱 `LlmClient` 接口 + 模板方法基类，新增 provider 只需 ~20 行
 - 💾 默认模型持久化到 `~/.paicli/config.json`
 
@@ -298,7 +330,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 ### 1. 配置 API Key
 
-复制 `.env.example` 为 `.env`，并填入你的 GLM、DeepSeek 或 StepFun API Key：
+复制 `.env.example` 为 `.env`，并填入你的 GLM、DeepSeek、StepFun 或 Kimi API Key：
 
 ```bash
 cp .env.example .env
@@ -312,12 +344,16 @@ export GLM_API_KEY=your_api_key_here
 # 或
 export STEP_API_KEY=your_step_api_key_here
 export STEP_MODEL=step-3.5-flash
+# 或
+export KIMI_API_KEY=your_kimi_api_key_here
+export KIMI_MODEL=kimi-k2.6
 ```
 
 长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
 长期记忆只保存显式保存意图下的稳定事实：`/save <事实>`，或用户在自然语言里明确说“记一下 / 记住 / 以后记得”时由 Agent 调用 `save_memory`。它不应包含一次性任务请求或临时文件名/目录名。
 代码索引默认保存在 `~/.paicli/rag/codebase.db`。
 调试日志默认滚动写入 `~/.paicli/logs/paicli.log`，旧日志会按保留天数和总容量自动清理。
+ReAct / Plan task / SubAgent / Planner 的模型 `reasoning_content` 会以 `LLM reasoning [...]` 形式写入该日志，便于排查模型为什么选择某个工具或路径。
 
 如果你想为某次运行指定单独目录，可以额外传入：
 
@@ -671,9 +707,10 @@ src/main/java/com/paicli
 │   ├── CliCommandParser.java   # 命令解析
 │   └── PlanReviewInputParser.java  # 计划审核输入
 ├── llm/
-│   ├── GLMClient.java          # GLM-5.1 API 客户端
+│   ├── GLMClient.java          # GLM API 客户端；glm-5.1 走 Coding endpoint，glm-5v-turbo 走多模态 endpoint
 │   ├── DeepSeekClient.java     # DeepSeek API 客户端
-│   └── StepClient.java         # 阶跃星辰 StepFun API 客户端
+│   ├── StepClient.java         # 阶跃星辰 StepFun API 客户端
+│   └── KimiClient.java         # Kimi / Moonshot API 客户端
 ├── context/
 │   ├── ContextMode.java        # short / balanced / long 模式
 │   ├── ContextProfile.java     # 模型窗口与上下文策略

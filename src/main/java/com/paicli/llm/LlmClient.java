@@ -3,6 +3,7 @@ package com.paicli.llm;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 public interface LlmClient {
@@ -27,8 +28,36 @@ public interface LlmClient {
         return "none";
     }
 
+    record ContentPart(String type, String text, String imageBase64, String imageUrl, String mimeType) {
+        public static ContentPart text(String text) {
+            return new ContentPart("text", text, null, null, null);
+        }
+
+        public static ContentPart imageBase64(String imageBase64, String mimeType) {
+            return new ContentPart("image_base64", null, imageBase64, null,
+                    mimeType == null || mimeType.isBlank() ? "image/png" : mimeType);
+        }
+
+        public static ContentPart imageUrl(String imageUrl) {
+            return new ContentPart("image_url", null, null, imageUrl, null);
+        }
+
+        public boolean isText() {
+            return "text".equals(type);
+        }
+
+        public boolean isImage() {
+            return "image_base64".equals(type) || "image_url".equals(type);
+        }
+    }
+
     record Message(String role, String content, String reasoningContent, List<ToolCall> toolCalls,
-                   String toolCallId) {
+                   String toolCallId, List<ContentPart> contentParts) {
+        public Message(String role, String content, String reasoningContent, List<ToolCall> toolCalls,
+                       String toolCallId) {
+            this(role, content, reasoningContent, toolCalls, toolCallId, null);
+        }
+
         public Message(String role, String content) {
             this(role, content, null, null, null);
         }
@@ -39,6 +68,11 @@ public interface LlmClient {
 
         public static Message user(String content) {
             return new Message("user", content);
+        }
+
+        public static Message user(List<ContentPart> contentParts) {
+            return new Message("user", plainText(contentParts), null, null, null,
+                    contentParts == null ? null : List.copyOf(contentParts));
         }
 
         public static Message assistant(String content) {
@@ -59,6 +93,83 @@ public interface LlmClient {
 
         public static Message tool(String toolCallId, String content) {
             return new Message("tool", content, null, null, toolCallId);
+        }
+
+        public boolean hasContentParts() {
+            return contentParts != null && !contentParts.isEmpty();
+        }
+
+        public boolean hasImageContent() {
+            return hasContentParts() && contentParts.stream().anyMatch(ContentPart::isImage);
+        }
+
+        public int imagePartCount() {
+            if (!hasContentParts()) {
+                return 0;
+            }
+            int count = 0;
+            for (ContentPart part : contentParts) {
+                if (part != null && part.isImage()) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        public Message withoutImageContent() {
+            if (!hasImageContent()) {
+                return this;
+            }
+            List<ContentPart> stripped = new ArrayList<>();
+            int omitted = 0;
+            for (ContentPart part : contentParts) {
+                if (part == null) {
+                    continue;
+                }
+                if (part.isImage()) {
+                    omitted++;
+                } else {
+                    stripped.add(part);
+                }
+            }
+            stripped.add(ContentPart.text("[历史图片附件已省略 " + omitted
+                    + " 张；如需重新查看，请使用上文 Image source 或相关工具结果。]"));
+            return new Message(role, plainText(stripped), reasoningContent, toolCalls, toolCallId, List.copyOf(stripped));
+        }
+
+        public Message withoutReasoningContent() {
+            if (reasoningContent == null || reasoningContent.isBlank()) {
+                return this;
+            }
+            return new Message(role, content, null, toolCalls, toolCallId, contentParts);
+        }
+
+        private static String plainText(List<ContentPart> parts) {
+            if (parts == null || parts.isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder();
+            int imageCount = 0;
+            for (ContentPart part : parts) {
+                if (part == null) {
+                    continue;
+                }
+                if (part.isText() && part.text() != null && !part.text().isBlank()) {
+                    if (!sb.isEmpty()) {
+                        sb.append("\n\n");
+                    }
+                    sb.append(part.text());
+                } else if (part.isImage()) {
+                    imageCount++;
+                }
+            }
+            if (imageCount > 0) {
+                if (!sb.isEmpty()) {
+                    sb.append("\n\n");
+                }
+                sb.append("[已附加 ").append(imageCount).append(" 张图片]");
+            }
+            return sb.toString();
         }
     }
 

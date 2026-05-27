@@ -12,6 +12,7 @@ import com.paicli.policy.AuditLog;
 import com.paicli.mcp.transport.McpTransport;
 import com.paicli.mcp.transport.StdioTransport;
 import com.paicli.mcp.transport.StreamableHttpTransport;
+import com.paicli.tool.ToolOutput;
 import com.paicli.tool.ToolRegistry;
 
 import java.io.IOException;
@@ -387,10 +388,10 @@ public class McpServerManager implements AutoCloseable {
     }
 
     private void replaceTools(McpServer server, McpClient client, List<McpToolDescriptor> tools) {
-        toolRegistry.replaceMcpToolsForServer(server.name(), tools,
+        toolRegistry.replaceMcpToolOutputsForServer(server.name(), tools,
                 descriptor -> isResourceVirtualTool(descriptor)
-                        ? McpResourceTool.invoker(client, descriptor)
-                        : args -> invokeMcpTool(client, descriptor, args));
+                        ? args -> ToolOutput.text(McpResourceTool.invoker(client, descriptor).apply(args))
+                        : args -> invokeMcpToolOutput(client, descriptor, args));
     }
 
     private boolean isResourceVirtualTool(McpToolDescriptor descriptor) {
@@ -432,11 +433,12 @@ public class McpServerManager implements AutoCloseable {
      * MCP 工具执行入口：把 LLM 给的 JSON 参数透传给 server 的 tools/call，并把异常转成 LLM 可读字符串。
      * 提取成独立方法是为了让 server 维度的错误信息（serverName/toolName）在堆栈和日志里清晰可见。
      */
-    private static String invokeMcpTool(McpClient client, McpToolDescriptor descriptor, String argumentsJson) {
+    private static ToolOutput invokeMcpToolOutput(McpClient client, McpToolDescriptor descriptor, String argumentsJson) {
         try {
-            return client.callTool(descriptor.name(), argumentsJson);
+            return client.callToolOutput(descriptor.name(), argumentsJson);
         } catch (Exception e) {
-            return "MCP 工具调用失败 (" + descriptor.serverName() + "/" + descriptor.name() + "): " + e.getMessage();
+            return ToolOutput.text("MCP 工具调用失败 (" + descriptor.serverName() + "/" + descriptor.name() + "): "
+                    + e.getMessage());
         }
     }
 

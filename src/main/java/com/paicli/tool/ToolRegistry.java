@@ -693,6 +693,12 @@ public class ToolRegistry {
     public synchronized void registerMcpTool(McpToolDescriptor descriptor, Function<String, String> invoker) {
         Objects.requireNonNull(descriptor, "descriptor");
         Objects.requireNonNull(invoker, "invoker");
+        registerMcpToolOutput(descriptor, args -> ToolOutput.text(invoker.apply(args)));
+    }
+
+    public synchronized void registerMcpToolOutput(McpToolDescriptor descriptor, Function<String, ToolOutput> invoker) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        Objects.requireNonNull(invoker, "invoker");
         String toolName = descriptor.namespacedName();
         McpRegisteredTool registered = new McpRegisteredTool(descriptor, invoker);
         mcpTools.put(toolName, registered);
@@ -714,6 +720,12 @@ public class ToolRegistry {
 
     public synchronized void replaceMcpToolsForServer(String serverName, List<McpToolDescriptor> newTools,
                                                       Function<McpToolDescriptor, Function<String, String>> invokerFactory) {
+        replaceMcpToolOutputsForServer(serverName, newTools,
+                descriptor -> args -> ToolOutput.text(invokerFactory.apply(descriptor).apply(args)));
+    }
+
+    public synchronized void replaceMcpToolOutputsForServer(String serverName, List<McpToolDescriptor> newTools,
+                                                            Function<McpToolDescriptor, Function<String, ToolOutput>> invokerFactory) {
         Objects.requireNonNull(serverName, "serverName");
         Objects.requireNonNull(newTools, "newTools");
         Objects.requireNonNull(invokerFactory, "invokerFactory");
@@ -726,7 +738,7 @@ public class ToolRegistry {
             tools.remove(toolName);
         }
         for (McpToolDescriptor descriptor : newTools) {
-            registerMcpTool(descriptor, invokerFactory.apply(descriptor));
+            registerMcpToolOutput(descriptor, invokerFactory.apply(descriptor));
         }
     }
 
@@ -739,12 +751,23 @@ public class ToolRegistry {
      * - 其他情况 → allow（仅表示工具调用真的发生过，工具内部的业务错误仍以返回字符串呈现给 LLM）
      */
     public String executeTool(String name, String argumentsJson) {
+        return doExecuteTool(name, argumentsJson).text();
+    }
+
+    public ToolOutput executeToolOutput(String name, String argumentsJson) {
+        if (isLegacyExecuteToolOverride()) {
+            return ToolOutput.text(executeTool(name, argumentsJson));
+        }
+        return doExecuteTool(name, argumentsJson);
+    }
+
+    protected ToolOutput doExecuteTool(String name, String argumentsJson) {
         if (CancellationContext.isCancelled()) {
-            return "用户取消了此次工具调用";
+            return ToolOutput.text("用户取消了此次工具调用");
         }
         Tool tool = tools.get(name);
         if (tool == null) {
-            return "未知工具: " + name;
+            return ToolOutput.text("未知工具: " + name);
         }
 
         boolean shouldAudit = shouldAudit(name);
@@ -759,14 +782,17 @@ public class ToolRegistry {
                 if (browserCheck.blocked()) {
                     throw new PolicyException(browserCheck.reason());
                 }
-                String result = mcpTool.invoker().apply(argumentsJson);
+                ToolOutput output = mcpTool.invoker().apply(argumentsJson);
+                if (output == null) {
+                    output = ToolOutput.text("");
+                }
                 if (browserGuard != null) {
-                    browserGuard.applyAfterExecution(name, argumentsJson, result);
+                    browserGuard.applyAfterExecution(name, argumentsJson, output.text());
                 }
                 if (shouldAudit) {
                     auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start), auditMetadata));
                 }
-                return result;
+                return output;
             }
 
             JsonNode args = mapper.readTree(argumentsJson);
@@ -777,19 +803,29 @@ public class ToolRegistry {
             if (shouldAudit) {
                 auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start), auditMetadata));
             }
-            return result;
+            return ToolOutput.text(result);
         } catch (PolicyException e) {
             if (shouldAudit) {
                 auditLog.record(AuditLog.AuditEntry.denyByPolicy(
                         name, argumentsJson, e.getMessage(), elapsedMillis(start), auditMetadata));
             }
-            return "🛡️ 策略拒绝: " + e.getMessage();
+            return ToolOutput.text("🛡️ 策略拒绝: " + e.getMessage());
         } catch (Exception e) {
             if (shouldAudit) {
                 auditLog.record(AuditLog.AuditEntry.error(
                         name, argumentsJson, e.getMessage(), elapsedMillis(start), auditMetadata));
             }
-            return "工具执行失败: " + e.getMessage();
+            return ToolOutput.text("工具执行失败: " + e.getMessage());
+        }
+    }
+
+    private boolean isLegacyExecuteToolOverride() {
+        try {
+            return getClass()
+                    .getMethod("executeTool", String.class, String.class)
+                    .getDeclaringClass() != ToolRegistry.class;
+        } catch (NoSuchMethodException e) {
+            return false;
         }
     }
 
@@ -822,8 +858,8 @@ public class ToolRegistry {
         if (invocations.size() == 1) {
             ToolInvocation invocation = invocations.get(0);
             long startedAt = System.nanoTime();
-            String result = executeTool(invocation.name(), invocation.argumentsJson());
-            return List.of(ToolExecutionResult.completed(invocation, result, elapsedMillis(startedAt)));
+            ToolOutput output = executeToolOutput(invocation.name(), invocation.argumentsJson());
+            return List.of(ToolExecutionResult.completed(invocation, output, elapsedMillis(startedAt)));
         }
 
         int parallelism = Math.min(invocations.size(), MAX_PARALLEL_TOOLS);
@@ -840,8 +876,8 @@ public class ToolRegistry {
                             return ToolExecutionResult.failed(invocation, "用户取消了此次工具调用");
                         }
                         long startedAt = System.nanoTime();
-                        String result = executeTool(invocation.name(), invocation.argumentsJson());
-                        return ToolExecutionResult.completed(invocation, result, elapsedMillis(startedAt));
+                        ToolOutput output = executeToolOutput(invocation.name(), invocation.argumentsJson());
+                        return ToolExecutionResult.completed(invocation, output, elapsedMillis(startedAt));
                     })
                     .toList();
 
@@ -991,15 +1027,26 @@ public class ToolRegistry {
 
     public record Tool(String name, String description, JsonNode parameters, ToolExecutor executor) {}
 
-    private record McpRegisteredTool(McpToolDescriptor descriptor, Function<String, String> invoker) {}
+    private record McpRegisteredTool(McpToolDescriptor descriptor, Function<String, ToolOutput> invoker) {}
 
     public record ToolInvocation(String id, String name, String argumentsJson) {}
 
     public record ToolExecutionResult(String id, String name, String argumentsJson,
-                                      String result, long elapsedMillis, boolean timedOut) {
-        private static ToolExecutionResult completed(ToolInvocation invocation, String result, long elapsedMillis) {
+                                      String result, long elapsedMillis, boolean timedOut,
+                                      List<com.paicli.llm.LlmClient.ContentPart> imageParts) {
+        private static ToolExecutionResult completed(ToolInvocation invocation, ToolOutput output, long elapsedMillis) {
             return new ToolExecutionResult(
-                    invocation.id(), invocation.name(), invocation.argumentsJson(), result, elapsedMillis, false);
+                    invocation.id(),
+                    invocation.name(),
+                    invocation.argumentsJson(),
+                    output == null ? "" : output.text(),
+                    elapsedMillis,
+                    false,
+                    output == null ? List.of() : output.imageParts());
+        }
+
+        private static ToolExecutionResult completed(ToolInvocation invocation, String result, long elapsedMillis) {
+            return completed(invocation, ToolOutput.text(result), elapsedMillis);
         }
 
         private static ToolExecutionResult failed(ToolInvocation invocation, String message) {
@@ -1013,8 +1060,13 @@ public class ToolRegistry {
                     invocation.argumentsJson(),
                     "工具执行超时（" + timeoutSeconds + "秒），已取消",
                     timeoutSeconds * 1000,
-                    true
+                    true,
+                    List.of()
             );
+        }
+
+        public boolean hasImageParts() {
+            return imageParts != null && !imageParts.isEmpty();
         }
     }
 

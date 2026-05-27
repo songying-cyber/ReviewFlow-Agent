@@ -14,6 +14,7 @@ import com.paicli.mcp.protocol.McpToolDescriptor;
 import com.paicli.mcp.resources.McpResourceContent;
 import com.paicli.mcp.resources.McpResourceDescriptor;
 import com.paicli.mcp.transport.McpTransport;
+import com.paicli.tool.ToolOutput;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -93,6 +94,10 @@ public class McpClient implements AutoCloseable {
     }
 
     public String callTool(String toolName, String argumentsJson) throws IOException {
+        return callToolOutput(toolName, argumentsJson).text();
+    }
+
+    public ToolOutput callToolOutput(String toolName, String argumentsJson) throws IOException {
         JsonNode args;
         if (argumentsJson == null || argumentsJson.isBlank()) {
             args = JsonNodeFactory.instance.objectNode();
@@ -102,11 +107,11 @@ public class McpClient implements AutoCloseable {
         ObjectNode params = McpCallToolRequest.toJson(toolName, args);
         JsonNode result = rpc.request("tools/call", params, 60);
         McpCallToolResult callResult = MAPPER.treeToValue(result, McpCallToolResult.class);
-        String formatted = callResult.formatForLlm();
+        ToolOutput output = callResult.toToolOutput();
         if (callResult.isError()) {
-            return "MCP 工具返回错误: " + formatted;
+            return new ToolOutput("MCP 工具返回错误: " + output.text(), output.imageParts());
         }
-        return formatted;
+        return output;
     }
 
     public List<McpResourceDescriptor> listResources() throws IOException {

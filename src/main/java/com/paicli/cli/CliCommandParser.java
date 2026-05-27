@@ -31,6 +31,7 @@ final class CliCommandParser {
         MCP_RESOURCES,
         MCP_PROMPTS,
         BROWSER,
+        TASK,
         SKILL_LIST,
         SKILL_SHOW,
         SKILL_ON,
@@ -191,6 +192,14 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/browser ", 0, 9)) {
             return new ParsedCommand(CommandType.BROWSER, trimmed.substring(9).trim());
+        }
+
+        if (trimmed.equalsIgnoreCase("/task")) {
+            return new ParsedCommand(CommandType.TASK, "list");
+        }
+
+        if (trimmed.regionMatches(true, 0, "/task ", 0, 6)) {
+            return new ParsedCommand(CommandType.TASK, trimmed.substring(6).trim());
         }
 
         if (trimmed.equalsIgnoreCase("/skill") || trimmed.equalsIgnoreCase("/skill list")) {

@@ -20,6 +20,7 @@ import com.paicli.llm.LlmClientFactory;
 import com.paicli.render.Renderer;
 import com.paicli.render.RendererFactory;
 import com.paicli.render.inline.InlineRenderer;
+import com.paicli.image.ClipboardImage;
 import com.paicli.mcp.McpServer;
 import com.paicli.mcp.McpServerManager;
 import com.paicli.mcp.McpServerStatus;
@@ -33,9 +34,14 @@ import com.paicli.rag.CodeRelation;
 import com.paicli.rag.SearchResultFormatter;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.runtime.CancellationToken;
+import com.paicli.runtime.api.RuntimeApiServer;
+import com.paicli.runtime.api.RuntimeThreadStore;
+import com.paicli.runtime.task.DurableTaskManager;
+import com.paicli.runtime.task.TaskCommandFormatter;
 import com.paicli.snapshot.RestoreResult;
 import com.paicli.snapshot.SnapshotService;
 import com.paicli.snapshot.TurnSnapshot;
+import com.paicli.tool.ToolRegistry;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.jline.terminal.Attributes;
@@ -55,14 +61,18 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * PaiCLI v16.1.0 - Terminal-First Agent IDE
@@ -147,6 +157,13 @@ public class Main {
     }
 
     public static void main(String[] args) {
+        configureAwtForCli();
+        if (isRuntimeServeCommand(args)) {
+            configureLogging();
+            startRuntimeApiAndBlock(args);
+            return;
+        }
+
         printBanner();
         configureLogging();
 
@@ -154,9 +171,10 @@ public class Main {
         LlmClient llmClient = LlmClientFactory.createFromConfig(config);
         if (llmClient == null) {
             System.err.println("❌ 错误: 未找到可用的 API Key");
-            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY 或 STEP_API_KEY");
+            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY 或 KIMI_API_KEY");
             System.exit(1);
         }
+        AtomicReference<LlmClient> llmClientRef = new AtomicReference<>(llmClient);
 
         System.out.println("✅ 已加载模型: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")\n");
 
@@ -237,7 +255,11 @@ public class Main {
             reactAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
             reactAgent.setSkillRegistry(skillRegistry);
             reactAgent.setSkillContextBuffer(skillContextBuffer);
+            DurableTaskManager taskManager = openTaskManager(llmClientRef);
+            taskManager.start();
+            Runtime.getRuntime().addShutdownHook(new Thread(taskManager::close, "paicli-task-shutdown"));
             System.out.println("🔄 使用 ReAct 模式\n");
+            printStartupHints();
             boolean nextTaskUsePlanMode = false;
             boolean nextTaskUseTeamMode = false;
 
@@ -270,10 +292,9 @@ public class Main {
             boolean spaciousPrompt = false;
             if (renderer instanceof InlineRenderer inline) {
                 bindCtrlOToFoldableBlocks(lineReader, inline);
-                spaciousPrompt = inline.hasStatusBar();
             }
-
-            printStartupHints();
+            spaciousPrompt = defaultSpaciousPrompt(spaciousPrompt);
+            bindCtrlVToClipboardImage(lineReader);
 
             while (true) {
                 PromptInput promptInput;
@@ -372,20 +393,27 @@ public class Main {
                         input = command.payload();
                     }
                     case SWITCH_MODEL -> {
-                        String provider = command.payload();
-                        if (provider == null || provider.isEmpty()) {
+                        String selection = command.payload();
+                        if (selection == null || selection.isEmpty()) {
                             System.out.println("🤖 当前模型: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")");
-                            System.out.println("   可用模型：glm, deepseek, step");
+                            System.out.println("   可用模型：glm, deepseek, step, kimi");
                             System.out.println("   /model glm      - 切换到 GLM-5.1");
+                            System.out.println("   /model glm-5v-turbo - 切换到 GLM-5V-Turbo 多模态");
                             System.out.println("   /model deepseek - 切换到 DeepSeek V4");
-                            System.out.println("   /model step     - 切换到阶跃星辰 StepFun\n");
+                            System.out.println("   /model step     - 切换到阶跃星辰 StepFun");
+                            System.out.println("   /model kimi     - 切换到 Kimi K2.6\n");
                         } else {
-                            LlmClient newClient = LlmClientFactory.create(provider, config);
+                            ModelSelection target = resolveModelSelection(selection);
+                            if (target.explicitModel()) {
+                                ensureProviderConfig(config, target.provider()).setModel(target.model());
+                            }
+                            LlmClient newClient = LlmClientFactory.create(target.provider(), config);
                             if (newClient == null) {
-                                System.out.println("❌ 切换失败：未配置 " + provider + " 的 API Key\n");
+                                System.out.println("❌ 切换失败：未配置 " + target.provider() + " 的 API Key\n");
                             } else {
                                 llmClient = newClient;
-                                config.setDefaultProvider(provider);
+                                llmClientRef.set(newClient);
+                                config.setDefaultProvider(target.provider());
                                 config.save();
                                 reactAgent.setLlmClient(llmClient);
                                 System.out.println("✅ 已切换到: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")");
@@ -469,6 +497,10 @@ public class Main {
                                 mcpServerManager,
                                 hitlToolRegistry,
                                 hitlHandler));
+                        continue;
+                    }
+                    case TASK -> {
+                        printMcpCommandResult(TaskCommandFormatter.handle(taskManager, command.payload()));
                         continue;
                     }
                     case SKILL_LIST -> {
@@ -615,6 +647,75 @@ public class Main {
         }
 
         System.out.println("\n👋 再见!");
+    }
+
+    private static boolean isRuntimeServeCommand(String[] args) {
+        return args != null
+                && args.length >= 1
+                && "serve".equalsIgnoreCase(args[0])
+                && java.util.Arrays.stream(args).anyMatch("--http"::equalsIgnoreCase);
+    }
+
+    private static void startRuntimeApiAndBlock(String[] args) {
+        PaiCliConfig config = PaiCliConfig.load();
+        LlmClient client = LlmClientFactory.createFromConfig(config);
+        if (client == null) {
+            System.err.println("❌ 错误: 未找到可用的 API Key");
+            System.exit(1);
+        }
+        int port = parseServePort(args, 8080);
+        try {
+            RuntimeThreadStore store = new RuntimeThreadStore(RuntimeThreadStore.defaultDbPath());
+            RuntimeApiServer server = new RuntimeApiServer(
+                    store,
+                    prompt -> runHeadlessTask(prompt, client),
+                    port,
+                    RuntimeApiServer.configuredApiKey());
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                server.close();
+                store.close();
+            }, "paicli-runtime-api-shutdown"));
+            server.start();
+            System.out.println("✅ PaiCLI Runtime API 已启动: http://127.0.0.1:" + server.port());
+            System.out.println("   认证: Authorization: Bearer <PAICLI_RUNTIME_API_KEY>");
+            new CountDownLatch(1).await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            System.err.println("❌ Runtime API 启动失败: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
+    private static int parseServePort(String[] args, int defaultPort) {
+        if (args == null) {
+            return defaultPort;
+        }
+        for (int i = 0; i < args.length - 1; i++) {
+            if ("--port".equalsIgnoreCase(args[i])) {
+                try {
+                    return Integer.parseInt(args[i + 1]);
+                } catch (NumberFormatException ignored) {
+                    return defaultPort;
+                }
+            }
+        }
+        return defaultPort;
+    }
+
+    private static String runHeadlessTask(String prompt, LlmClient llmClient) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
+        Agent agent = new Agent(llmClient, registry);
+        return agent.run(prompt);
+    }
+
+    private static DurableTaskManager openTaskManager(AtomicReference<LlmClient> llmClientRef) {
+        try {
+            return DurableTaskManager.openDefault(prompt -> runHeadlessTask(prompt, llmClientRef.get()));
+        } catch (Exception e) {
+            throw new IllegalStateException("后台任务管理器初始化失败: " + e.getMessage(), e);
+        }
     }
 
     static PlanExecuteAgent createPlanAgent(LlmClient llmClient, Agent reactAgent,
@@ -778,6 +879,21 @@ public class Main {
         }
 
         return PromptInput.submitted(lineReader.readLine("", null, (MaskingCallback) null, prefill.seedBuffer()));
+    }
+
+    static boolean defaultSpaciousPrompt(boolean statusBarAvailable) {
+        return false;
+    }
+
+    static void configureAwtForCli() {
+        if (!isMacOs()) {
+            return;
+        }
+        System.setProperty("java.awt.headless", "true");
+    }
+
+    static boolean isMacOs() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
     }
 
     private static PlanExecuteAgent.PlanReviewHandler createPlanReviewHandler(Terminal terminal, LineReader lineReader) {
@@ -977,7 +1093,6 @@ public class Main {
                 "输入你的问题或任务",
                 "输入 '/' 查看命令",
                 "输入 '@server:protocol://path' 可显式引用 MCP resource",
-                "输入 '/skill list' 查看可用 skill；任务匹配时 LLM 会自动 load_skill 加载完整指引",
                 "任务运行中按 ESC 取消当前任务",
                 "默认模式是 ReAct"
         );
@@ -990,8 +1105,10 @@ public class Main {
         return List.of(
                 new SlashCommandHint("/model", "/model", "查看当前模型"),
                 new SlashCommandHint("/model glm", "/model glm", "切换到 GLM-5.1"),
+                new SlashCommandHint("/model glm-5v-turbo", "/model glm-5v-turbo", "切换到 GLM-5V-Turbo 多模态"),
                 new SlashCommandHint("/model deepseek", "/model deepseek", "切换到 DeepSeek V4"),
                 new SlashCommandHint("/model step", "/model step", "切换到阶跃星辰 StepFun"),
+                new SlashCommandHint("/model kimi", "/model kimi", "切换到 Kimi K2.6"),
                 new SlashCommandHint("/plan", "/plan", "下一条任务使用 Plan-and-Execute 模式"),
                 new SlashCommandHint("/plan ", "/plan <任务内容>", "直接用计划模式执行这条任务"),
                 new SlashCommandHint("/team", "/team", "下一条任务使用 Multi-Agent 协作模式"),
@@ -1005,6 +1122,10 @@ public class Main {
                 new SlashCommandHint("/browser status", "/browser status", "查看浏览器会话状态"),
                 new SlashCommandHint("/browser tabs", "/browser tabs", "查看 shared 模式真实 Chrome tab"),
                 new SlashCommandHint("/browser disconnect", "/browser disconnect", "切回 isolated 浏览器模式"),
+                new SlashCommandHint("/task", "/task", "查看后台任务列表"),
+                new SlashCommandHint("/task add ", "/task add <任务内容>", "提交后台任务"),
+                new SlashCommandHint("/task cancel ", "/task cancel <task_id>", "取消后台任务"),
+                new SlashCommandHint("/task log ", "/task log <task_id>", "查看后台任务结果"),
                 new SlashCommandHint("/mcp", "/mcp", "查看 MCP server 状态"),
                 new SlashCommandHint("/mcp restart ", "/mcp restart <name>", "重启 MCP server"),
                 new SlashCommandHint("/mcp logs ", "/mcp logs <name>", "查看 MCP server 日志"),
@@ -1130,7 +1251,7 @@ public class Main {
             return;
         }
         String hint = switch (selected) {
-            case 0, 1 -> "💡 切换模型: /model glm / /model deepseek / /model step";
+            case 0, 1 -> "💡 切换模型: /model glm / /model deepseek / /model step / /model kimi";
             case 2 -> "💡 切换 HITL: /hitl on / /hitl off";
             case 3 -> "💡 管理 Skill: /skill list / /skill on <name> / /skill off <name>";
             case 4 -> "💡 切换渲染器（重启后生效）: PAICLI_RENDERER=inline|lanterna|plain";
@@ -1155,6 +1276,40 @@ public class Main {
             KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
             if (map != null) {
                 map.bind(ref, ctrlO);
+            }
+        }
+    }
+
+    // Ctrl+V 抓系统剪贴板里的图片到 ~/.paicli/cache/ 并把 @image:<path> 注入当前输入行。
+    // 失败（无图 / headless / IO 错误）时只打提示，不破坏现有 buffer，覆盖掉 JLine 默认的
+    // quoted-insert 没有交互价值。注意 macOS Cmd+V 通常被终端劫持成本地粘贴文本，所以这里
+    // 绑的是 Ctrl+V（ASCII 22 / SYN），iTerm / Terminal.app 默认不会拦截。
+    //
+    // 输入层不按模型名拦截图片：与 Claude Code 类似，先把图片读成附件收进
+    // prompt；模型是否接受 image block 由 provider API 自己处理。
+    static void bindCtrlVToClipboardImage(LineReader lineReader) {
+        if (lineReader == null) {
+            return;
+        }
+        lineReader.getWidgets().put("paicli-paste-clipboard-image", () -> {
+            ClipboardImage.GrabResult grab = ClipboardImage.grab();
+            if (!grab.ok()) {
+                lineReader.printAbove("⚠️ Ctrl+V 抓图失败: " + grab.error());
+                lineReader.callWidget(LineReader.REDISPLAY);
+                return true;
+            }
+            String token = "@image:<" + grab.path().toAbsolutePath() + "> ";
+            lineReader.getBuffer().write(token);
+            lineReader.printAbove("✅ 已接收剪贴板图片: " + ClipboardImage.describe(grab.path()));
+            lineReader.callWidget(LineReader.REDISPLAY);
+            return true;
+        });
+        Reference ref = new Reference("paicli-paste-clipboard-image");
+        String ctrlV = String.valueOf((char) 22);  // Ctrl+V (SYN)
+        for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
+            KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
+            if (map != null) {
+                map.bind(ref, ctrlV);
             }
         }
     }
@@ -1606,6 +1761,39 @@ public class Main {
         return null;
     }
 
+    static ModelSelection resolveModelSelection(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        String normalized = value.toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "glm" -> new ModelSelection("glm", null, false);
+            case "deepseek" -> new ModelSelection("deepseek", null, false);
+            case "step", "stepfun", "step-fun" -> new ModelSelection("step", null, false);
+            case "kimi", "moonshot", "moonshotai", "moonshot-ai" -> new ModelSelection("kimi", null, false);
+            default -> {
+                if (normalized.startsWith("glm-")) {
+                    yield new ModelSelection("glm", value, true);
+                }
+                if (normalized.startsWith("deepseek")) {
+                    yield new ModelSelection("deepseek", value, true);
+                }
+                if (normalized.startsWith("step")) {
+                    yield new ModelSelection("step", value, true);
+                }
+                if (normalized.startsWith("kimi-") || normalized.startsWith("moonshot-")) {
+                    yield new ModelSelection("kimi", value, true);
+                }
+                yield new ModelSelection(normalized, null, false);
+            }
+        };
+    }
+
+    private static PaiCliConfig.ProviderConfig ensureProviderConfig(PaiCliConfig config, String provider) {
+        if (config.getProviders() == null) {
+            config.setProviders(new LinkedHashMap<>());
+        }
+        return config.getProviders().computeIfAbsent(provider, ignored -> new PaiCliConfig.ProviderConfig());
+    }
+
     private static void printBanner() {
         System.out.println("╔══════════════════════════════════════════════════════════╗");
         System.out.println("║                                                          ║");
@@ -1640,5 +1828,8 @@ public class Main {
     }
 
     record McpConfigBootstrapResult(boolean created, String message) {
+    }
+
+    record ModelSelection(String provider, String model, boolean explicitModel) {
     }
 }

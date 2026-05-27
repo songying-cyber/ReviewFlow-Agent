@@ -1,6 +1,8 @@
 package com.paicli.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.paicli.llm.LlmClient;
+import com.paicli.tool.ToolOutput;
 import com.paicli.mcp.protocol.McpToolDescriptor;
 import com.paicli.tool.ToolRegistry;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,23 @@ class McpToolRegistrationTest {
             assertTrue(registry.hasTool("mcp__demo__echo"));
             assertTrue(registry.getToolDefinitions().stream().anyMatch(t -> t.name().equals("mcp__demo__echo")));
             assertEquals("echo:{\"text\":\"hi\"}", registry.executeTool("mcp__demo__echo", "{\"text\":\"hi\"}"));
+        });
+    }
+
+    @Test
+    void structuredMcpOutputSurvivesBatchExecution(@TempDir Path tempDir) throws Exception {
+        withAuditDir(tempDir, () -> {
+            ToolRegistry registry = new ToolRegistry();
+            registry.registerMcpToolOutput(sampleDescriptor(), args -> new ToolOutput(
+                    "screenshot",
+                    List.of(LlmClient.ContentPart.imageBase64("aGVsbG8=", "image/png"))));
+
+            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
+                    new ToolRegistry.ToolInvocation("call-1", "mcp__demo__echo", "{}")));
+
+            assertEquals("screenshot", results.get(0).result());
+            assertTrue(results.get(0).hasImageParts());
+            assertEquals("image/png", results.get(0).imageParts().get(0).mimeType());
         });
     }
 

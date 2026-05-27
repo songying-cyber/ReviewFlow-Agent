@@ -4,10 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.context.TokenUsageFormatter;
 import com.paicli.llm.LlmClient;
+import com.paicli.llm.LlmTraceLogger;
 import com.paicli.lsp.LspDiagnosticReport;
 import com.paicli.memory.ConversationHistoryCompactor;
 import com.paicli.memory.MemoryManager;
 import com.paicli.plan.*;
+import com.paicli.prompt.PromptAssembler;
+import com.paicli.prompt.PromptContext;
+import com.paicli.prompt.PromptMode;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.skill.SkillContextBuffer;
 import com.paicli.skill.SkillIndexFormatter;
@@ -17,6 +21,7 @@ import com.paicli.tool.ToolRegistry;
 import com.paicli.tool.ToolRegistry.ToolExecutionResult;
 import com.paicli.tool.ToolRegistry.ToolInvocation;
 import com.paicli.util.TerminalMarkdownRenderer;
+import com.paicli.image.ImageReferenceParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,6 +29,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Supplier;
@@ -102,51 +108,7 @@ public class PlanExecuteAgent {
     private Supplier<String> externalContextSupplier = () -> "";
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
-
-    // 执行提示词
-    private static final String EXECUTION_PROMPT = """
-            你是一个任务执行专家。请根据当前任务和上下文，选择合适的工具或生成回复。
-
-            当前任务类型：%s
-            任务描述：%s
-
-            可用工具：
-            1. read_file - 读取文件内容，参数：{"path": "文件路径"}
-            2. write_file - 写入文件内容，参数：{"path": "文件路径", "content": "内容"}
-            3. list_dir - 列出目录内容，参数：{"path": "目录路径"}
-            4. execute_command - 执行命令，参数：{"command": "命令"}
-            5. create_project - 创建项目，参数：{"name": "名称", "type": "java|python|node"}
-            6. search_code - 语义检索代码库，参数：{"query": "自然语言描述", "top_k": 5}
-            7. web_search - 搜索互联网获取实时信息，参数：{"query": "搜索关键词", "top_k": 5}
-            8. web_fetch - 抓取已知 URL 并返回正文 Markdown，参数：{"url": "https://...", "max_chars": 8000}
-            9. save_memory - 在用户明确要求“记一下/记住/以后记得”时保存长期记忆，参数：{"fact": "精炼稳定事实"}
-            10. mcp__{server}__{tool} - MCP server 动态提供的外部工具，具体参数以工具 schema 为准
-
-            如果任务涉及理解代码库（如分析代码结构、查找实现位置），请优先使用 search_code 工具。
-            当用户明确说“记一下”“记住”“以后记得”或要求保存长期偏好/稳定事实时，必须调用 save_memory；
-            只保存跨会话仍成立的精炼事实，不保存一次性任务请求、临时文件名、模型猜测或当前轮执行计划。
-            如果任务需要实时互联网信息（如查询框架最新版本、官方文档），请使用 web_search 找入口，
-            拿到具体 URL 后用 web_fetch 抓取全文。已经有 URL 时直接 web_fetch，不要再 web_search 一次。
-            web_fetch 拿到空正文（SPA / 防爬墙）时，自动 fallback 到浏览器 MCP，不要重复 web_fetch。
-            工具选择 - 网页内容获取：静态 / SSR 页面用 web_fetch；SPA / React / Vue / 客户端渲染、需要 JS 才有内容、防爬墙、
-            需要登录态、需要表单交互（点击/输入/提交）时用浏览器 MCP（mcp__chrome-devtools__navigate_page + take_snapshot）。
-            微信公众号文章 (mp.weixin.qq.com)、知乎专栏、推特、小红书等站点 web_fetch 通常拿不到正文，应走浏览器 MCP。
-            浏览器操作优先 mcp__chrome-devtools__take_snapshot（结构化 DOM 文本），不要默认 take_screenshot；
-            表单填写优先 fill_form，等待异步加载用 wait_for，控制台排查用 list_console_messages，网络排查用 list_network_requests + get_network_request。
-            如果浏览器 MCP 返回登录页、权限不足、需要认证，或用户明确要求访问登录后页面，先调用 browser_connect 自动连接已允许远程调试的本机 Chrome，再重新打开原 URL；公开页面（如微信公众号文章）不要提前连接 shared。shared 模式下敏感页面改写操作会强制单步 HITL，close_page 只能关 PaiCLI 自己创建的 tab。
-            对于当前项目内的文件，请优先使用 read_file 或 list_dir，不要用 execute_command 扫描 /、~ 或整个文件系统。
-            execute_command 只适合在当前项目目录执行短时命令。
-            安全策略硬规则（HITL 之外的兜底，无法绕过）：read_file / write_file / list_dir / create_project 必须在项目根之内；write_file 单文件 5MB 上限；
-            execute_command 禁止 sudo / rm -rf 全盘 / mkfs / dd of=/dev / fork bomb / curl|sh / find / / chmod 777 / / shutdown。
-            被策略拒绝的工具调用（"🛡️ 策略拒绝" 开头）不要原样重试，改用项目内相对路径或更安全的命令。
-            MCP 工具来自外部 server，默认会触发 HITL 审批与审计；除非任务确实需要该 server 能力，否则优先使用内置工具。
-            同一轮返回多个工具调用时，系统会并行执行这些工具；如果工具之间有依赖关系，请分多轮调用。
-            如果需要同时检查多个已知且互不依赖的文件或目录（例如同时读取 pom.xml、README.md、ROADMAP.md，
-            或同时列出 src/main/java、src/test/java、src/main/resources），请在同一轮返回多个 read_file/list_dir 工具调用。
-            如果是ANALYSIS或VERIFICATION类型任务，请直接输出分析结果，不需要调用工具。
-
-            请用中文回复。
-            """;
+    private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
 
     public PlanExecuteAgent(LlmClient llmClient) {
         this(llmClient, (goal, plan) -> PlanReviewDecision.execute());
@@ -443,16 +405,12 @@ public class PlanExecuteAgent {
      */
     private TaskRunResult executeTask(String goal, ExecutionPlan plan, Task task,
                                       StreamState streamState, PrintStream out) throws IOException {
-        String prompt = String.format(EXECUTION_PROMPT,
-                task.getType(), task.getDescription());
-        String externalContext = buildExternalContext();
-        if (!externalContext.isEmpty()) {
-            prompt = prompt + "\n" + externalContext;
-        }
-        String skillIndex = buildSkillIndex();
-        if (!skillIndex.isEmpty()) {
-            prompt = prompt + "\n" + skillIndex;
-        }
+        String prompt = promptAssembler.assemble(PromptMode.PLAN, PromptContext.builder()
+                .variable("taskType", task.getType())
+                .variable("taskDescription", task.getDescription())
+                .externalContext(buildExternalContext())
+                .skillIndex(buildSkillIndex())
+                .build());
 
         // 注入长期记忆上下文
         String memoryContext = memoryManager.buildContextForQuery(
@@ -466,7 +424,9 @@ public class PlanExecuteAgent {
 
         List<LlmClient.Message> messages = new ArrayList<>(Arrays.asList(
                 LlmClient.Message.system(prompt),
-                LlmClient.Message.user(taskInput)
+                ImageReferenceParser.userMessage(
+                        taskInput,
+                        Path.of(toolRegistry.getProjectPath()))
         ));
 
         StringBuilder allResults = new StringBuilder();
@@ -494,6 +454,10 @@ public class PlanExecuteAgent {
                     toolRegistry.getToolDefinitions(),
                     streamRenderer
             );
+            LlmTraceLogger.logReasoning(log,
+                    "plan-task task=" + task.getId() + " iteration=" + iteration,
+                    llmClient,
+                    response.reasoningContent());
             if (CancellationContext.isCancelled()) {
                 streamRenderer.finish();
                 return TaskRunResult.of("⏹️ 已取消任务 [" + task.getId() + "]。", streamRenderer.hasStreamedOutput());
@@ -547,6 +511,7 @@ public class PlanExecuteAgent {
                 allResults.append(toolResult.result()).append("\n");
                 messages.add(LlmClient.Message.tool(toolResult.id(), toolResult.result()));
             }
+            appendImageToolMessages(messages, toolResults);
         }
 
         String fallbackResult = allResults.toString().trim();
@@ -610,6 +575,21 @@ public class PlanExecuteAgent {
             log.debug("Task {} tool result preview [{}]: {}", taskId, result.name(), preview(result.result(), 300));
         }
         return results;
+    }
+
+    private void appendImageToolMessages(List<LlmClient.Message> messages, List<ToolExecutionResult> toolResults) {
+        if (toolResults == null || toolResults.isEmpty()) {
+            return;
+        }
+        for (ToolExecutionResult result : toolResults) {
+            if (!result.hasImageParts()) {
+                continue;
+            }
+            List<LlmClient.ContentPart> parts = new ArrayList<>();
+            parts.add(LlmClient.ContentPart.text("工具 " + result.name() + " 返回了图片内容，请结合上面的工具文本结果分析。"));
+            parts.addAll(result.imageParts());
+            messages.add(LlmClient.Message.user(parts));
+        }
     }
 
     private static void printToolCalls(PrintStream out, List<LlmClient.ToolCall> toolCalls) {

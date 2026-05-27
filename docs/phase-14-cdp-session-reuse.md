@@ -38,7 +38,7 @@
 - Cookie 持久化到 PaiCLI 自己的存储
 - 多 Chrome profile 并行（同时连两个 Chrome 实例）
 - TLS 客户端证书 / mTLS 配置
-- 真 multimodal LLM 输入（仍走第 21 期）
+- 真 图片复制粘贴输入（仍走第 21 期）
 - Playwright / Firefox / WebKit 跨浏览器（仍走 chrome-devtools-mcp 专精）
 
 ---
@@ -753,7 +753,7 @@ if (BrowserGuard.requiresPerCallApproval(toolName, argsJson)) {
 - 多 Chrome profile 并行
 - TLS 客户端证书 / mTLS
 - DOM snapshot 内的敏感数据自动脱敏（接受边界，由敏感页面强制审批兜底）
-- 真 multimodal LLM 输入（第 21 期）
+- 真 图片复制粘贴输入（第 21 期）
 - Playwright / Firefox / WebKit 跨浏览器
 - 远程 host 连接（仅 127.0.0.1，避免 SSRF 风险）
 - `evaluate_script` 跳转后的敏感判定（无法可靠拦截，文档明示边界）
@@ -825,7 +825,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 | 跨平台 Chrome 启动命令 | macOS / Linux / Windows 三平台都给 |
 | `/browser connect` 探活与 setArgs 顺序 | 默认 `--autoConnect` 不探活，失败回滚；旧式 `/browser connect <port>` **先探活，再 setArgs**，失败不动 args |
 | 切换模式时 `approvedAllByServer` | **清空**，新模式新一轮信任 |
-| 第 21 期多模态、第 15 期 Skill 范围 | **保持原计划**，本期不动 |
+| 第 21 期图片输入、第 15 期 Skill 范围 | **保持原计划**，本期不动 |
 
 ---
 

@@ -161,17 +161,17 @@
 
 ---
 
-## 第8期：多模型适配 + 运行时切换（GLM / DeepSeek）✅
+## 第8期：多模型适配 + 运行时切换（GLM / DeepSeek / StepFun / Kimi）✅
 
 **已完成**
 
-**目标**：支持多模型运行时切换，GLM-5.1 和 DeepSeek V4 双模型
+**目标**：支持多模型运行时切换，当前包含 GLM-5.1、DeepSeek V4、StepFun 和 Kimi K2.6
 
 **功能迭代**：
 - `LlmClient` 接口抽象：将 GLMClient 的内部类型（Message、ToolCall、Tool 等）提升为接口级公共类型
 - `AbstractOpenAiCompatibleClient` 基类：共享 SSE 流式解析、请求构建、工具调用增量合并逻辑
-- `GLMClient` / `DeepSeekClient` 瘦子类：各约 20 行，仅提供 API URL、模型名、API Key
-- 运行时模型切换：`/model glm` `/model deepseek` 命令实时切换当前对话模型
+- `GLMClient` / `DeepSeekClient` / `StepClient` / `KimiClient` 瘦子类：仅提供 API URL、模型名、API Key 与 provider 差异
+- 运行时模型切换：`/model glm` `/model deepseek` `/model step` `/model kimi` 命令实时切换当前对话模型
 - 配置持久化：`~/.paicli/config.json` 存储默认模型，支持 `.env` 回退读取 API Key
 - `LlmClientFactory` 工厂：根据 provider 名称和配置创建对应客户端
 
@@ -279,7 +279,7 @@
 
 ## 第12期：长上下文工程（适配 200k–1M 模型 + prompt caching） ✅
 
-**目标**：适配 GLM-5.1（200k）/ DeepSeek V4（1M）/ Claude Sonnet 4.6（1M）等长上下文模型。第 3 期 Memory 是基于"短上下文兜底"假设设计的，长窗口下要切换策略。
+**目标**：适配 GLM-5.1（200k）/ DeepSeek V4（1M）/ StepFun（256k）/ Kimi K2.6（256k）/ Claude Sonnet 4.6（1M）等长上下文模型。第 3 期 Memory 是基于"短上下文兜底"假设设计的，长窗口下要切换策略。
 
 **功能迭代**（详细开发任务见 `docs/phase-12-long-context.md`）：
 - `LlmClient` 接口扩展能力声明：`maxContextWindow()` / `supportsPromptCaching()` / `promptCacheMode()`
@@ -317,7 +317,7 @@
 
 - 接入 Google 官方 `chrome-devtools-mcp@latest`（28 个工具：导航 / 输入 / 调试 / 网络 / 性能 / 模拟 / 扩展 / 内存）
 - **默认 enabled**：`~/.paicli/mcp.json` 不存在时启动自动创建模板，含 chrome-devtools 条目
-- `image` content 处理走**路线 B**：fallback 文案引导 LLM 优先用 `take_snapshot`（DOM 文本快照）而非 `take_screenshot`；不做真 multimodal LLM 输入（拆到第 21 期）
+- `image` content 处理走**路线 B**：fallback 文案引导 LLM 优先用 `take_snapshot`（DOM 文本快照）而非 `take_screenshot`；不做真 图片复制粘贴输入（拆到第 21 期）
 - HITL「全部放行」改为 **server 维度**：用户对 chrome-devtools 选 `a → server` 后，连续浏览器操作只需确认一次（`approvedAllByServer` 集合 + 子菜单）
 - `Agent` / `PlanExecuteAgent` / `SubAgent` 系统提示词加「web_fetch vs 浏览器 MCP」决策表，明示微信公众号 / 知乎 / 推特等典型 web_fetch 失败站点直接走浏览器
 - `McpClient.initialize` 超时 30s → 60s（chrome-devtools 首次启动需 npx 拉包 + Chrome 冷启 ≈ 20s+），可被 `paicli.mcp.initialize.timeout.seconds` 覆盖
@@ -325,7 +325,7 @@
 - 必跑端到端测试：微信公众号文章（`https://mp.weixin.qq.com/s/RB7kF_BbsJZ5_Hmu9PxWdg`），验证 web_fetch 失败 → LLM 自动 fallback 到浏览器 → take_snapshot 拿正文
 
 **不做（明确边界）**：
-- 真 multimodal LLM 输入（拆到第 21 期「多模态 LLM 输入」）
+- 真 图片复制粘贴输入（拆到第 21 期「图片复制粘贴输入」）
 - CDP 会话复用 / 登录态识别（第 14 期）
 - Playwright / Firefox / WebKit 跨浏览器
 - 浏览器执行隔离（默认 `--isolated=true` 临时 user-data-dir，第 14 期通过 `--autoConnect` 或旧式 `--browser-url` 复用已开 Chrome）
@@ -484,18 +484,20 @@
 
 **前置依赖**：第 1–16 期全链路（所有 system prompt 的累积）
 
+**当前状态**：MVP 已落地。ReAct、Plan task executor、Multi-Agent 三角色、Planner 已接入 `PromptAssembler`，内置资源位于 `src/main/resources/prompts/`，覆盖路径支持 `~/.paicli/prompts/...` 与 `.paicli/prompts/...`。
+
 **目标**：把分散在 `Agent.java` / `PlanExecuteAgent.java` / `SubAgent.java` 三处的硬编码 system prompt 重构为编译时嵌入的 Markdown 分层，支持用户级覆盖，让 prompt 调优从"改 Java 源码 + 重编译"变成"改 Markdown 文件"。
 
 **功能迭代**：
-- 分层 prompt 文件（`resources/prompts/`）：
+- 分层 prompt 文件（`src/main/resources/prompts/`）：
   - `base.md`：核心规则（工具使用、输出格式、子 Agent 协议、上下文管理）
-  - `modes/agent.md` / `modes/plan.md` / `modes/team.md`：各模式的工作流预期和权限
+  - `modes/agent.md` / `modes/plan.md` / `modes/planner.md` / `modes/team-planner.md` / `modes/team-worker.md` / `modes/team-reviewer.md`：各模式的工作流预期和权限
   - `approvals/suggest.md` / `approvals/auto.md` / `approvals/never.md`：审批策略
   - `personalities/calm.md`：语调（保留现有 `AGENTS.md` 中的 Personality 规范）
-- `PromptAssembler`：按固定顺序组装（base → personality → mode → approval → project_context → environment → instructions → skills → context_mgmt → handoff），遵循"volatile content last"原则以最大化 KV prefix cache 命中率
-- 用户级覆盖：`~/.paicli/prompts/base.md` 可整体替换内置 base.md；`~/.paicli/prompts/modes/agent.md` 可覆盖特定模式
+- `PromptAssembler`：按固定顺序组装（base → personality → mode → approval → project_context → skills → context_mgmt → handoff），遵循"volatile content last"原则以最大化 KV prefix cache 命中率
+- 用户级覆盖：`~/.paicli/prompts/base.md` 可整体替换内置 base.md；`~/.paicli/prompts/modes/agent.md` 可覆盖特定模式；项目级 `.paicli/prompts/...` 优先级更高
 - 启动时校验：必含 `## Language` section（保证 reasoning_content 语言跟随）
-- 兼容旧有 API：`Agent.java` / `PlanExecuteAgent.java` / `SubAgent.java` 不再手写 prompt，改为调 `PromptAssembler.assemble(mode, approvalMode, context)`
+- 兼容旧有 API：`Agent.java` / `PlanExecuteAgent.java` / `SubAgent.java` / `Planner.java` 不再手写运行模式 prompt，改为调 `PromptAssembler.assemble(mode, context)`
 - 自带 prompt 质量审计模板（参考 DeepSeek TUI `PROMPT_ANALYSIS.md`）：每次改 prompt 都应该写 Gap 分析
 
 **设计参考**：DeepSeek TUI `crates/tui/src/prompts.rs` + `crates/tui/src/prompts/*.md` 的分层架构，以及 `PROMPT_ANALYSIS.md` 的自我批判方法论。
@@ -510,7 +512,7 @@
 
 ---
 
-## 第20期：异步后台任务 + Runtime API（异步 & 无头场景）
+## 第20期：异步后台任务 + Runtime API（异步 & 无头场景） ✅ MVP
 
 **前置依赖**：第 13 期 Chrome DevTools MCP 已能产出截图等 image content；第 12 期长上下文工程已就绪。
 
@@ -545,11 +547,21 @@
 - HTTP/SSE 服务端嵌入（Javalin / Spring Boot 内嵌 + SSE emitter）
 - OpenAI Assistants API 兼容层设计
 
+**当前 MVP 已落地**：
+- `DurableTaskManager`：SQLite 后台任务队列，默认 `~/.paicli/tasks/tasks.db`
+- `/task`、`/task add`、`/task cancel`、`/task log` CLI 闭环
+- 进程启动时将残留 `running` 任务恢复为 `enqueued`
+- Worker Pool 默认 2，可用 `PAICLI_TASK_WORKERS` / `-Dpaicli.task.workers` 覆盖
+- `RuntimeApiServer`：基于 JDK `HttpServer`，仅监听 `127.0.0.1`
+- `RuntimeThreadStore`：SQLite 保存 thread 与 event 时间线
+- Runtime API 强制 `PAICLI_RUNTIME_API_KEY` / `-Dpaicli.runtime.api.key`
+- 详细实现文档：`docs/phase-20-runtime-api.md`
+
 **教程标题候选**：《不想守在终端前？后台任务 + HTTP API，Agent 可以在后台跑》
 
 ---
 
-## 第21期：多模态 LLM 输入（vision）
+## 第21期：图片复制粘贴输入 ✅ MVP
 
 **前置依赖**：第 13 期 Chrome DevTools MCP 已能产出截图等 image content；第 12 期长上下文工程已就绪；第 17–20 期安全网与架构已就绪。
 
@@ -558,15 +570,21 @@
 **功能迭代**：
 
 - `LlmClient.Message.content` 协议升级：从 `String` 扩展为 `List<ContentPart>`（含 `text` / `image_base64` / `image_url`）
-- 各 `LlmClient` 实现适配 OpenAI 兼容的 multimodal API：
-  - GLM-5.1V（智谱多模态变体）
-  - DeepSeek V4（如声明 vision 能力）
-  - Claude Sonnet / Opus 系列
-- `LlmClient` 接口加 `supportsVision()` 能力声明
-- 第 13 期的 `take_screenshot` image fallback 升级为真 multimodal 输入（仅在当前模型 `supportsVision()` 时生效）
+- 各 `LlmClient` 实现适配图片输入请求体；公共接口不声明图片能力，含图片时统一上传，provider API 负责最终接收或返回错误
+- 第 13 期的 `take_screenshot` image fallback 升级为图片附件回灌；输入层不按模型名拦截图片
 - 用户输入层：终端粘贴 base64 图片或 `@image:file://path/to/img.png` 显式引用
 - HITL 弹窗展示图片元数据（mimeType / size），不展示原图
-- 按 token 成本审计：image input 单独计费维度（多数 vision API 按 image tile 数计 token）
+- 按 token 成本审计：image input 单独计费维度（多数 图片输入 API 按 image tile 数计 token）
+
+**当前 MVP 已落地**：
+- `LlmClient.Message` 新增 `ContentPart`，旧字符串构造器保持兼容
+- `AbstractOpenAiCompatibleClient` 在含图片时输出带图片块的 content array，纯文本仍输出 string content
+- 公共 `LlmClient` 接口不做图片能力声明
+- MCP image content 的 `data` / `mimeType` 被保留为 `ToolOutput.imageParts`
+- ReAct / Plan task executor / SubAgent 在工具结果后追加图片 user message，不在 CLI 输入层按模型名拦截
+- 用户输入支持 `@image:file:///abs/path.png`、`@image:/abs/path.png`、`@image:relative/path.png`
+- 图片处理对齐 Claude Code：不 OCR 成文本；统一压缩 / 缩放后以图片块发送，并只补充来源、尺寸、坐标映射元信息
+- 详细实现文档：`docs/phase-21-image-input.md`
 
 **不做**：
 - 视频 / 音频输入（再独立期）
@@ -574,8 +592,8 @@
 - TUI sixel 协议显示截图（依赖第 16 期 TUI 是否实现，留作扩展）
 
 **核心知识点**：
-- OpenAI 兼容协议的 multimodal 扩展（content array vs string）
-- 各模型 vision 输入定价模型差异
+- OpenAI 兼容协议的 图片输入 扩展（content array vs string）
+- 各模型 图片输入定价模型差异
 - base64 图片在 JSON-RPC / HTTP / 流式响应里的传输与缓存
 - Agent 何时该截图、何时该读 DOM、何时该问用户（决策权 vs 成本）
 
@@ -596,8 +614,8 @@ ReAct    执行     上下文    检索       协作      协同      并行    
 能力     stdio+HTTP rsc/sample  200k-1M    DevTools   会话复用    系统       产品化     诊断注入
 
 第18期 ──► 第19期 ──► 第20期 ──► 第21期
-Git       Prompt    异步后台    多模态
-快照回滚   分层架构    Runtime API  vision
+Git       Prompt    异步后台    图片
+快照回滚   分层架构    Runtime API  图片输入
 ```
 
 ## 学习路径建议
@@ -633,4 +651,4 @@ Git       Prompt    异步后台    多模态
 
 ---
 
-*已完成第 16 期 TUI 产品化（含 16.1 形态修正：默认切换为 inline 流式 TUI，Lanterna 全屏 TUI 通过 `PAICLI_RENDERER=lanterna` 保留）、第 17 期 LSP 诊断注入 MVP，并开始落地第 18 期 Git Side-History 快照与回滚 MVP。后续第 19–20 期依次做 Prompt 分层、异步后台任务，第 21 期（原 17 期）多模态 vision 排在安全网与架构就绪之后。*
+*已完成第 16 期 TUI 产品化（含 16.1 形态修正：默认切换为 inline 流式 TUI，Lanterna 全屏 TUI 通过 `PAICLI_RENDERER=lanterna` 保留）、第 17 期 LSP 诊断注入 MVP、第 18 期 Git Side-History 快照与回滚 MVP、第 19 期 Prompt 分层架构 MVP、第 20 期后台任务 + Runtime API MVP、第 21 期图片复制粘贴输入 MVP。*

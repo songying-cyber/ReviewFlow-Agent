@@ -46,6 +46,47 @@ class MainInputNormalizationTest {
         assertTrue(hints.stream().anyMatch(hint -> hint.contains("输入 '/' 查看命令")));
         assertTrue(hints.stream().noneMatch(hint -> hint.contains("/model")));
         assertTrue(hints.stream().noneMatch(hint -> hint.contains("/index [路径]")));
+        assertTrue(hints.stream().noneMatch(hint -> hint.contains("/skill list")));
+    }
+
+    @Test
+    void promptDoesNotUseBottomSpaciousModeByDefault() {
+        assertFalse(Main.defaultSpaciousPrompt(false));
+        assertFalse(Main.defaultSpaciousPrompt(true));
+    }
+
+    @Test
+    void configuresAwtHeadlessOnMac() {
+        String oldOs = System.getProperty("os.name");
+        String oldHeadless = System.getProperty("java.awt.headless");
+        try {
+            System.setProperty("os.name", "Mac OS X");
+            System.clearProperty("java.awt.headless");
+
+            Main.configureAwtForCli();
+
+            assertEquals("true", System.getProperty("java.awt.headless"));
+        } finally {
+            restoreProperty("os.name", oldOs);
+            restoreProperty("java.awt.headless", oldHeadless);
+        }
+    }
+
+    @Test
+    void doesNotForceAwtHeadlessOnNonMac() {
+        String oldOs = System.getProperty("os.name");
+        String oldHeadless = System.getProperty("java.awt.headless");
+        try {
+            System.setProperty("os.name", "Linux");
+            System.clearProperty("java.awt.headless");
+
+            Main.configureAwtForCli();
+
+            assertFalse(System.getProperties().containsKey("java.awt.headless"));
+        } finally {
+            restoreProperty("os.name", oldOs);
+            restoreProperty("java.awt.headless", oldHeadless);
+        }
     }
 
     @Test
@@ -64,7 +105,9 @@ class MainInputNormalizationTest {
         String choices = Main.formatSlashCommandChoices(120);
 
         assertTrue(choices.contains("/model glm"), choices);
+        assertTrue(choices.contains("/model glm-5v-turbo"), choices);
         assertTrue(choices.contains("/model step"), choices);
+        assertTrue(choices.contains("/model kimi"), choices);
         assertTrue(choices.contains("/browser status"), choices);
         assertFalse(choices.contains("do you wish"), choices);
         assertTrue(choices.lines().count() < Main.slashCommandHints().size(),
@@ -140,6 +183,14 @@ class MainInputNormalizationTest {
     @Test
     void readEscCancelHandlesNullTerminalSafely() {
         assertFalse(Main.readEscCancel(null));
+    }
+
+    private static void restoreProperty(String key, String value) {
+        if (value == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, value);
+        }
     }
 
     private static LineReader newLineReader() throws Exception {

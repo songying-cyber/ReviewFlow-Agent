@@ -14,6 +14,19 @@ import static org.junit.jupiter.api.Assertions.*;
 class SkillCommandHandlerTest {
 
     @Test
+    void startupSummaryOnlyShowsCounts(@TempDir Path tempDir) throws IOException {
+        SkillRegistry registry = registryWith(tempDir,
+                new SkillSpec("web-access", "很长很长的联网决策说明，不应该出现在启动页", "1.0.0"),
+                new SkillSpec("debug-helper", "调试辅助", "0.1.0"));
+
+        String out = SkillCommandHandler.startupSummary(registry);
+
+        assertEquals("📚 Skills: 2/2 启用", out);
+        assertFalse(out.contains("web-access"));
+        assertFalse(out.contains("联网决策"));
+    }
+
+    @Test
     void listShowsAllSkillsWithStatus(@TempDir Path tempDir) throws IOException {
         SkillRegistry registry = registryWith(tempDir,
                 new SkillSpec("web-access", "联网决策", "1.0.0"),

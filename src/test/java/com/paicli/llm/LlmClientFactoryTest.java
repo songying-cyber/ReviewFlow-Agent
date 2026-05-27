@@ -12,6 +12,20 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class LlmClientFactoryTest {
 
     @Test
+    void createsGlm5vTurboClientWithMultimodalEndpoint() {
+        PaiCliConfig config = new PaiCliConfig();
+        config.getProviders().put("glm",
+                new PaiCliConfig.ProviderConfig("test-glm-key", null, "glm-5v-turbo"));
+
+        LlmClient client = LlmClientFactory.create("glm", config);
+
+        GLMClient glmClient = assertInstanceOf(GLMClient.class, client);
+        assertEquals("glm", glmClient.getProviderName());
+        assertEquals("glm-5v-turbo", glmClient.getModelName());
+        assertEquals("https://open.bigmodel.cn/api/paas/v4/chat/completions", glmClient.getApiUrl());
+    }
+
+    @Test
     void createsStepClientFromConfiguredProvider() {
         PaiCliConfig config = new PaiCliConfig();
         config.getProviders().put("step",
@@ -41,6 +55,24 @@ class LlmClientFactoryTest {
         StepClient stepClient = assertInstanceOf(StepClient.class, client);
         assertEquals("step-router-v1", stepClient.getModelName());
         assertEquals("https://api.stepfun.com/step_plan/v1/chat/completions", stepClient.getApiUrl());
+    }
+
+    @Test
+    void createsKimiClientFromMoonshotAliasAndCustomBaseUrl() {
+        PaiCliConfig config = new PaiCliConfig();
+        config.setProviders(new LinkedHashMap<>());
+        config.getProviders().put("kimi",
+                new PaiCliConfig.ProviderConfig(
+                        "test-kimi-key",
+                        "https://api.moonshot.ai/v1",
+                        "kimi-k2.6"));
+
+        LlmClient client = LlmClientFactory.create("moonshot", config);
+
+        KimiClient kimiClient = assertInstanceOf(KimiClient.class, client);
+        assertEquals("kimi", kimiClient.getProviderName());
+        assertEquals("kimi-k2.6", kimiClient.getModelName());
+        assertEquals(256_000, kimiClient.maxContextWindow());
     }
 
     @Test

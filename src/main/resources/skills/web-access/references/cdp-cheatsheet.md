@@ -53,7 +53,7 @@ google-chrome --remote-debugging-port=9222
 
 ### 调试（6）
 - `take_snapshot` — **首选** 结构化 DOM 文本快照，含元素 uid。LLM 直接读
-- `take_screenshot` — 截图 base64。LLM 看不到图，要向用户口述
+- `take_screenshot` — 截图 base64。vision 模型可作为图片输入查看；非 vision 模型只能拿到 fallback 文案
 - `evaluate_script` — 跑 JS。强力工具，shared 模式属敏感
 - `list_console_messages` / `get_console_message` — 控制台日志
 - `lighthouse_audit` — Lighthouse 审计
@@ -105,7 +105,7 @@ navigate_page(url)
 
 ## 常见陷阱
 
-1. **截图无意义**：`take_screenshot` 的 image content LLM 看不到，PaiCLI 现版本不直传给模型。一定要看页面布局时用，并且自己向用户描述。
+1. **不要默认截图**：`take_screenshot` 的 image content 只有在当前模型声明 vision 能力时才会作为图片输入；普通 DOM 阅读、文章总结、表单内容识别仍优先 `take_snapshot`。
 2. **selector 经常失效**：SPA 站点 class 名是 hash 化的（`._3f9k_aBcD2`），优先用 snapshot 拿 uid，再 click(uid) / fill(uid)。
 3. **wait_for 比 sleep 可靠**：等异步加载用 `wait_for`，不要用 `setTimeout` / `sleep`。
 4. **跨 tab 操作**：`new_page` 后默认不切换激活 tab，需要 `select_page` 或在 navigate 时显式指定 pageId。
