@@ -295,6 +295,7 @@ public class Main {
             }
             spaciousPrompt = defaultSpaciousPrompt(spaciousPrompt);
             bindCtrlVToClipboardImage(lineReader);
+            bindEscToClearInput(lineReader);
 
             while (true) {
                 PromptInput promptInput;
@@ -396,12 +397,13 @@ public class Main {
                         String selection = command.payload();
                         if (selection == null || selection.isEmpty()) {
                             System.out.println("🤖 当前模型: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")");
-                            System.out.println("   可用模型：glm, deepseek, step, kimi");
-                            System.out.println("   /model glm      - 切换到 GLM-5.1");
-                            System.out.println("   /model glm-5v-turbo - 切换到 GLM-5V-Turbo 多模态");
-                            System.out.println("   /model deepseek - 切换到 DeepSeek V4");
-                            System.out.println("   /model step     - 切换到阶跃星辰 StepFun");
-                            System.out.println("   /model kimi     - 切换到 Kimi K2.6\n");
+                            System.out.println("   GLM 明确模型：");
+                            System.out.println("   /model glm-5.1       - 切换到 GLM-5.1");
+                            System.out.println("   /model glm-5v-turbo  - 切换到 GLM-5V-Turbo 多模态");
+                            System.out.println("   其它 provider 使用你配置里的具体模型：");
+                            System.out.println("   /model deepseek      - 切换到 DeepSeek（读取配置模型）");
+                            System.out.println("   /model step          - 切换到 StepFun（读取配置模型）");
+                            System.out.println("   /model kimi          - 切换到 Kimi（读取配置模型）\n");
                         } else {
                             ModelSelection target = resolveModelSelection(selection);
                             if (target.explicitModel()) {
@@ -1104,11 +1106,11 @@ public class Main {
     static List<SlashCommandHint> slashCommandHints() {
         return List.of(
                 new SlashCommandHint("/model", "/model", "查看当前模型"),
-                new SlashCommandHint("/model glm", "/model glm", "切换到 GLM-5.1"),
+                new SlashCommandHint("/model glm-5.1", "/model glm-5.1", "切换到 GLM-5.1"),
                 new SlashCommandHint("/model glm-5v-turbo", "/model glm-5v-turbo", "切换到 GLM-5V-Turbo 多模态"),
-                new SlashCommandHint("/model deepseek", "/model deepseek", "切换到 DeepSeek V4"),
-                new SlashCommandHint("/model step", "/model step", "切换到阶跃星辰 StepFun"),
-                new SlashCommandHint("/model kimi", "/model kimi", "切换到 Kimi K2.6"),
+                new SlashCommandHint("/model deepseek", "/model deepseek", "切换到 DeepSeek（读取配置模型）"),
+                new SlashCommandHint("/model step", "/model step", "切换到 StepFun（读取配置模型）"),
+                new SlashCommandHint("/model kimi", "/model kimi", "切换到 Kimi（读取配置模型）"),
                 new SlashCommandHint("/plan", "/plan", "下一条任务使用 Plan-and-Execute 模式"),
                 new SlashCommandHint("/plan ", "/plan <任务内容>", "直接用计划模式执行这条任务"),
                 new SlashCommandHint("/team", "/team", "下一条任务使用 Multi-Agent 协作模式"),
@@ -1251,7 +1253,7 @@ public class Main {
             return;
         }
         String hint = switch (selected) {
-            case 0, 1 -> "💡 切换模型: /model glm / /model deepseek / /model step / /model kimi";
+            case 0, 1 -> "💡 GLM: /model glm-5.1 / /model glm-5v-turbo；其它: /model deepseek|step|kimi 读取配置模型";
             case 2 -> "💡 切换 HITL: /hitl on / /hitl off";
             case 3 -> "💡 管理 Skill: /skill list / /skill on <name> / /skill off <name>";
             case 4 -> "💡 切换渲染器（重启后生效）: PAICLI_RENDERER=inline|lanterna|plain";
@@ -1300,7 +1302,6 @@ public class Main {
             }
             String token = "@image:<" + grab.path().toAbsolutePath() + "> ";
             lineReader.getBuffer().write(token);
-            lineReader.printAbove("✅ 已接收剪贴板图片: " + ClipboardImage.describe(grab.path()));
             lineReader.callWidget(LineReader.REDISPLAY);
             return true;
         });
@@ -1312,6 +1313,32 @@ public class Main {
                 map.bind(ref, ctrlV);
             }
         }
+    }
+
+    static void bindEscToClearInput(LineReader lineReader) {
+        if (lineReader == null) {
+            return;
+        }
+        lineReader.getWidgets().put("paicli-clear-input", () -> {
+            clearInputBuffer(lineReader);
+            lineReader.callWidget(LineReader.REDISPLAY);
+            return true;
+        });
+        Reference clearInput = new Reference("paicli-clear-input");
+        String esc = KeyMap.esc();
+        for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
+            KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
+            if (map != null) {
+                map.bind(clearInput, esc);
+            }
+        }
+    }
+
+    static void clearInputBuffer(LineReader lineReader) {
+        if (lineReader == null || lineReader.getBuffer() == null) {
+            return;
+        }
+        lineReader.getBuffer().clear();
     }
 
     private static void printPolicyStatus(Agent reactAgent) {
@@ -1765,7 +1792,7 @@ public class Main {
         String value = raw == null ? "" : raw.trim();
         String normalized = value.toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "glm" -> new ModelSelection("glm", null, false);
+            case "glm" -> new ModelSelection("glm", "glm-5.1", true);
             case "deepseek" -> new ModelSelection("deepseek", null, false);
             case "step", "stepfun", "step-fun" -> new ModelSelection("step", null, false);
             case "kimi", "moonshot", "moonshotai", "moonshot-ai" -> new ModelSelection("kimi", null, false);

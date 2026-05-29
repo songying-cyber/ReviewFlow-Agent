@@ -90,6 +90,16 @@ class MainInputNormalizationTest {
     }
 
     @Test
+    void clearsCurrentInputBufferForEscWidget() throws Exception {
+        LineReader lineReader = newLineReader();
+        lineReader.getBuffer().write("@image:</tmp/shot.png> 这张图呢");
+
+        Main.clearInputBuffer(lineReader);
+
+        assertEquals("", lineReader.getBuffer().toString());
+    }
+
+    @Test
     void slashCommandHintsIncludeRagSlashCommands() {
         List<String> commands = Main.slashCommandHints().stream()
                 .map(Main.SlashCommandHint::display)
@@ -104,7 +114,7 @@ class MainInputNormalizationTest {
     void slashCommandChoicesAreRenderedDirectlyWithoutJLineConfirmationText() {
         String choices = Main.formatSlashCommandChoices(120);
 
-        assertTrue(choices.contains("/model glm"), choices);
+        assertTrue(choices.contains("/model glm-5.1"), choices);
         assertTrue(choices.contains("/model glm-5v-turbo"), choices);
         assertTrue(choices.contains("/model step"), choices);
         assertTrue(choices.contains("/model kimi"), choices);

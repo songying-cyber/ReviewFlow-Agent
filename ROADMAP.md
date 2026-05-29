@@ -171,7 +171,7 @@
 - `LlmClient` 接口抽象：将 GLMClient 的内部类型（Message、ToolCall、Tool 等）提升为接口级公共类型
 - `AbstractOpenAiCompatibleClient` 基类：共享 SSE 流式解析、请求构建、工具调用增量合并逻辑
 - `GLMClient` / `DeepSeekClient` / `StepClient` / `KimiClient` 瘦子类：仅提供 API URL、模型名、API Key 与 provider 差异
-- 运行时模型切换：`/model glm` `/model deepseek` `/model step` `/model kimi` 命令实时切换当前对话模型
+- 运行时模型切换：`/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型；`/model deepseek` / `/model step` / `/model kimi` 切 provider 并读取配置里的具体模型
 - 配置持久化：`~/.paicli/config.json` 存储默认模型，支持 `.env` 回退读取 API Key
 - `LlmClientFactory` 工厂：根据 provider 名称和配置创建对应客户端
 

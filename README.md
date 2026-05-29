@@ -80,7 +80,7 @@ mvn test
 
 - `LlmClient` 接口抽象 + `AbstractOpenAiCompatibleClient` 模板基类
 - 内置 `GLMClient`、`DeepSeekClient`、`StepClient`、`KimiClient` 四个瘦实现
-- `/model glm` / `/model glm-5v-turbo` / `/model deepseek` / `/model step` / `/model kimi` 运行时切换当前对话模型
+- `/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型；`/model deepseek` / `/model step` / `/model kimi` 切 provider 并读取配置里的具体模型
 - 配置持久化到 `~/.paicli/config.json`，API Key 可从配置、环境变量或 `.env` 读取
 
 ### 第九期：联网能力 + Web 工具
@@ -307,7 +307,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 ### 第八期
 
-- 🔄 GLM-5.1、GLM-5V-Turbo、DeepSeek V4、阶跃星辰 StepFun 与 Kimi K2.6 多模型，`/model glm` / `/model glm-5v-turbo` / `/model deepseek` / `/model step` / `/model kimi` 运行时切换
+- 🔄 GLM-5.1、GLM-5V-Turbo、DeepSeek V4、阶跃星辰 StepFun 与 Kimi K2.6 多模型，`/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型，`/model deepseek` / `/model step` / `/model kimi` 读取配置模型
 - 🧱 `LlmClient` 接口 + 模板方法基类，新增 provider 只需 ~20 行
 - 💾 默认模型持久化到 `~/.paicli/config.json`
 

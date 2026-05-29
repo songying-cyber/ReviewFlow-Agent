@@ -47,6 +47,16 @@ class CliCommandParserTest {
         assertNull(provider.model());
         assertEquals(false, provider.explicitModel());
 
+        Main.ModelSelection defaultGlm = Main.resolveModelSelection("glm");
+        assertEquals("glm", defaultGlm.provider());
+        assertEquals("glm-5.1", defaultGlm.model());
+        assertEquals(true, defaultGlm.explicitModel());
+
+        Main.ModelSelection explicitGlm = Main.resolveModelSelection("glm-5.1");
+        assertEquals("glm", explicitGlm.provider());
+        assertEquals("glm-5.1", explicitGlm.model());
+        assertEquals(true, explicitGlm.explicitModel());
+
         Main.ModelSelection kimi = Main.resolveModelSelection("kimi-k2.6");
         assertEquals("kimi", kimi.provider());
         assertEquals("kimi-k2.6", kimi.model());
