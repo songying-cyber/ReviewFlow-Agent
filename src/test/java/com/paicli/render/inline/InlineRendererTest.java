@@ -4,9 +4,11 @@ import com.paicli.hitl.ApprovalRequest;
 import com.paicli.hitl.ApprovalResult;
 import com.paicli.llm.LlmClient;
 import com.paicli.render.StatusInfo;
+import org.jline.reader.LineReader;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayOutputStream;
@@ -63,6 +65,113 @@ class InlineRendererTest {
         InlineRenderer renderer = new InlineRenderer(terminal);
         try {
             assertNotNull(renderer.stream());
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
+    void streamUsesPrintAboveWhenLineReaderIsReading() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        LineReader lineReader = Mockito.mock(LineReader.class);
+        Mockito.when(lineReader.isReading()).thenReturn(true);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.bindLineReader(lineReader);
+            renderer.beginTurn();
+            renderer.stream().println("异步通知");
+
+            Mockito.verify(lineReader).printAbove("异步通知\n");
+            assertFalse(sink.toString(StandardCharsets.UTF_8).contains("异步通知"));
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
+    void streamedCodeBlockUsesCollapsedHeaderWithPrintAbove() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        LineReader lineReader = Mockito.mock(LineReader.class);
+        Mockito.when(lineReader.isReading()).thenReturn(true);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.bindLineReader(lineReader);
+            renderer.beginTurn();
+            renderer.stream().println("┌─ code: bash");
+            renderer.stream().println("    echo hi");
+            renderer.stream().println("└─ end");
+
+            ArgumentCaptor<String> output = ArgumentCaptor.forClass(String.class);
+            Mockito.verify(lineReader).printAbove(output.capture());
+            String rendered = output.getValue();
+            assertTrue(rendered.contains("⏵"), rendered);
+            assertTrue(rendered.contains("code: bash"), rendered);
+            assertTrue(rendered.contains("1 行"), rendered);
+            assertFalse(rendered.contains("echo hi"), rendered);
+            assertFalse(sink.toString(StandardCharsets.UTF_8).contains("echo hi"));
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
+    void inlineRendererKeepsPromptInTranscriptFlow() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.start();
+            sink.reset();
+            renderer.beforeInput();
+            renderer.afterInput();
+
+            String emitted = sink.toString(StandardCharsets.UTF_8);
+            assertEquals("* ", renderer.inputPrompt());
+            assertTrue(renderer.inputRightPrompt().contains("@path"));
+            assertFalse(emitted.contains("[39;1H"), "LineReader should own the input row: " + emitted);
+            assertFalse(emitted.contains("[37;1H"), "renderer should not force transcript cursor rows: " + emitted);
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
+    void thinkingPanelRendersDynamicQuotedReasoningAndClears() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.beginThinking("Thinking");
+            renderer.appendThinking("先分析用户输入\n再检查状态栏边界");
+
+            String rendered = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(renderer.supportsThinkingPanel());
+            assertTrue(rendered.contains("Thinking"), rendered);
+            assertTrue(rendered.contains("> 先分析用户输入"), rendered);
+            assertTrue(rendered.contains("> 再检查状态栏边界"), rendered);
+
+            sink.reset();
+            renderer.endThinking();
+            String cleared = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(cleared.contains(AnsiSeq.CLEAR_TO_EOS), cleared);
         } finally {
             renderer.close();
         }

@@ -34,7 +34,7 @@ import java.util.function.Supplier;
  * 并行策略：
  * - 同一依赖批次内部 **并行** 执行（最多 Worker 池大小并发，默认 2）
  * - 每个并行步骤使用独立的 PrintStream 缓冲流式输出，批次结束后按 step_id 顺序 flush 到 stdout，
- *   避免多线程写 System.out 造成交错，同时仍让用户看到结构化的执行过程
+ *   避免多线程写同一个终端流造成交错，同时仍让用户看到结构化的执行过程
  * - 单步批次仍走直连流式路径，保持"实时打字"的观感
  * - Worker 通过 {@link java.util.concurrent.BlockingQueue} 池化分配，确保同一 Worker 不会被两个步骤并发占用
  * - Reviewer 在并行路径中按步骤即时创建独立实例，避免对话历史竞争
@@ -50,6 +50,7 @@ public class AgentOrchestrator {
     private final SubAgent reviewer;
     private final MemoryManager memoryManager;
     private final ToolRegistry toolRegistry;
+    private final PrintStream out;
     private Supplier<String> externalContextSupplier = () -> "";
 
     // 执行步骤的数据结构（package-private 供测试访问）
@@ -86,7 +87,13 @@ public class AgentOrchestrator {
     }
 
     public AgentOrchestrator(LlmClient llmClient, ToolRegistry toolRegistry, MemoryManager memoryManager) {
+        this(llmClient, toolRegistry, memoryManager, System.out);
+    }
+
+    public AgentOrchestrator(LlmClient llmClient, ToolRegistry toolRegistry,
+                             MemoryManager memoryManager, PrintStream out) {
         this.llmClient = llmClient;
+        this.out = out == null ? System.out : out;
         this.toolRegistry = toolRegistry;
         this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
         this.toolRegistry.setMemorySaver(memoryManager::storeFact);
@@ -134,12 +141,12 @@ public class AgentOrchestrator {
         }
 
         // 1. 规划阶段：让规划者拆解任务
-        System.out.println(AnsiStyle.heading("📋 第一阶段：规划"));
-        System.out.println("🧑‍💼 规划者正在分析任务...\n");
+        out.println(AnsiStyle.heading("📋 第一阶段：规划"));
+        out.println("🧑‍💼 规划者正在分析任务...\n");
 
         AgentMessage planMessage = AgentMessage.task("orchestrator",
                 "请为以下任务制定执行计划：\n" + userInput);
-        AgentMessage planResult = planner.execute(planMessage);
+        AgentMessage planResult = planner.execute(planMessage, out);
         planner.clearHistory();
         if (CancellationContext.isCancelled()) {
             return "⏹️ 已取消当前多 Agent 任务。";
@@ -158,11 +165,11 @@ public class AgentOrchestrator {
             return "❌ 规划失败：无法解析执行计划\n原始输出:\n" + planResult.content();
         }
 
-        System.out.println(AnsiStyle.heading("📋 执行计划"));
-        System.out.println(summarizeSteps(steps) + "\n");
+        out.println(AnsiStyle.heading("📋 执行计划"));
+        out.println(summarizeSteps(steps) + "\n");
 
         // 3. 执行阶段：按依赖顺序分配给执行者
-        System.out.println(AnsiStyle.heading("⚡ 第二阶段：执行"));
+        out.println(AnsiStyle.heading("⚡ 第二阶段：执行"));
         Map<String, Integer> retryCount = new ConcurrentHashMap<>();
         int singleStepCursor = 0;
         int batchIndex = 0;
@@ -183,11 +190,11 @@ public class AgentOrchestrator {
                 SubAgent worker = workers.get(singleStepCursor % workers.size());
                 singleStepCursor++;
                 String context = buildStepContext(steps, step);
-                runStep(step, steps, retryCount, worker, reviewer, context, System.out);
+                runStep(step, steps, retryCount, worker, reviewer, context, out);
                 worker.clearHistory();
             } else {
                 // 多步批次：真正并行执行，每步用独立的 PrintStream 缓冲，完成后按 step_id 顺序 flush
-                System.out.println("⚡ 批次 #" + batchIndex + "：" + executable.size()
+                out.println("⚡ 批次 #" + batchIndex + "：" + executable.size()
                         + " 个独立步骤并行执行（最多 " + workers.size() + " 个并发 Worker）\n");
                 runBatchParallel(executable, steps, retryCount);
             }
@@ -196,7 +203,7 @@ public class AgentOrchestrator {
         // 5. 处理因前置失败而无法执行的残留步骤（显式提示用户）
         for (ExecutionStep step : steps) {
             if (step.status() == StepStatus.PENDING) {
-                System.out.println("⏭️ 步骤 [" + step.id() + "] 因前置步骤失败被跳过: " + step.description());
+                out.println("⏭️ 步骤 [" + step.id() + "] 因前置步骤失败被跳过: " + step.description());
             }
         }
 
@@ -458,8 +465,8 @@ public class AgentOrchestrator {
         for (ExecutionStep step : batch) {
             ByteArrayOutputStream buf = buffers.get(step.id());
             if (buf != null && buf.size() > 0) {
-                System.out.print(buf.toString(StandardCharsets.UTF_8));
-                System.out.flush();
+                out.print(buf.toString(StandardCharsets.UTF_8));
+                out.flush();
             }
         }
     }

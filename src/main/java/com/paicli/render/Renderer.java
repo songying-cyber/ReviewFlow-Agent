@@ -13,8 +13,9 @@ import java.util.List;
  * <p>把对话流核心交互（流式输出、工具调用、HITL、状态栏、行内 diff、palette）
  * 收口到一个接口，方便 inline 流式 / Lanterna 全屏 / plain 三种形态切换。
  *
- * <p>非对话流的输出（banner、slash 命令结果、错误提示等）不经过此接口，
- * 仍走原有 {@code System.out.println}，避免大改 {@code Main.java}。
+ * <p>启动期一次性输出（banner、MCP/Skill 摘要等）仍可走原有 stdout；
+ * 对话期的流、工具块、状态栏、输入区应尽量经过 Renderer，避免多个组件
+ * 直接争抢终端光标。
  *
  * <p>线程模型：所有方法应在调用方线程同步返回；
  * 涉及异步（如 Lanterna GUI 线程）的实现负责自己做线程封送。
@@ -26,6 +27,41 @@ public interface Renderer extends AutoCloseable {
 
     /** 开始一次用户任务输出。默认 no-op；inline renderer 用它重置本轮可重绘 transcript。 */
     default void beginTurn() {
+    }
+
+    /** 进入用户输入前。inline renderer 用它刷新输入周边状态。 */
+    default void beforeInput() {
+    }
+
+    /** 用户输入结束后。inline renderer 用它恢复输入周边状态。 */
+    default void afterInput() {
+    }
+
+    /** 当前渲染器是否支持独立的模型思考面板。 */
+    default boolean supportsThinkingPanel() {
+        return false;
+    }
+
+    /** 开始显示模型思考面板。plain renderer 保持 no-op，继续用正文流式输出。 */
+    default void beginThinking(String label) {
+    }
+
+    /** 追加模型 reasoning delta 到思考面板。 */
+    default void appendThinking(String delta) {
+    }
+
+    /** 结束并清理模型思考面板。 */
+    default void endThinking() {
+    }
+
+    /** 当前渲染器希望 LineReader 使用的左侧输入提示。 */
+    default String inputPrompt() {
+        return "> ";
+    }
+
+    /** 当前渲染器希望 LineReader 使用的右侧提示；返回 null 表示不显示。 */
+    default String inputRightPrompt() {
+        return null;
     }
 
     @Override

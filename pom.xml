@@ -48,11 +48,12 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- JLine for terminal input handling -->
+        <!-- JLine for terminal input, status area and interactive widgets -->
         <dependency>
             <groupId>org.jline</groupId>
             <artifactId>jline</artifactId>
-            <version>3.26.3</version>
+            <version>4.0.0</version>
+            <classifier>jdk11</classifier>
         </dependency>
 
         <!-- 中文分词 -->

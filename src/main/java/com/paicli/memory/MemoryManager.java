@@ -2,6 +2,8 @@ package com.paicli.memory;
 
 import com.paicli.llm.LlmClient;
 import com.paicli.context.ContextProfile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -14,6 +16,7 @@ import java.util.UUID;
  * 为 Agent 提供简洁的记忆存取接口。
  */
 public class MemoryManager {
+    private static final Logger log = LoggerFactory.getLogger(MemoryManager.class);
     private final ConversationMemory shortTermMemory;
     private final LongTermMemory longTermMemory;
     private final ContextCompressor compressor;
@@ -160,13 +163,13 @@ public class MemoryManager {
             return false;
         }
         int beforeTokens = shortTermMemory.getTokenCount();
-        System.out.println("📦 上下文占用达到压缩阈值（" + (int) (contextProfile.compressionTriggerRatio() * 100)
-                + "%），触发压缩...");
+        log.info("上下文占用达到压缩阈值（{}%），触发短期记忆压缩",
+                (int) (contextProfile.compressionTriggerRatio() * 100));
         String summary = compressor.compress(shortTermMemory);
         if (summary != null) {
             int afterTokens = shortTermMemory.getTokenCount();
-            System.out.println("   压缩完成: " + beforeTokens + " → " + afterTokens + " tokens，摘要: "
-                    + summary.substring(0, Math.min(100, summary.length())) + "...");
+            String preview = summary.substring(0, Math.min(100, summary.length()));
+            log.info("短期记忆压缩完成: {} -> {} tokens, summaryPreview={}", beforeTokens, afterTokens, preview);
         }
         return summary != null;
     }

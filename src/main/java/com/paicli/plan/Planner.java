@@ -12,6 +12,7 @@ import com.paicli.util.TerminalMarkdownRenderer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.PrintStream;
 import java.io.IOException;
 import java.util.*;
 
@@ -22,18 +23,24 @@ public class Planner {
     private static final Logger log = LoggerFactory.getLogger(Planner.class);
 
     private final LlmClient llmClient;
+    private final PrintStream out;
     private final ObjectMapper mapper = new ObjectMapper();
     private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
 
     public Planner(LlmClient llmClient) {
+        this(llmClient, System.out);
+    }
+
+    public Planner(LlmClient llmClient, PrintStream out) {
         this.llmClient = llmClient;
+        this.out = out == null ? System.out : out;
     }
 
     /**
      * 为复杂任务创建执行计划
      */
     public ExecutionPlan createPlan(String goal) throws IOException {
-        System.out.println("📋 正在规划任务: " + goal + "\n");
+        out.println("📋 正在规划任务: " + goal + "\n");
 
         if (isSimpleGoal(goal)) {
             return createMinimalPlan(goal);
@@ -46,7 +53,7 @@ public class Planner {
         );
 
         // 调用LLM生成计划
-        PlanningStreamRenderer streamRenderer = new PlanningStreamRenderer();
+        PlanningStreamRenderer streamRenderer = new PlanningStreamRenderer(out);
         LlmClient.ChatResponse response = llmClient.chat(messages, null, streamRenderer);
         LlmTraceLogger.logReasoning(log, "planner", llmClient, response.reasoningContent());
         streamRenderer.finish();
@@ -141,7 +148,7 @@ public class Planner {
      * 根据执行结果重新规划
      */
     public ExecutionPlan replan(ExecutionPlan failedPlan, String failureReason) throws IOException {
-        System.out.println("🔄 重新规划，原因: " + failureReason + "\n");
+        out.println("🔄 重新规划，原因: " + failureReason + "\n");
 
         StringBuilder context = new StringBuilder();
         context.append("原任务: ").append(failedPlan.getGoal()).append("\n");
@@ -237,9 +244,14 @@ public class Planner {
     }
 
     private static final class PlanningStreamRenderer implements LlmClient.StreamListener {
+        private final PrintStream out;
         private TerminalMarkdownRenderer reasoningRenderer;
         private boolean reasoningStarted;
         private boolean streamed;
+
+        private PlanningStreamRenderer(PrintStream out) {
+            this.out = out == null ? System.out : out;
+        }
 
         @Override
         public void onReasoningDelta(String delta) {
@@ -247,13 +259,13 @@ public class Planner {
                 return;
             }
             if (!reasoningStarted) {
-                System.out.println(AnsiStyle.heading("🧠 规划思考"));
-                reasoningRenderer = new TerminalMarkdownRenderer(System.out);
+                out.println(AnsiStyle.heading("🧠 规划思考"));
+                reasoningRenderer = new TerminalMarkdownRenderer(out);
                 reasoningStarted = true;
                 streamed = true;
             }
             reasoningRenderer.append(delta);
-            System.out.flush();
+            out.flush();
         }
 
         private void finish() {
@@ -261,7 +273,7 @@ public class Planner {
                 if (reasoningRenderer != null) {
                     reasoningRenderer.finish();
                 }
-                System.out.println("\n");
+                out.println("\n");
             }
         }
     }

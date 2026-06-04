@@ -133,17 +133,18 @@ public class Agent {
                 userMessageContent,
                 Path.of(toolRegistry.getProjectPath())));
         StringBuilder reasoningTranscript = new StringBuilder();
-        StreamRenderer streamRenderer = new StreamRenderer(renderer().stream());
+        StreamRenderer streamRenderer = new StreamRenderer(renderer());
 
         long startNanos = System.nanoTime();
         AgentBudget budget = AgentBudget.fromLlmClient(llmClient);
-        pushStatus(budget, startNanos);
+        pushStatus(budget, startNanos, "running");
 
         // 主退出条件 = LLM 自己决定（不再调用工具就返回）；
         // budget 仅在 token 用尽 / 检测到死循环 / 超出硬轮数时兜底。
         while (true) {
             if (CancellationContext.isCancelled()) {
                 log.info("ReAct run cancelled before iteration");
+                pushStatus(budget, startNanos, "idle");
                 return "⏹️ 已取消当前任务。";
             }
             // 调 LLM 前评估 conversationHistory 是否接近 window 上限；超阈值就把早期消息压缩成摘要。
@@ -153,12 +154,12 @@ public class Agent {
             maybeCompactHistory();
             AgentBudget.ExitReason exitReason = budget.check();
             if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
-                String statsLine = formatTokenStats(budget, startNanos);
                 String description = budget.describeExit(exitReason);
                 log.warn("ReAct run exhausted budget: reason={}, iteration={}, tokens={}/{}",
                         exitReason, budget.iteration(),
                         budget.totalInputTokens() + budget.totalOutputTokens(), budget.tokenBudget());
-                return "❌ " + description + "\n\n" + statsLine;
+                pushStatus(budget, startNanos, "idle");
+                return "❌ " + description;
             }
 
             int iteration = budget.beginIteration();
@@ -166,6 +167,7 @@ public class Agent {
             try {
                 List<LlmClient.Tool> toolDefinitions = toolRegistry.getToolDefinitions();
                 logRequestContext("react iteration=" + iteration, toolDefinitions);
+                streamRenderer.beginThinking();
                 // 调用 LLM
                 LlmClient.ChatResponse response = llmClient.chat(
                         conversationHistory,
@@ -175,18 +177,19 @@ public class Agent {
                 LlmTraceLogger.logReasoning(log, "react iteration=" + iteration, llmClient, response.reasoningContent());
                 if (CancellationContext.isCancelled()) {
                     log.info("ReAct run cancelled after LLM response");
+                    streamRenderer.finish();
+                    pushStatus(budget, startNanos, "idle");
                     return "⏹️ 已取消当前任务。";
                 }
 
                 budget.recordTokens(response.inputTokens(), response.outputTokens(), response.cachedInputTokens());
-                pushStatus(budget, startNanos);
+                pushStatus(budget, startNanos, "running");
 
                 // 如果有工具调用
                 if (response.hasToolCalls()) {
                     appendReasoning(reasoningTranscript, response.reasoningContent());
                     log.info("LLM requested {} tool call(s) in iteration {}", response.toolCalls().size(), iteration);
                     budget.recordToolCalls(response.toolCalls());
-                    renderer().appendToolCalls(response.toolCalls());
                     // 添加助手消息（包含工具调用）
                     conversationHistory.add(LlmClient.Message.assistant(
                             response.reasoningContent(),
@@ -198,6 +201,7 @@ public class Agent {
                     // 内部 pending 缓冲区（仅按换行 flush）里的文本被 HITL 提示"跨过"
                     // 造成标题和内容错位。重置后下一轮迭代的 reasoning/content 会重新打印标题。
                     streamRenderer.resetBetweenIterations();
+                    renderer().appendToolCalls(response.toolCalls());
 
                     List<ToolExecutionResult> toolResults = executeToolCalls(response.toolCalls(), iteration);
                     for (ToolExecutionResult toolResult : toolResults) {
@@ -219,6 +223,7 @@ public class Agent {
 
                 // 记录 token 使用
                 memoryManager.recordTokenUsage(budget.totalInputTokens(), budget.totalOutputTokens(), budget.totalCachedInputTokens());
+                pushStatus(budget, startNanos, "idle");
                 log.info("ReAct run finished: inputTokens={}, outputTokens={}, reasoningChars={}, answerChars={}",
                         budget.totalInputTokens(),
                         budget.totalOutputTokens(),
@@ -228,18 +233,16 @@ public class Agent {
                     log.debug("Assistant answer preview: {}", preview(response.content(), 500));
                 }
 
-                String statsLine = formatTokenStats(budget, startNanos);
-
                 if (streamRenderer.hasStreamedOutput()) {
                     streamRenderer.finish();
-                    renderer().stream().println(statsLine);
                     return "";
                 }
-                return formatUserFacingResponse(reasoningTranscript.toString(), response.content())
-                        + "\n\n" + statsLine;
+                streamRenderer.clearThinkingPanel();
+                return formatUserFacingResponse(reasoningTranscript.toString(), response.content());
 
             } catch (IOException e) {
                 log.error("LLM call failed in ReAct loop", e);
+                streamRenderer.finish();
                 return "❌ 调用 LLM 失败: " + e.getMessage();
             }
         }
@@ -278,7 +281,7 @@ public class Agent {
         try {
             boolean compacted = historyCompactor.compactIfNeeded(conversationHistory, trigger);
             if (compacted) {
-                System.out.println("📦 上下文接近窗口上限，已把早期对话压缩为摘要后继续。");
+                renderer().stream().println("📦 上下文接近窗口上限，已把早期对话压缩为摘要后继续。");
             }
         } catch (Exception e) {
             log.warn("conversationHistory compaction failed", e);
@@ -547,7 +550,7 @@ public class Agent {
     }
 
     /** 把当前预算/耗时/HITL 状态推送给 renderer 状态栏。 */
-    private void pushStatus(AgentBudget budget, long startNanos) {
+    private void pushStatus(AgentBudget budget, long startNanos, String phase) {
         try {
             String model = llmClient == null ? "—" : llmClient.getModelName();
             long totalTokens = budget == null ? 0L
@@ -555,19 +558,26 @@ public class Agent {
             long contextWindow = llmClient == null ? 0L : llmClient.maxContextWindow();
             boolean hitl = Boolean.TRUE.equals(hitlEnabledSupplier.get());
             long elapsed = (System.nanoTime() - startNanos) / 1_000_000L;
-            renderer().updateStatus(new StatusInfo(model, totalTokens, contextWindow, hitl, elapsed));
+            String cost = budget == null ? null : TokenUsageFormatter.estimatedCostCny(
+                    llmClient,
+                    budget.totalInputTokens(),
+                    budget.totalOutputTokens(),
+                    budget.totalCachedInputTokens());
+            renderer().updateStatus(StatusInfo.tokens(
+                    model,
+                    contextWindow,
+                    budget == null ? 0L : budget.totalInputTokens(),
+                    budget == null ? 0L : budget.totalOutputTokens(),
+                    budget == null ? 0L : budget.totalCachedInputTokens(),
+                    cost,
+                    hitl,
+                    elapsed,
+                    phase == null || phase.isBlank()
+                            ? (totalTokens > 0 || elapsed > 0 ? "running" : "idle")
+                            : phase));
         } catch (Exception e) {
             log.debug("status push failed", e);
         }
-    }
-
-    private String formatTokenStats(AgentBudget budget, long startNanos) {
-        return TokenUsageFormatter.format(
-                llmClient,
-                budget.totalInputTokens(),
-                budget.totalOutputTokens(),
-                budget.totalCachedInputTokens(),
-                startNanos);
     }
 
     private void appendReasoning(StringBuilder reasoningTranscript, String reasoningContent) {
@@ -625,7 +635,7 @@ public class Agent {
         if (normalizedAnswer.isEmpty()) {
             return "🧠 思考过程:\n" + normalizedReasoning;
         }
-        return "🧠 思考过程:\n" + normalizedReasoning + "\n\n🤖 回复:\n" + normalizedAnswer;
+        return "🧠 思考过程:\n" + normalizedReasoning + "\n\nπ 回复:\n" + normalizedAnswer;
     }
 
     private String preview(String content, int maxLength) {
@@ -648,33 +658,60 @@ public class Agent {
      * 1. 在 content 出现之前，只要 reasoning 有实质内容（非空白），就立刻流式打印在"🧠 思考过程"下
      *    同一次用户输入只打印一次"🧠 思考过程"标题；工具调用后的后续推理继续归在同一块下
      * 2. 仅空白的 reasoning delta 会先暂存，不触发标题——避免出现"空的思考过程"
-     * 3. content 一出现就收尾 reasoning 区，打印"🤖 回复"标题并流式输出 content
+     * 3. content 一出现就收尾 reasoning 区，打印"π 回复"标题并流式输出 content
      *    （故意使用"回复"而不是"最终结果"：当模型在调用工具前先 narrate 一段时，"最终结果"会误导用户
      *    认为下面的内容就是答案；"回复"在 narration 和真正最终回答两种情况下都准确）
      * 4. 如果 content 启动之后又收到 reasoning（服务器把思考内容追加在答案之后），
      *    缓冲到 lateReasoning，最终在 finish() 用"🧠 补充思考"标题独立展示，不会污染回复区
      */
     private static final class StreamRenderer implements LlmClient.StreamListener {
+        private final Renderer renderer;
         private final PrintStream boundOut;  // null 表示延迟读取 System.out（保持旧测试兼容）
         private final StringBuilder pendingReasoning = new StringBuilder();
+        private final StringBuilder visibleReasoning = new StringBuilder();
         private final StringBuilder lateReasoning = new StringBuilder();
         private TerminalMarkdownRenderer reasoningRenderer;
         private TerminalMarkdownRenderer contentRenderer;
         private boolean reasoningHeadingPrinted;
         private boolean reasoningStarted;
         private boolean contentStarted;
+        private boolean thinkingQuotePrinted;
         private boolean streamedOutput;
 
         StreamRenderer() {
+            this.renderer = null;
             this.boundOut = null;
         }
 
         StreamRenderer(PrintStream out) {
+            this.renderer = null;
             this.boundOut = out;
+        }
+
+        StreamRenderer(Renderer renderer) {
+            this.renderer = renderer;
+            this.boundOut = renderer == null ? null : renderer.stream();
         }
 
         private PrintStream out() {
             return boundOut != null ? boundOut : System.out;
+        }
+
+        private boolean hasThinkingPanel() {
+            return renderer != null && renderer.supportsThinkingPanel();
+        }
+
+        private void beginThinking() {
+            if (hasThinkingPanel()) {
+                renderer.beginThinking("Thinking");
+            }
+        }
+
+        private void clearThinkingPanel() {
+            if (hasThinkingPanel()) {
+                renderer.endThinking();
+                pendingReasoning.setLength(0);
+            }
         }
 
         @Override
@@ -685,6 +722,17 @@ public class Agent {
             if (contentStarted) {
                 // content 已开始，无法回头；缓冲到"补充思考"
                 lateReasoning.append(delta);
+                return;
+            }
+            visibleReasoning.append(delta);
+            if (hasThinkingPanel()) {
+                pendingReasoning.append(delta);
+                if (pendingReasoning.toString().isBlank()) {
+                    return;
+                }
+                renderer.appendThinking(pendingReasoning.toString());
+                pendingReasoning.setLength(0);
+                reasoningStarted = true;
                 return;
             }
             if (!reasoningStarted) {
@@ -702,7 +750,11 @@ public class Agent {
                 reasoningStarted = true;
                 streamedOutput = true;
             } else {
-                reasoningRenderer.append(delta);
+                if (hasThinkingPanel()) {
+                    renderer.appendThinking(delta);
+                } else {
+                    reasoningRenderer.append(delta);
+                }
             }
             out().flush();
         }
@@ -713,7 +765,9 @@ public class Agent {
                 return;
             }
             if (!contentStarted) {
-                if (reasoningStarted && reasoningRenderer != null) {
+                if (hasThinkingPanel()) {
+                    finishThinkingPanelAndPrintQuote();
+                } else if (reasoningStarted && reasoningRenderer != null) {
                     reasoningRenderer.finish();
                     out().println();
                 } else if (pendingReasoning.length() > 0 && !pendingReasoning.toString().isBlank()) {
@@ -725,7 +779,7 @@ public class Agent {
                     pendingReasoning.setLength(0);
                     reasoningStarted = true;
                 }
-                out().println(AnsiStyle.section("🤖 回复"));
+                out().println(AnsiStyle.section("π 回复"));
                 contentRenderer = new TerminalMarkdownRenderer(out());
                 contentStarted = true;
                 streamedOutput = true;
@@ -739,10 +793,13 @@ public class Agent {
         }
 
         private void resetBetweenIterations() {
+            if (hasThinkingPanel()) {
+                finishThinkingPanelAndPrintQuote();
+            }
             if (reasoningRenderer != null) {
                 reasoningRenderer.finish();
                 reasoningRenderer = null;
-            } else {
+            } else if (!hasThinkingPanel()) {
                 flushPendingReasoning();
             }
             if (contentRenderer != null) {
@@ -760,17 +817,22 @@ public class Agent {
                 streamedOutput = true;
             }
             pendingReasoning.setLength(0);
+            visibleReasoning.setLength(0);
             reasoningStarted = false;
             contentStarted = false;
+            thinkingQuotePrinted = false;
             if (streamedOutput) {
                 out().println();
             }
         }
 
         private void finish() {
+            if (hasThinkingPanel()) {
+                finishThinkingPanelAndPrintQuote();
+            }
             if (reasoningRenderer != null) {
                 reasoningRenderer.finish();
-            } else {
+            } else if (!hasThinkingPanel()) {
                 flushPendingReasoning();
             }
             if (contentRenderer != null) {
@@ -812,6 +874,41 @@ public class Agent {
             renderer.append(pending);
             renderer.finish();
             pendingReasoning.setLength(0);
+            streamedOutput = true;
+        }
+
+        private void finishThinkingPanelAndPrintQuote() {
+            if (!hasThinkingPanel()) {
+                return;
+            }
+            if (pendingReasoning.length() > 0 && !pendingReasoning.toString().isBlank()) {
+                renderer.appendThinking(pendingReasoning.toString());
+            }
+            renderer.endThinking();
+            pendingReasoning.setLength(0);
+            printThinkingQuoteIfNeeded();
+        }
+
+        private void printThinkingQuoteIfNeeded() {
+            if (thinkingQuotePrinted) {
+                return;
+            }
+            String reasoning = visibleReasoning.toString()
+                    .replace("\r\n", "\n")
+                    .replace('\r', '\n')
+                    .trim();
+            if (reasoning.isEmpty()) {
+                return;
+            }
+            out().println(AnsiStyle.subtle(": Thinking"));
+            for (String line : reasoning.split("\\R+")) {
+                String normalized = line.replaceAll("\\s+", " ").trim();
+                if (!normalized.isEmpty()) {
+                    out().println(AnsiStyle.subtle("  > " + normalized));
+                }
+            }
+            out().println();
+            thinkingQuotePrinted = true;
             streamedOutput = true;
         }
 

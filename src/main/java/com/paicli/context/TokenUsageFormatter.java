@@ -28,7 +28,7 @@ public final class TokenUsageFormatter {
                 elapsedSeconds));
     }
 
-    private static String estimatedCostCny(LlmClient llmClient, int inputTokens, int outputTokens, int cachedInputTokens) {
+    public static String estimatedCostCny(LlmClient llmClient, int inputTokens, int outputTokens, int cachedInputTokens) {
         String provider = llmClient == null ? "" : llmClient.getProviderName();
         double inputPerMillion;
         double cachedPerMillion;

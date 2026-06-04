@@ -135,7 +135,7 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
                     role = deltaRole;
                 }
 
-                String reasoningDelta = delta.path("reasoning_content").asText("");
+                String reasoningDelta = extractReasoningDelta(delta);
                 if (!reasoningDelta.isEmpty()) {
                     reasoning.append(reasoningDelta);
                     streamListener.onReasoningDelta(reasoningDelta);
@@ -160,6 +160,32 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
                     cachedInputTokens
             );
         }
+    }
+
+    private String extractReasoningDelta(JsonNode delta) {
+        String reasoningContent = delta.path("reasoning_content").asText("");
+        if (!reasoningContent.isEmpty()) {
+            return reasoningContent;
+        }
+        String reasoning = delta.path("reasoning").asText("");
+        if (!reasoning.isEmpty()) {
+            return reasoning;
+        }
+        JsonNode details = delta.path("reasoning_details");
+        if (details.isArray() && !details.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (JsonNode detail : details) {
+                String text = detail.path("text").asText("");
+                if (text.isEmpty()) {
+                    text = detail.path("content").asText("");
+                }
+                if (!text.isEmpty()) {
+                    sb.append(text);
+                }
+            }
+            return sb.toString();
+        }
+        return "";
     }
 
     private int parseCachedInputTokens(JsonNode usage, int fallback) {
@@ -221,7 +247,11 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
                 functionNode.set("parameters", tool.parameters());
             }
         }
+        customizeRequestBody(requestBody);
         return requestBody;
+    }
+
+    protected void customizeRequestBody(ObjectNode requestBody) {
     }
 
     private void appendMessageContent(ObjectNode msgNode, Message msg) {

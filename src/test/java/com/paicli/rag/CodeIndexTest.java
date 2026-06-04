@@ -2,6 +2,9 @@ package com.paicli.rag;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class CodeIndexTest {
@@ -22,5 +25,18 @@ class CodeIndexTest {
         CodeIndex.IndexResult result = indexer.index("src/test/resources/rag");
         assertTrue(result.chunkCount() > 0, "应该至少索引一个代码块");
         assertTrue(result.message().contains("索引完成"));
+    }
+
+    @Test
+    void reportsProgressThroughListener() {
+        List<String> messages = new ArrayList<>();
+        CodeIndex indexer = new CodeIndex(messages::add);
+
+        CodeIndex.IndexResult result = indexer.index("src/test/resources/rag");
+
+        assertTrue(result.chunkCount() > 0, "应该至少索引一个代码块");
+        assertTrue(messages.stream().anyMatch(message -> message.startsWith("🔍 开始索引")));
+        assertTrue(messages.stream().anyMatch(message -> message.startsWith("📁 发现")));
+        assertTrue(messages.stream().anyMatch(message -> message.startsWith("✅ 索引完成")));
     }
 }

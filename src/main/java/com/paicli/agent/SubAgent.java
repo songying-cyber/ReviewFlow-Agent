@@ -2,7 +2,6 @@ package com.paicli.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.paicli.context.TokenUsageFormatter;
 import com.paicli.llm.LlmClient;
 import com.paicli.llm.LlmTraceLogger;
 import com.paicli.lsp.LspDiagnosticReport;
@@ -171,7 +170,6 @@ public class SubAgent {
 
         SubAgentStreamRenderer streamRenderer = new SubAgentStreamRenderer(name, role, out);
 
-        long startNanos = System.nanoTime();
         AgentBudget budget = AgentBudget.fromLlmClient(llmClient);
 
         // 与 Agent.java 对称：主退出条件 = LLM 自决，budget 仅在 token / 停滞 / 硬轮数兜底。
@@ -179,7 +177,6 @@ public class SubAgent {
             AgentBudget.ExitReason exitReason = budget.check();
             if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
                 streamRenderer.finish();
-                out.println(formatTokenStats(budget, startNanos));
                 String description = budget.describeExit(exitReason);
                 log.warn("[{}] run exhausted budget: reason={}, iteration={}, tokens={}/{}",
                         name, exitReason, budget.iteration(),
@@ -231,7 +228,6 @@ public class SubAgent {
                 conversationHistory.add(LlmClient.Message.assistant(response.content()));
 
                 streamRenderer.finish();
-                out.println(formatTokenStats(budget, startNanos));
 
                 return AgentMessage.result(name, role, response.content());
 
@@ -415,15 +411,6 @@ public class SubAgent {
         } catch (Exception e) {
             return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
         }
-    }
-
-    private String formatTokenStats(AgentBudget budget, long startNanos) {
-        return TokenUsageFormatter.format(
-                llmClient,
-                budget.totalInputTokens(),
-                budget.totalOutputTokens(),
-                budget.totalCachedInputTokens(),
-                startNanos);
     }
 
     public String getName() {

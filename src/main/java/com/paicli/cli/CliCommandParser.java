@@ -8,6 +8,7 @@ final class CliCommandParser {
         CANCEL,
         EXIT,
         CLEAR,
+        HISTORY_CLEAR,
         SWITCH_MODEL,
         SWITCH_PLAN,
         SWITCH_TEAM,
@@ -72,6 +73,10 @@ final class CliCommandParser {
 
         if (trimmed.equalsIgnoreCase("/clear") || trimmed.equalsIgnoreCase("clear")) {
             return new ParsedCommand(CommandType.CLEAR, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/history clear")) {
+            return new ParsedCommand(CommandType.HISTORY_CLEAR, null);
         }
 
         if (trimmed.equalsIgnoreCase("/model")) {

@@ -1,5 +1,7 @@
 package com.paicli.llm;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 public class StepClient extends AbstractOpenAiCompatibleClient {
 
     private static final String DEFAULT_BASE_URL = "https://api.stepfun.com/v1";
@@ -56,6 +58,16 @@ public class StepClient extends AbstractOpenAiCompatibleClient {
     @Override
     public String promptCacheMode() {
         return "step-prefix-cache";
+    }
+
+    @Override
+    protected void customizeRequestBody(ObjectNode requestBody) {
+        // StepFun 默认 reasoning_format=general，会返回 `reasoning` 字段；
+        // deepseek-style 让它返回 PaiCLI/DeepSeek 兼容的 `reasoning_content`。
+        requestBody.put("reasoning_format", "deepseek-style");
+        if (model != null && model.contains("2603")) {
+            requestBody.put("reasoning_effort", "high");
+        }
     }
 
     private static String toChatCompletionsUrl(String baseUrl) {

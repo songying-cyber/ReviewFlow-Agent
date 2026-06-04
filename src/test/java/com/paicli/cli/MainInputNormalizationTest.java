@@ -43,10 +43,35 @@ class MainInputNormalizationTest {
     void startupHintsKeepSlashCommandDetailsOutOfInitialScreen() {
         List<String> hints = Main.startupHints();
 
-        assertTrue(hints.stream().anyMatch(hint -> hint.contains("输入 '/' 查看命令")));
+        assertTrue(hints.stream().anyMatch(hint -> hint.contains("输入 '/' 后按 Tab 补全命令")));
         assertTrue(hints.stream().noneMatch(hint -> hint.contains("/model")));
         assertTrue(hints.stream().noneMatch(hint -> hint.contains("/index [路径]")));
         assertTrue(hints.stream().noneMatch(hint -> hint.contains("/skill list")));
+    }
+
+    @Test
+    void startupBannerUsesOpenLayoutWithoutRightBorder() {
+        List<String> lines = Main.startupBannerLines();
+
+        assertTrue(lines.stream().anyMatch(line -> line.contains("PaiCLI")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("π")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("v16.1.0")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("████████")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("Tips for getting started")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("@path")));
+        assertTrue(lines.stream().noneMatch(line -> line.contains("for shortcuts")));
+        assertTrue(lines.stream().noneMatch(line -> line.contains("────────────────")));
+        assertTrue(lines.stream().noneMatch(line -> line.endsWith("║")),
+                "banner should not depend on a padded right border");
+    }
+
+    @Test
+    void slashCommandTailTipsExposeCommandDescriptions() {
+        var tips = Main.slashCommandTailTips();
+
+        assertTrue(tips.containsKey("/model"));
+        assertTrue(tips.get("/model").getMainDesc().get(0).toString().contains("查看当前模型"));
+        assertTrue(tips.containsKey("/plan <任务内容>"));
     }
 
     @Test

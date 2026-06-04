@@ -7,6 +7,7 @@ import com.paicli.render.PlainRenderer;
 import com.paicli.render.Renderer;
 import com.paicli.render.StatusInfo;
 import com.paicli.util.AnsiStyle;
+import org.jline.reader.LineReader;
 import org.jline.terminal.Terminal;
 
 import java.io.OutputStream;
@@ -15,11 +16,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Inline 流式渲染器：默认形态。
  *
- * <p>不进 alternate screen，主屏直接输出；底部用 DECSTBM 留出常驻状态栏。
+ * <p>不进 alternate screen，主屏直接输出；输入期状态区紧跟当前 prompt 渲染。
  * 工具调用块、行内 diff、HITL 单字符提示、palette 等高级特性在 Day 3 / Day 4 落地，
  * 现阶段对应方法委托给 {@link PlainRenderer} 兜底。
  */
@@ -32,11 +37,21 @@ public final class InlineRenderer implements Renderer {
     private final PrintStream stream;
     private final PrintStream out;
     private final Object transcriptLock = new Object();
+    private final Object thinkingLock = new Object();
+    private final ScheduledExecutorService thinkingScheduler;
     private final List<TranscriptEntry> transcript = new ArrayList<>();
+    private volatile LineReader lineReader;
     private int renderedRows;
     private boolean redrawing;
     private volatile boolean started;
     private volatile boolean closed;
+    private final StringBuilder thinkingBuffer = new StringBuilder();
+    private ScheduledFuture<?> thinkingTask;
+    private boolean thinkingActive;
+    private String thinkingLabel = "Thinking";
+    private long thinkingStartedNanos;
+    private int thinkingFrame;
+    private int thinkingRenderedRows;
 
     // —— 代码块折叠状态机字段（仅供 createTranscriptStream 内部使用）——
     private final StringBuilder lineBuffer = new StringBuilder();
@@ -45,6 +60,7 @@ public final class InlineRenderer implements Renderer {
     private String codeLanguage = "";
     private String codeHeaderLine;
     private int codeStartTranscriptIndex = -1;
+    private boolean codeHeaderEmitted;
 
     public InlineRenderer(Terminal terminal) {
         this(terminal, System.out);
@@ -60,6 +76,11 @@ public final class InlineRenderer implements Renderer {
                 : null;
         this.blockRegistry = new BlockRegistry();
         this.stream = createTranscriptStream(out);
+        this.thinkingScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "paicli-thinking-panel");
+            t.setDaemon(true);
+            return t;
+        });
     }
 
     @Override
@@ -73,6 +94,7 @@ public final class InlineRenderer implements Renderer {
             codeLanguage = "";
             codeHeaderLine = null;
             codeStartTranscriptIndex = -1;
+            codeHeaderEmitted = false;
         }
         blockRegistry.clear();
     }
@@ -89,11 +111,38 @@ public final class InlineRenderer implements Renderer {
     }
 
     @Override
+    public void beforeInput() {
+        if (statusBar != null) {
+            statusBar.prepareInputLine();
+            statusBar.flushNow();
+        }
+    }
+
+    @Override
+    public void afterInput() {
+        if (statusBar != null) {
+            statusBar.finishInputLine();
+        }
+    }
+
+    @Override
+    public String inputPrompt() {
+        return "* ";
+    }
+
+    @Override
+    public String inputRightPrompt() {
+        return "message / @path / @image";
+    }
+
+    @Override
     public void close() {
         if (closed) {
             return;
         }
         closed = true;
+        endThinking();
+        thinkingScheduler.shutdownNow();
         if (statusBar != null) {
             statusBar.close();
         }
@@ -103,6 +152,80 @@ public final class InlineRenderer implements Renderer {
     @Override
     public PrintStream stream() {
         return stream;
+    }
+
+    @Override
+    public boolean supportsThinkingPanel() {
+        return statusBar != null && terminal != null;
+    }
+
+    @Override
+    public void beginThinking(String label) {
+        if (!supportsThinkingPanel() || closed) {
+            return;
+        }
+        synchronized (thinkingLock) {
+            clearThinkingPanelLocked();
+            thinkingBuffer.setLength(0);
+            thinkingLabel = (label == null || label.isBlank()) ? "Thinking" : label.trim();
+            thinkingStartedNanos = System.nanoTime();
+            thinkingFrame = 0;
+            thinkingActive = true;
+            renderThinkingPanelLocked();
+            if (thinkingTask != null) {
+                thinkingTask.cancel(false);
+            }
+            thinkingTask = thinkingScheduler.scheduleAtFixedRate(
+                    this::tickThinkingPanel, 250, 250, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    @Override
+    public void appendThinking(String delta) {
+        if (delta == null || delta.isEmpty() || closed) {
+            return;
+        }
+        if (!supportsThinkingPanel()) {
+            return;
+        }
+        synchronized (thinkingLock) {
+            if (!thinkingActive) {
+                thinkingStartedNanos = System.nanoTime();
+                thinkingLabel = "Thinking";
+                thinkingFrame = 0;
+                thinkingActive = true;
+            }
+            thinkingBuffer.append(delta);
+            trimThinkingBuffer();
+            renderThinkingPanelLocked();
+        }
+    }
+
+    @Override
+    public void endThinking() {
+        if (!supportsThinkingPanel()) {
+            return;
+        }
+        synchronized (thinkingLock) {
+            thinkingActive = false;
+            if (thinkingTask != null) {
+                thinkingTask.cancel(false);
+                thinkingTask = null;
+            }
+            clearThinkingPanelLocked();
+            thinkingBuffer.setLength(0);
+        }
+    }
+
+    /**
+     * 绑定当前交互循环使用的 JLine LineReader。
+     *
+     * <p>绑定后，用户正在输入时的异步输出会优先通过
+     * {@link LineReader#printAbove(String)} 显示在输入行上方；非读取态和
+     * 测试/降级路径继续使用构造时注入的 {@link PrintStream}。
+     */
+    public void bindLineReader(LineReader lineReader) {
+        this.lineReader = lineReader;
     }
 
     @Override
@@ -120,8 +243,7 @@ public final class InlineRenderer implements Renderer {
         synchronized (transcriptLock) {
             transcript.add(entry);
             renderedRows += estimateRows(rendered);
-            out.print(rendered);
-            out.flush();
+            emit(rendered);
         }
     }
 
@@ -196,7 +318,7 @@ public final class InlineRenderer implements Renderer {
                         delegate.write(b, off, len);
                         return;
                     }
-                    feedWithCodeBlockDetection(text, delegate);
+                    feedWithCodeBlockDetection(text);
                 }
             }
 
@@ -216,19 +338,19 @@ public final class InlineRenderer implements Renderer {
      * 看到 header 行被重新渲染但 body 行尚未在 transcript 里——属于罕见时序，
      * 下一次 LLM 输出 / `/clear` / 退出可恢复。
      */
-    private void feedWithCodeBlockDetection(String text, PrintStream delegate) {
+    private void feedWithCodeBlockDetection(String text) {
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             lineBuffer.append(ch);
             if (ch == '\n') {
                 String line = lineBuffer.toString();
                 lineBuffer.setLength(0);
-                processStreamedLine(line, delegate);
+                processStreamedLine(line);
             }
         }
     }
 
-    private void processStreamedLine(String line, PrintStream delegate) {
+    private void processStreamedLine(String line) {
         String stripped = stripAnsi(line).trim();
 
         if (!inCodeBlock && stripped.startsWith("┌─ code")) {
@@ -238,10 +360,13 @@ public final class InlineRenderer implements Renderer {
             codeLanguage = colon >= 0 ? stripped.substring(colon + 1).trim() : "";
             codeHeaderLine = stripTrailingNewline(line);
             codeBodyLines.clear();
-            delegate.print(line);
             codeStartTranscriptIndex = transcript.size();
-            transcript.add(new TextEntry(line));
-            renderedRows += estimateRows(line);
+            codeHeaderEmitted = activePrintAboveReader() == null;
+            if (codeHeaderEmitted) {
+                emit(line);
+                transcript.add(new TextEntry(line));
+                renderedRows += estimateRows(line);
+            }
             return;
         }
 
@@ -250,10 +375,13 @@ public final class InlineRenderer implements Renderer {
                 int bodyLineCount = codeBodyLines.size();
                 inCodeBlock = false;
 
-                // 用 ANSI move-up + clear-to-eos 覆盖原 header 行
-                delegate.print(AnsiSeq.moveUp(1));
-                delegate.print("\r");
-                delegate.print(AnsiSeq.CLEAR_TO_EOS);
+                if (codeHeaderEmitted) {
+                    // 用 ANSI move-up + clear-to-eos 覆盖原 header 行。这里必须直写
+                    // 底层输出，因为 printAbove 是追加式输出，不适合承载光标回退。
+                    out.print(AnsiSeq.moveUp(1));
+                    out.print("\r");
+                    out.print(AnsiSeq.CLEAR_TO_EOS);
+                }
 
                 String label = codeLanguage.isEmpty() ? "code" : "code: " + codeLanguage;
                 String collapsedHeader = AnsiStyle.subtle(
@@ -271,10 +399,17 @@ public final class InlineRenderer implements Renderer {
 
                 if (codeStartTranscriptIndex >= 0 && codeStartTranscriptIndex < transcript.size()) {
                     transcript.set(codeStartTranscriptIndex, new BlockEntry(block));
+                } else {
+                    transcript.add(new BlockEntry(block));
                 }
 
-                delegate.print(collapsedHeader);
-                delegate.print("\n");
+                if (codeHeaderEmitted) {
+                    out.print(collapsedHeader);
+                    out.print("\n");
+                    out.flush();
+                } else {
+                    emit(collapsedHeader + "\n");
+                }
 
                 // renderedRows 调整：移除原 header 占位（约 1 行），加入折叠头占位
                 renderedRows = Math.max(0, renderedRows - estimateRows(codeHeaderLine + "\n"));
@@ -283,6 +418,7 @@ public final class InlineRenderer implements Renderer {
                 codeBodyLines.clear();
                 codeHeaderLine = null;
                 codeStartTranscriptIndex = -1;
+                codeHeaderEmitted = false;
                 return;
             }
             // body 行：缓冲，不写终端、不入 transcript
@@ -291,9 +427,131 @@ public final class InlineRenderer implements Renderer {
         }
 
         // 非代码块：常规流式
-        delegate.print(line);
+        emit(line);
         transcript.add(new TextEntry(line));
         renderedRows += estimateRows(line);
+    }
+
+    private LineReader activePrintAboveReader() {
+        LineReader reader = lineReader;
+        if (reader == null || redrawing || closed) {
+            return null;
+        }
+        try {
+            return reader.isReading() ? reader : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private void emit(String text) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        LineReader reader = activePrintAboveReader();
+        if (reader != null) {
+            reader.printAbove(text);
+            return;
+        }
+        out.print(text);
+        out.flush();
+    }
+
+    private void tickThinkingPanel() {
+        synchronized (thinkingLock) {
+            if (!thinkingActive || closed) {
+                return;
+            }
+            thinkingFrame++;
+            renderThinkingPanelLocked();
+        }
+    }
+
+    private void renderThinkingPanelLocked() {
+        if (!thinkingActive || closed) {
+            return;
+        }
+        List<String> lines = thinkingPanelLines();
+        synchronized (out) {
+            clearThinkingPanelLocked();
+            for (String line : lines) {
+                out.print(line);
+                out.print('\n');
+            }
+            out.flush();
+            thinkingRenderedRows = lines.size();
+        }
+    }
+
+    private void clearThinkingPanelLocked() {
+        if (thinkingRenderedRows <= 0) {
+            return;
+        }
+        synchronized (out) {
+            out.print(AnsiSeq.moveUp(thinkingRenderedRows));
+            out.print('\r');
+            out.print(AnsiSeq.CLEAR_TO_EOS);
+            out.flush();
+        }
+        thinkingRenderedRows = 0;
+    }
+
+    private List<String> thinkingPanelLines() {
+        int elapsedSeconds = (int) Math.max(0, TimeUnit.NANOSECONDS.toSeconds(
+                System.nanoTime() - thinkingStartedNanos));
+        String dots = switch (thinkingFrame % 4) {
+            case 0 -> ".";
+            case 1 -> "..";
+            case 2 -> "...";
+            default -> "....";
+        };
+        List<String> lines = new ArrayList<>();
+        lines.add(AnsiStyle.subtle(": " + thinkingLabel + dots + " (ESC 取消, " + elapsedSeconds + "s)"));
+        for (String line : latestThinkingLines(3)) {
+            lines.add(AnsiStyle.subtle("  > " + line));
+        }
+        return lines;
+    }
+
+    private List<String> latestThinkingLines(int maxLines) {
+        String text = thinkingBuffer.toString()
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .trim();
+        if (text.isEmpty()) {
+            return List.of();
+        }
+        String[] rawLines = text.split("\\R+");
+        int start = Math.max(0, rawLines.length - maxLines);
+        int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns());
+        int maxChars = Math.max(20, cols - 6);
+        List<String> lines = new ArrayList<>();
+        for (int i = start; i < rawLines.length; i++) {
+            String line = rawLines[i].replaceAll("\\s+", " ").trim();
+            if (line.isEmpty()) {
+                continue;
+            }
+            lines.add(truncateVisible(line, maxChars));
+        }
+        return lines;
+    }
+
+    private String truncateVisible(String text, int maxChars) {
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        if (maxChars <= 1) {
+            return "…";
+        }
+        return text.substring(0, maxChars - 1) + "…";
+    }
+
+    private void trimThinkingBuffer() {
+        int max = 4096;
+        if (thinkingBuffer.length() <= max) {
+            return;
+        }
+        thinkingBuffer.delete(0, thinkingBuffer.length() - max);
     }
 
     private static String stripAnsi(String s) {
@@ -337,6 +595,19 @@ public final class InlineRenderer implements Renderer {
     private void redrawTranscript() {
         synchronized (transcriptLock) {
             if (transcript.isEmpty()) {
+                return;
+            }
+            LineReader reader = activePrintAboveReader();
+            if (reader != null) {
+                StringBuilder snapshot = new StringBuilder();
+                int rowsAfter = 0;
+                for (TranscriptEntry entry : transcript) {
+                    String rendered = entry.render();
+                    snapshot.append(rendered);
+                    rowsAfter += estimateRows(rendered);
+                }
+                renderedRows = rowsAfter;
+                reader.printAbove(snapshot.toString());
                 return;
             }
             redrawing = true;

@@ -111,7 +111,7 @@ mvn test
 - short / balanced / long 三种上下文模式：长上下文模式跳过摘要压缩，RAG 默认 topK 提升到 20
 - `search_code` 未显式传 `top_k` 时按上下文模式自适应
 - 长上下文模式下自动把 MCP resources 的 URI / 描述索引注入 system prompt，不自动注入正文
-- Token 输出显示 window、动态预算、cached input tokens 和估算成本
+- inline 模式下 Token / cached input tokens / 估算成本 / 耗时进入底部状态栏，避免占用正文输出区
 - `/context` 会显示当前上下文模式、prompt cache 模式、RAG topK、resources 自动索引状态
 
 ### 第十三期：Chrome DevTools MCP
@@ -155,7 +155,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 | 形态 | 启用方式 | 视觉风格 |
 |---|---|---|
-| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code 风格：主屏直出、底部 DECSTBM 状态栏、行内可折叠工具块（`Read 3 files (ctrl+o to expand)`）、行内 git diff、HITL 单字符 `[y/n/a/s/m]` 提示 |
+| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、prompt 下方留 1 行间距的两行 inline 状态区（phase / model / ctx / HITL / MCP / Skill / token）、右侧输入提示、行内可折叠工具块（`Read 3 files (ctrl+o to expand)`）、行内 git diff、HITL 单字符 `[y/n/a/s/m]` 提示 |
 | **lanterna 全屏 TUI** | `PAICLI_RENDERER=lanterna`（或兼容旧 `PAICLI_TUI=true`） | v16 三栏全屏：文件树 + 对话流 + 状态栏 + 底部输入栏，HITL 模态弹窗 |
 | **plain 兜底** | `PAICLI_RENDERER=plain` | 纯 println，无折叠 / 状态栏，等价 v15 行为 |
 
@@ -164,7 +164,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - 通用命令：`/clear`、`/context`、`/memory`、`/memory clear`、`/save <事实>`、`/hitl`、`/hitl on`、`/hitl off`、`/config`、`/exit`
 - 对话历史保存到 `~/.paicli/history/session_*.jsonl`
 - 兼容旧设置：`PAICLI_TUI=true` 自动映射为 `PAICLI_RENDERER=lanterna`（已 deprecated）
-- `PAICLI_NO_STATUSBAR=true` 在 inline 模式下禁用底部状态栏（不支持 DECSTBM 的终端）
+- `PAICLI_NO_STATUSBAR=true` 在 inline 模式下禁用 prompt 下方状态区（不适合 ANSI 光标控制的终端）
 - `NO_COLOR=1` 禁用所有 ANSI 颜色，保留布局
 
 ### 第十七期：LSP 诊断注入（MVP）
@@ -236,20 +236,16 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 当前启动输出以命令行实际产物为准：
 
 ```text
-╔══════════════════════════════════════════════════════════╗
-║                                                          ║
-║   ██████╗  █████╗ ██╗ ██████╗██╗     ██╗                ║
-║   ██╔══██╗██╔══██╗██║██╔════╝██║     ██║                ║
-║   ██████╔╝███████║██║██║     ██║     ██║                ║
-║   ██╔═══╝ ██╔══██║██║██║     ██║     ██║                ║
-║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
-║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
-║                                                          ║
-║      Terminal-First Agent IDE v16.1.0                ║
-║                                                          ║
-╚══════════════════════════════════════════════════════════╝
+   ████████    PaiCLI π  v16.1.0
+     ██  ██    Model step-3.5-flash-2603 (step)
+     ██  ██    MCP 4/4 · 61 tools · 2/2 skills · ReAct
+     ██  ██    ReAct · Plan · MCP · Browser · Image
+     ██  ██
 
-🔄 使用 ReAct 模式
+Tips for getting started:
+1. Type / for commands and Tab completion
+2. Ask coding questions, edit code or run commands
+3. Attach context with @path or @image:
 ```
 
 ## 功能
@@ -260,7 +256,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - 🔄 ReAct Agent 循环（思考-行动-观察）
 - 🛠️ 工具调用（文件操作、Shell命令、项目创建、代码语义检索、联网搜索、MCP 动态工具）
 - 💬 交互式命令行界面
-- 🧠 默认通过流式接口获取模型输出；ReAct 与用户可见的 Plan 阶段都会按流式展示思考过程与最终回复；ReAct 同一次用户输入只打印一次 `🧠 思考过程` 标题，工具调用前后的后续推理继续归在同一块下
+- 🧠 默认通过流式接口获取模型输出；inline ReAct 会先显示动态 `Thinking...` 面板，并在回复 / 工具调用开始前把模型 reasoning 以灰色 `> ...` 引用块落到正文区；plain / 非 inline 路径继续按流式展示 `🧠 思考过程` 与 `π 回复`
 - 🖥️ 终端会对常见 Markdown（标题、列表、表格、代码块）做渲染后再显示，避免直接暴露原始标记符号
 
 ### 第二期
@@ -518,7 +514,7 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ### 第一期：ReAct 示例
 
 ```text
-👤 你: 创建一个Java项目叫myapp
+* 创建一个Java项目叫myapp
 
 🧠 思考过程:
 用户要创建一个 Java 项目。我先调用 create_project 工具生成基础结构，再根据工具返回结果确认是否创建成功。
@@ -532,13 +528,13 @@ mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ```text
 💡 提示:
    - 输入你的问题或任务
-   - 输入 '/' 查看命令
+   - 输入 '/' 后按 Tab 补全命令
    - 输入 '@server:protocol://path' 可显式引用 MCP resource
    - 任务运行中按 ESC 取消当前任务
    - 默认模式是 ReAct
    - 未识别的 `/xxx` 命令会直接提示“未知命令”，不会再交给 Agent 当普通对话处理
 
-👤 你: /plan 创建一个名为 demoapp 的 java 项目，然后读取 pom.xml，最后验证项目结构
+* /plan 创建一个名为 demoapp 的 java 项目，然后读取 pom.xml，最后验证项目结构
 
 📋 使用 Plan-and-Execute 模式
 
@@ -641,31 +637,18 @@ I
 ### 第三期：当前运行效果
 
 ```text
-╔══════════════════════════════════════════════════════════╗
-║                                                          ║
-║   ██████╗  █████╗ ██╗ ██████╗██╗     ██╗                ║
-║   ██╔══██╗██╔══██╗██║██╔════╝██║     ██║                ║
-║   ██████╔╝███████║██║██║     ██║     ██║                ║
-║   ██╔═══╝ ██╔══██║██║██║     ██║     ██║                ║
-║   ██║     ██║  ██║██║╚██████╗███████╗██║                ║
-║   ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝╚══════╝╚═╝                ║
-║                                                          ║
-║      Memory-Enhanced Agent CLI v3.0.0                 ║
-║                                                          ║
-╚══════════════════════════════════════════════════════════╝
+   ████████    PaiCLI π  v16.1.0
+     ██  ██    Model glm-5.1 (glm)
+     ██  ██    MCP 4/4 · 61 tools · 2/2 skills · ReAct
+     ██  ██    ReAct · Plan · MCP · Browser · Image
+     ██  ██
 
-✅ API Key 已加载
+Tips for getting started:
+1. Type / for commands and Tab completion
+2. Ask coding questions, edit code or run commands
+3. Attach context with @path or @image:
 
-🔄 使用 ReAct 模式
-
-💡 提示:
-   - 输入你的问题或任务
-   - 输入 '/' 查看命令
-   - 输入 '@server:protocol://path' 可显式引用 MCP resource
-   - 任务运行中按 ESC 取消当前任务
-   - 默认模式是 ReAct
-
-👤 你: 你好，请列出当前目录的文件
+* 你好，请列出当前目录的文件
 
 🧠 思考过程:
 用户想了解当前目录结构。我先读取目录，再基于结果做归类说明，而不是只回原始文件列表。
@@ -674,7 +657,7 @@ I
 当前目录包含 `src`、`target`、`pom.xml`、`README.md` 等文件，
 这是一个标准的 Java Maven 项目。
 
-👤 你: /exit
+* /exit
 
 👋 再见!
 ```
@@ -686,7 +669,7 @@ I
 - GLM-5.1 API
 - OkHttp
 - Jackson
-- JLine3（终端交互）
+- JLine 4（终端交互、Status、输入 widgets）
 - SQLite（向量与图谱持久化）
 - JavaParser（AST 分析）
 - Ollama（本地 Embedding）

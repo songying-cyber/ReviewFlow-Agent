@@ -27,10 +27,11 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 ```
 
 **预期**：
-- Banner 显示 `Terminal-First Agent IDE v16.1.0`
-- 进入 JLine REPL，提示 `👤 你: `
+- Banner 显示简洁的 `PaiCLI v16.1.0` 开屏，不带右侧盒线边框
+- 进入 JLine REPL，输入行由 LineReader 停在当前 transcript 位置，提示 `* `
 - **不进 alternate screen**（退出后 banner、对话历史还留在 terminal scrollback 里）
-- 底部最后一行显示反色状态栏（用例 15 详细验证）
+- 输入行下方留 1 行间距后显示两行 inline 状态区：反色状态栏 + 操作提示行（用例 15 详细验证）
+- ReAct 请求发出后，输入区上方出现动态 `Thinking...` 面板；如果模型返回 reasoning delta，面板下方显示灰色 `> ...` 引用行，最终回复开始时面板被清理
 
 **失败迹象**：
 - 整屏被清空 → 误进了 alt screen
@@ -269,7 +270,7 @@ NO_COLOR=1 java -jar target/paicli-1.0-SNAPSHOT.jar
 **预期**：
 - 所有 ANSI 颜色消失（"思考过程"标题、subtle 灰、emphasis 粗体都退化为纯文本）
 - 但布局结构（折叠头、`⏵`/`⏷` 符号、`@@` hunk 头）保留
-- 状态栏没了反色背景但仍占最后一行
+- 文本颜色消失；底部 dock 仍使用光标控制占底部三行
 
 ---
 
@@ -302,19 +303,22 @@ TERM=dumb java -jar target/paicli-1.0-SNAPSHOT.jar
 帮我读 README.md
 ```
 
-**预期**：发送后，**底部最后一行实时显示**反色状态栏：
+**预期**：等待输入时，LineReader 输入行下方留 1 行间距，然后紧跟两行 inline status，中间不能出现大段空白：
 ```
- glm-5.1 │ 0/200.0k │ HITL OFF │ 12ms 
+*
+ PaiCLI  idle  glm-5.1  ctx 0/200.0k  HITL OFF  MCP 4/4  Skill 2/2
+ Auto Model · / commands · @path/@image · Ctrl+O fold · ESC clear
 ```
 
 - 模型名跟当前 `/model` 一致
+- MCP 与 Skill 摘要跟当前配置一致，形如 `MCP 4/4`、`Skill 2/2`
 - token 计数在 LLM 响应回来后跳动（如 `1.3k/200.0k`）
-- elapsed 持续增长（200ms 节流刷新）
+- 任务运行时阶段从 `idle` 切到 `react` / `plan` / `team`，流式响应期间 elapsed 持续增长
 - HITL 列反映 `/hitl on/off` 状态
 
-**通过判定**：状态栏不被对话内容滚走（DECSTBM 滚动区域生效）；输入文字时不与状态栏冲突。
+**通过判定**：状态区与 prompt 之间只有 1 行间距；输入文字时不与状态区冲突，输入提交后状态区和后续空白被清掉。
 
-**已知小瑕疵**：JLine 输入瞬间状态栏可能闪一下，是 200ms 节流和光标移动的竞态，不影响功能。
+**已知小瑕疵**：少数终端 resize 后可能出现一次轻微重绘闪烁，继续输入或下一次状态更新会恢复。
 
 ---
 
@@ -439,7 +443,7 @@ TUI 输入框输入 `/config`。
 
 ---
 
-## 23. PAICLI_NO_STATUSBAR 禁用底部状态栏
+## 23. PAICLI_NO_STATUSBAR 禁用状态栏
 
 ```bash
 PAICLI_NO_STATUSBAR=true java -jar target/paicli-1.0-SNAPSHOT.jar
@@ -447,7 +451,7 @@ PAICLI_NO_STATUSBAR=true java -jar target/paicli-1.0-SNAPSHOT.jar
 
 **预期**：
 - 折叠块、HITL 单字符、`/config` palette 等其它 inline 特性照常
-- 但底部最后一行**没有反色状态栏**（因为 DECSTBM 滚动区域没设置）
+- 但 prompt 下方**没有 inline 状态区**
 - 输入提示 / Agent 输出可以一直占满整屏，不会被状态栏占位压缩
 
 ---
@@ -474,7 +478,7 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 **预期**：
 - 任务取消，对话流出现 `⏹️ 已请求取消当前任务。`
 - 状态栏 `elapsed` 停止刷新
-- 提示符回到 `👤 你: `
+- 提示符回到底部 dock 的 `* `
 - 整体不卡死
 
 ---
@@ -487,7 +491,7 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 ```
 
 **预期**：
-- 对话历史清空，但状态栏仍在最后一行
+- 对话历史清空；下一次等待输入时，prompt 下方状态区仍会出现
 - 之前注册的折叠块（如果还活跃）也应清干净
 
 ---
@@ -497,7 +501,7 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 按 Ctrl+D 或输入 `/exit`。
 
 **预期**：
-- 状态栏被清掉（DECSTBM 还原）
+- 当前输入期状态栏被清掉
 - 输出 `👋 再见!`
 - 进程正常退出
 - terminal scrollback 里完整保留对话历史（inline 模式特性）
@@ -511,8 +515,7 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 
 **已知不在测试范围**：
 - 流式输出与状态栏并发刷新的撕裂（极小概率，肉眼几乎不可见，不阻断任务）
-- 终端 resize 后状态栏不会自动重新设置滚动区域（再次 `/clear` 或重启可恢复）
-- 旧 Windows cmd / PuTTY 等不支持 DECSTBM 的终端：用 `PAICLI_NO_STATUSBAR=true` 即可
+- 旧 Windows cmd / PuTTY 等不适合 ANSI 光标控制的终端：用 `PAICLI_NO_STATUSBAR=true` 即可
 
 ---
 

@@ -2,7 +2,6 @@ package com.paicli.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.paicli.context.TokenUsageFormatter;
 import com.paicli.llm.LlmClient;
 import com.paicli.llm.LlmTraceLogger;
 import com.paicli.lsp.LspDiagnosticReport;
@@ -27,6 +26,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -105,6 +105,7 @@ public class PlanExecuteAgent {
     private final PlanReviewHandler reviewHandler;
     private final MemoryManager memoryManager;
     private final ConversationHistoryCompactor historyCompactor;
+    private final PrintStream out;
     private Supplier<String> externalContextSupplier = () -> "";
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
@@ -123,16 +124,47 @@ public class PlanExecuteAgent {
         this(llmClient, toolRegistry, null, memoryManager, reviewHandler);
     }
 
+    public PlanExecuteAgent(LlmClient llmClient, ToolRegistry toolRegistry,
+                            MemoryManager memoryManager, PlanReviewHandler reviewHandler,
+                            PrintStream out) {
+        this(llmClient, toolRegistry, null, memoryManager, reviewHandler, out);
+    }
+
     PlanExecuteAgent(LlmClient llmClient, ToolRegistry toolRegistry, Planner planner,
                      MemoryManager memoryManager, PlanReviewHandler reviewHandler) {
+        this(llmClient, toolRegistry, planner, memoryManager, reviewHandler, null);
+    }
+
+    PlanExecuteAgent(LlmClient llmClient, ToolRegistry toolRegistry, Planner planner,
+                     MemoryManager memoryManager, PlanReviewHandler reviewHandler, PrintStream out) {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry != null ? toolRegistry : new ToolRegistry();
-        this.planner = planner != null ? planner : new Planner(llmClient);
+        this.out = out == null ? deferredSystemOut() : out;
+        this.planner = planner != null ? planner : new Planner(llmClient, this.out);
         this.reviewHandler = reviewHandler == null ? (goal, plan) -> PlanReviewDecision.execute() : reviewHandler;
         this.memoryManager = memoryManager != null ? memoryManager : new MemoryManager(llmClient);
         this.historyCompactor = new ConversationHistoryCompactor(llmClient);
         this.toolRegistry.setContextProfile(this.memoryManager.getContextProfile());
         this.toolRegistry.setMemorySaver(this.memoryManager::storeFact);
+    }
+
+    private static PrintStream deferredSystemOut() {
+        return new PrintStream(new OutputStream() {
+            @Override
+            public void write(int b) throws IOException {
+                System.out.write(b);
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws IOException {
+                System.out.write(b, off, len);
+            }
+
+            @Override
+            public void flush() throws IOException {
+                System.out.flush();
+            }
+        }, true, StandardCharsets.UTF_8);
     }
 
     public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
@@ -230,14 +262,14 @@ public class PlanExecuteAgent {
                 return PlanRunOutcome.executed(executePlan(plan, streamState));
             }
 
-            System.out.println("📝 已收到补充要求，正在重新规划...\n");
+            out.println("📝 已收到补充要求，正在重新规划...\n");
             plan = planner.createPlan(plan.getGoal() + "\n补充要求：" + feedback);
         }
     }
 
     private String executePlan(ExecutionPlan plan, StreamState streamState) throws IOException {
         log.info("Executing plan: goal='{}', taskCount={}", plan.getGoal(), plan.getAllTasks().size());
-        System.out.println("🚀 开始执行计划...\n");
+        out.println("🚀 开始执行计划...\n");
 
         plan.markStarted();
         StringBuilder finalResult = new StringBuilder();
@@ -262,9 +294,9 @@ public class PlanExecuteAgent {
                     log.info("Task completed: {} status={} resultChars={}",
                             task.getId(), task.getStatus(), batchResult.result() == null ? 0 : batchResult.result().length());
                     if (batchResult.streamedOutput() || batchResult.result() == null || batchResult.result().isBlank()) {
-                        System.out.println("✅ 完成 [" + task.getId() + "]\n");
+                        out.println("✅ 完成 [" + task.getId() + "]\n");
                     } else {
-                        System.out.println("✅ 完成 [" + task.getId() + "]: "
+                        out.println("✅ 完成 [" + task.getId() + "]: "
                                 + batchResult.result().substring(0, Math.min(100, batchResult.result().length())) + "\n");
                     }
                     continue;
@@ -273,10 +305,10 @@ public class PlanExecuteAgent {
                 Exception error = batchResult.error();
                 task.markFailed(error.getMessage());
                 log.warn("Task failed: {} error={}", task.getId(), error.getMessage());
-                System.out.println("❌ 失败 [" + task.getId() + "]: " + error.getMessage() + "\n");
+                out.println("❌ 失败 [" + task.getId() + "]: " + error.getMessage() + "\n");
 
                 if (plan.getProgress() < 0.5) {
-                    System.out.println("🔄 尝试重新规划...\n");
+                    out.println("🔄 尝试重新规划...\n");
                     ExecutionPlan replanned = planner.replan(plan, error.getMessage());
                     return reviewAndExecutePlan(replanned, streamState).result();
                 }
@@ -328,11 +360,11 @@ public class PlanExecuteAgent {
         if (executableTasks.size() == 1) {
             Task task = executableTasks.get(0);
             log.info("Executing single task: {} type={}", task.getId(), task.getType());
-            System.out.println("▶️ 执行任务 [" + task.getId() + "]: " + task.getDescription());
+            out.println("▶️ 执行任务 [" + task.getId() + "]: " + task.getDescription());
             task.markStarted();
 
             try {
-                return List.of(TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState, System.out)));
+                return List.of(TaskExecutionResult.success(task, executeTask(plan.getGoal(), plan, task, streamState, out)));
             } catch (Exception e) {
                 return List.of(TaskExecutionResult.failure(task, e));
             }
@@ -342,7 +374,7 @@ public class PlanExecuteAgent {
                 .map(Task::getId)
                 .collect(Collectors.joining(", "));
         log.info("Executing parallel batch: {}", parallelTaskIds);
-        System.out.println("⚡ 本轮并行执行 " + executableTasks.size() + " 个任务: " + parallelTaskIds);
+        out.println("⚡ 本轮并行执行 " + executableTasks.size() + " 个任务: " + parallelTaskIds);
 
         ExecutorService executor = Executors.newFixedThreadPool(Math.min(executableTasks.size(), 4), r -> {
             Thread t = new Thread(r, "paicli-plan-executor");
@@ -353,7 +385,7 @@ public class PlanExecuteAgent {
             Map<String, ByteArrayOutputStream> buffers = new LinkedHashMap<>();
             List<Future<TaskExecutionResult>> futures = new ArrayList<>();
             for (Task task : executableTasks) {
-                System.out.println("▶️ 并行任务 [" + task.getId() + "]: " + task.getDescription());
+                out.println("▶️ 并行任务 [" + task.getId() + "]: " + task.getDescription());
                 task.markStarted();
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 buffers.put(task.getId(), baos);
@@ -387,8 +419,8 @@ public class PlanExecuteAgent {
             for (Task task : executableTasks) {
                 ByteArrayOutputStream buf = buffers.get(task.getId());
                 if (buf != null && buf.size() > 0) {
-                    System.out.print(buf.toString(StandardCharsets.UTF_8));
-                    System.out.flush();
+                    out.print(buf.toString(StandardCharsets.UTF_8));
+                    out.flush();
                 }
             }
 
@@ -433,7 +465,6 @@ public class PlanExecuteAgent {
         int iteration = 0;
         TaskStreamRenderer streamRenderer = new TaskStreamRenderer(task.getId(), streamState, out);
 
-        long startNanos = System.nanoTime();
         int totalInputTokens = 0;
         int totalOutputTokens = 0;
         int totalCachedInputTokens = 0;
@@ -482,14 +513,12 @@ public class PlanExecuteAgent {
                         memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + toolOnlyResult);
                     }
                     streamRenderer.finish();
-                    out.println(formatTokenStats(totalInputTokens, totalOutputTokens, totalCachedInputTokens, startNanos));
                     return TaskRunResult.of(toolOnlyResult, streamRenderer.hasStreamedOutput());
                 }
                 if (response.content() != null && !response.content().isBlank()) {
                     memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + response.content());
                 }
                 streamRenderer.finish();
-                out.println(formatTokenStats(totalInputTokens, totalOutputTokens, totalCachedInputTokens, startNanos));
                 return TaskRunResult.of(response.content(), streamRenderer.hasStreamedOutput());
             }
 
@@ -519,7 +548,6 @@ public class PlanExecuteAgent {
             memoryManager.addAssistantMessage("[计划任务 " + task.getId() + "] " + fallbackResult);
         }
         streamRenderer.finish();
-        out.println(formatTokenStats(totalInputTokens, totalOutputTokens, totalCachedInputTokens, startNanos));
         return TaskRunResult.of(fallbackResult, streamRenderer.hasStreamedOutput());
     }
 
@@ -658,10 +686,6 @@ public class PlanExecuteAgent {
         } catch (Exception e) {
             return argsJson.length() > 80 ? argsJson.substring(0, 77) + "..." : argsJson;
         }
-    }
-
-    private String formatTokenStats(int inputTokens, int outputTokens, int cachedInputTokens, long startNanos) {
-        return TokenUsageFormatter.format(llmClient, inputTokens, outputTokens, cachedInputTokens, startNanos);
     }
 
     private static final class StreamState {

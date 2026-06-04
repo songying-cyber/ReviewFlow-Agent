@@ -13,7 +13,7 @@ public final class TerminalCapabilities {
     private TerminalCapabilities() {
     }
 
-    /** 终端是否能渲染 ANSI 转义序列（颜色、光标控制、滚动区域等）。 */
+    /** 终端是否能渲染 ANSI 转义序列（颜色、光标控制、inline status 等）。 */
     public static boolean supportsAnsi(Terminal terminal) {
         if (terminal == null) {
             return false;
@@ -31,7 +31,7 @@ public final class TerminalCapabilities {
     }
 
     /**
-     * 终端是否支持 DECSTBM 滚动区域（底部常驻状态栏依赖）。
+     * 终端是否适合启用 inline status 状态区。
      * 同时校验终端尺寸合理（rows ≥ 5）。
      */
     public static boolean supportsScrollRegion(Terminal terminal) {

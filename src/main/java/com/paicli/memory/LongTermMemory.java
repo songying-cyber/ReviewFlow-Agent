@@ -2,6 +2,8 @@ package com.paicli.memory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,6 +23,7 @@ import java.util.stream.Collectors;
  * 4. 定期持久化到磁盘
  */
 public class LongTermMemory implements Memory {
+    private static final Logger log = LoggerFactory.getLogger(LongTermMemory.class);
     private static final String STORAGE_DIR_PROPERTY = "paicli.memory.dir";
     private static final String STORAGE_DIR_ENV = "PAICLI_MEMORY_DIR";
     private static final String STORAGE_FILE = "long_term_memory.json";
@@ -137,7 +140,7 @@ public class LongTermMemory implements Memory {
                     .collect(Collectors.toList());
             mapper.writeValue(storageFile, dataList);
         } catch (IOException e) {
-            System.err.println("⚠️ 长期记忆持久化失败: " + e.getMessage());
+            log.warn("长期记忆持久化失败: {}", e.getMessage(), e);
         }
     }
 
@@ -168,9 +171,9 @@ public class LongTermMemory implements Memory {
                     tokenCounter.addAndGet(entry.getTokenCount());
                 }
             }
-            System.out.println("📂 加载了 " + entries.size() + " 条长期记忆");
+            log.info("加载了 {} 条长期记忆", entries.size());
         } catch (IOException e) {
-            System.err.println("⚠️ 加载长期记忆失败: " + e.getMessage());
+            log.warn("加载长期记忆失败: {}", e.getMessage(), e);
         }
     }
 

@@ -12,6 +12,7 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.util.List;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.paicli.image.ImageReferenceParser;
 
@@ -133,6 +134,82 @@ class AbstractOpenAiCompatibleClientImageInputTest {
 
             assertEquals("hidden reasoning", message.path("reasoning_content").asText());
             assertEquals("call_1", message.path("tool_calls").get(0).path("id").asText());
+        }
+    }
+
+    @Test
+    void parsesReasoningFieldAliasesFromStreamingDeltas() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse()
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody("""
+                            data: {"choices":[{"delta":{"role":"assistant","reasoning":"先判断意图。"}}]}
+
+                            data: {"choices":[{"delta":{"reasoning_details":[{"text":"再组织回复。"}]}}]}
+
+                            data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":12,"completion_tokens":1}}
+
+                            data: [DONE]
+
+                            """));
+            TestClient client = new TestClient(server.url("/chat/completions").toString());
+            AtomicReference<StringBuilder> streamedReasoning = new AtomicReference<>(new StringBuilder());
+
+            LlmClient.ChatResponse response = client.chat(
+                    List.of(LlmClient.Message.user("你好")),
+                    null,
+                    new LlmClient.StreamListener() {
+                        @Override
+                        public void onReasoningDelta(String delta) {
+                            streamedReasoning.get().append(delta);
+                        }
+                    });
+
+            assertEquals("先判断意图。再组织回复。", response.reasoningContent());
+            assertEquals("先判断意图。再组织回复。", streamedReasoning.get().toString());
+            assertEquals("ok", response.content());
+        }
+    }
+
+    @Test
+    void stepClientRequestsDeepseekStyleReasoningContent() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse()
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody("""
+                            data: {"choices":[{"delta":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":12,"completion_tokens":1}}
+
+                            data: [DONE]
+
+                            """));
+            StepClient client = new StepClient("test-key", "step-3.5-flash-2603", server.url("/v1").toString());
+
+            client.chat(List.of(LlmClient.Message.user("你好")), null);
+
+            JsonNode root = MAPPER.readTree(server.takeRequest().getBody().readUtf8());
+            assertEquals("deepseek-style", root.path("reasoning_format").asText());
+            assertEquals("high", root.path("reasoning_effort").asText());
+        }
+    }
+
+    @Test
+    void stepClientDoesNotSendUnsupportedReasoningEffortForOlderStepModel() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse()
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody("""
+                            data: {"choices":[{"delta":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":12,"completion_tokens":1}}
+
+                            data: [DONE]
+
+                            """));
+            StepClient client = new StepClient("test-key", "step-3.5-flash", server.url("/v1").toString());
+
+            client.chat(List.of(LlmClient.Message.user("你好")), null);
+
+            JsonNode root = MAPPER.readTree(server.takeRequest().getBody().readUtf8());
+            assertEquals("deepseek-style", root.path("reasoning_format").asText());
+            assertFalse(root.has("reasoning_effort"));
         }
     }
 

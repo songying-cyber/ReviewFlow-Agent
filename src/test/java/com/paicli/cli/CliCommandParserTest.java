@@ -77,6 +77,14 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesHistoryClearSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/history clear");
+
+        assertEquals(CliCommandParser.CommandType.HISTORY_CLEAR, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
     void parsesExitSlashCommand() {
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("/exit");
 

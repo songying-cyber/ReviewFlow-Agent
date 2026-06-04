@@ -1,9 +1,11 @@
 package com.paicli.rag;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -11,20 +13,39 @@ import java.util.List;
  * 代码索引管理器：负责将代码库分块、向量化并持久化到 VectorStore
  */
 public class CodeIndex {
+    private static final Logger log = LoggerFactory.getLogger(CodeIndex.class);
     private final EmbeddingClient embeddingClient;
     private final CodeChunker chunker;
     private final CodeAnalyzer analyzer;
+    private final ProgressListener progressListener;
+
+    @FunctionalInterface
+    public interface ProgressListener {
+        void onProgress(String message);
+
+        static ProgressListener noop() {
+            return message -> {
+            };
+        }
+    }
 
     public CodeIndex() {
-        this.embeddingClient = new EmbeddingClient();
-        this.chunker = new CodeChunker();
-        this.analyzer = new CodeAnalyzer();
+        this(new EmbeddingClient(), ProgressListener.noop());
     }
 
     public CodeIndex(EmbeddingClient embeddingClient) {
+        this(embeddingClient, ProgressListener.noop());
+    }
+
+    public CodeIndex(ProgressListener progressListener) {
+        this(new EmbeddingClient(), progressListener);
+    }
+
+    public CodeIndex(EmbeddingClient embeddingClient, ProgressListener progressListener) {
         this.embeddingClient = embeddingClient;
         this.chunker = new CodeChunker();
         this.analyzer = new CodeAnalyzer();
+        this.progressListener = progressListener == null ? ProgressListener.noop() : progressListener;
     }
 
     /**
@@ -36,14 +57,16 @@ public class CodeIndex {
     public IndexResult index(String projectPath) {
         Path root = Paths.get(projectPath).toAbsolutePath().normalize();
         if (!Files.exists(root)) {
-            return new IndexResult(0, 0, "路径不存在: " + projectPath);
+            String message = "路径不存在: " + projectPath;
+            emit("❌ " + message);
+            return new IndexResult(0, 0, message);
         }
 
-        System.out.println("🔍 开始索引: " + root);
+        emit("🔍 开始索引: " + root);
 
         List<Path> filesToIndex = new ArrayList<>();
         collectFiles(root, filesToIndex);
-        System.out.println("📁 发现 " + filesToIndex.size() + " 个文件待索引");
+        emit("📁 发现 " + filesToIndex.size() + " 个文件待索引");
 
         List<VectorStore.CodeChunkEntry> entries = new ArrayList<>();
         List<CodeRelation> allRelations = new ArrayList<>();
@@ -54,7 +77,7 @@ public class CodeIndex {
         for (Path file : filesToIndex) {
             processed++;
             if (processed % 10 == 0 || processed == total) {
-                System.out.printf("   进度: %d/%d (%s)%n", processed, total, file.getFileName());
+                emit(String.format("   进度: %d/%d (%s)", processed, total, file.getFileName()));
             }
 
             try {
@@ -72,7 +95,9 @@ public class CodeIndex {
                     allRelations.addAll(analyzer.analyzeFile(file));
                 }
             } catch (Exception e) {
-                System.err.println("   ⚠️ 索引失败: " + file + " - " + e.getMessage());
+                String message = "   ⚠️ 索引失败: " + file + " - " + e.getMessage();
+                emit(message);
+                log.warn("code index failed for file {}", file, e);
             }
         }
 
@@ -84,13 +109,18 @@ public class CodeIndex {
 
             VectorStore.IndexStats stats = store.getStats();
             String msg = String.format("索引完成：%d 个代码块，%d 条关系", stats.chunkCount(), stats.relationCount());
-            System.out.println("✅ " + msg);
+            emit("✅ " + msg);
             return new IndexResult(stats.chunkCount(), stats.relationCount(), msg);
         } catch (Exception e) {
             String error = "持久化失败: " + e.getMessage();
-            System.err.println("❌ " + error);
+            emit("❌ " + error);
+            log.warn("code index persistence failed for root {}", root, e);
             return new IndexResult(0, 0, error);
         }
+    }
+
+    private void emit(String message) {
+        progressListener.onProgress(message);
     }
 
     /**
@@ -137,7 +167,9 @@ public class CodeIndex {
                 }
             });
         } catch (IOException e) {
-            System.err.println("遍历文件失败: " + e.getMessage());
+            String message = "遍历文件失败: " + e.getMessage();
+            emit("❌ " + message);
+            log.warn("code index file traversal failed for root {}", root, e);
         }
     }
 
