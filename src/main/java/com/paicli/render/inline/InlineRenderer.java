@@ -16,10 +16,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Inline 流式渲染器：默认形态。
@@ -37,21 +33,13 @@ public final class InlineRenderer implements Renderer {
     private final PrintStream stream;
     private final PrintStream out;
     private final Object transcriptLock = new Object();
-    private final Object thinkingLock = new Object();
-    private final ScheduledExecutorService thinkingScheduler;
+    private final InlineActivityDisplay activityDisplay;
     private final List<TranscriptEntry> transcript = new ArrayList<>();
     private volatile LineReader lineReader;
     private int renderedRows;
     private boolean redrawing;
     private volatile boolean started;
     private volatile boolean closed;
-    private final StringBuilder thinkingBuffer = new StringBuilder();
-    private ScheduledFuture<?> thinkingTask;
-    private boolean thinkingActive;
-    private String thinkingLabel = "Thinking";
-    private long thinkingStartedNanos;
-    private int thinkingFrame;
-    private int thinkingRenderedRows;
 
     // —— 代码块折叠状态机字段（仅供 createTranscriptStream 内部使用）——
     private final StringBuilder lineBuffer = new StringBuilder();
@@ -74,13 +62,9 @@ public final class InlineRenderer implements Renderer {
         this.statusBar = TerminalCapabilities.supportsScrollRegion(terminal)
                 ? new BottomStatusBar(terminal, out)
                 : null;
+        this.activityDisplay = statusBar == null ? null : new InlineActivityDisplay(terminal, out);
         this.blockRegistry = new BlockRegistry();
         this.stream = createTranscriptStream(out);
-        this.thinkingScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "paicli-thinking-panel");
-            t.setDaemon(true);
-            return t;
-        });
     }
 
     @Override
@@ -141,8 +125,9 @@ public final class InlineRenderer implements Renderer {
             return;
         }
         closed = true;
-        endThinking();
-        thinkingScheduler.shutdownNow();
+        if (activityDisplay != null) {
+            activityDisplay.close();
+        }
         if (statusBar != null) {
             statusBar.close();
         }
@@ -156,64 +141,27 @@ public final class InlineRenderer implements Renderer {
 
     @Override
     public boolean supportsThinkingPanel() {
-        return statusBar != null && terminal != null;
+        return activityDisplay != null;
     }
 
     @Override
     public void beginThinking(String label) {
-        if (!supportsThinkingPanel() || closed) {
-            return;
-        }
-        synchronized (thinkingLock) {
-            clearThinkingPanelLocked();
-            thinkingBuffer.setLength(0);
-            thinkingLabel = (label == null || label.isBlank()) ? "Thinking" : label.trim();
-            thinkingStartedNanos = System.nanoTime();
-            thinkingFrame = 0;
-            thinkingActive = true;
-            renderThinkingPanelLocked();
-            if (thinkingTask != null) {
-                thinkingTask.cancel(false);
-            }
-            thinkingTask = thinkingScheduler.scheduleAtFixedRate(
-                    this::tickThinkingPanel, 250, 250, TimeUnit.MILLISECONDS);
+        if (activityDisplay != null && !closed) {
+            activityDisplay.begin(label);
         }
     }
 
     @Override
     public void appendThinking(String delta) {
-        if (delta == null || delta.isEmpty() || closed) {
-            return;
-        }
-        if (!supportsThinkingPanel()) {
-            return;
-        }
-        synchronized (thinkingLock) {
-            if (!thinkingActive) {
-                thinkingStartedNanos = System.nanoTime();
-                thinkingLabel = "Thinking";
-                thinkingFrame = 0;
-                thinkingActive = true;
-            }
-            thinkingBuffer.append(delta);
-            trimThinkingBuffer();
-            renderThinkingPanelLocked();
+        if (activityDisplay != null && !closed) {
+            activityDisplay.appendThinking(delta);
         }
     }
 
     @Override
     public void endThinking() {
-        if (!supportsThinkingPanel()) {
-            return;
-        }
-        synchronized (thinkingLock) {
-            thinkingActive = false;
-            if (thinkingTask != null) {
-                thinkingTask.cancel(false);
-                thinkingTask = null;
-            }
-            clearThinkingPanelLocked();
-            thinkingBuffer.setLength(0);
+        if (activityDisplay != null) {
+            activityDisplay.end();
         }
     }
 
@@ -455,103 +403,6 @@ public final class InlineRenderer implements Renderer {
         }
         out.print(text);
         out.flush();
-    }
-
-    private void tickThinkingPanel() {
-        synchronized (thinkingLock) {
-            if (!thinkingActive || closed) {
-                return;
-            }
-            thinkingFrame++;
-            renderThinkingPanelLocked();
-        }
-    }
-
-    private void renderThinkingPanelLocked() {
-        if (!thinkingActive || closed) {
-            return;
-        }
-        List<String> lines = thinkingPanelLines();
-        synchronized (out) {
-            clearThinkingPanelLocked();
-            for (String line : lines) {
-                out.print(line);
-                out.print('\n');
-            }
-            out.flush();
-            thinkingRenderedRows = lines.size();
-        }
-    }
-
-    private void clearThinkingPanelLocked() {
-        if (thinkingRenderedRows <= 0) {
-            return;
-        }
-        synchronized (out) {
-            out.print(AnsiSeq.moveUp(thinkingRenderedRows));
-            out.print('\r');
-            out.print(AnsiSeq.CLEAR_TO_EOS);
-            out.flush();
-        }
-        thinkingRenderedRows = 0;
-    }
-
-    private List<String> thinkingPanelLines() {
-        int elapsedSeconds = (int) Math.max(0, TimeUnit.NANOSECONDS.toSeconds(
-                System.nanoTime() - thinkingStartedNanos));
-        String dots = switch (thinkingFrame % 4) {
-            case 0 -> ".";
-            case 1 -> "..";
-            case 2 -> "...";
-            default -> "....";
-        };
-        List<String> lines = new ArrayList<>();
-        lines.add(AnsiStyle.subtle(": " + thinkingLabel + dots + " (ESC 取消, " + elapsedSeconds + "s)"));
-        for (String line : latestThinkingLines(3)) {
-            lines.add(AnsiStyle.subtle("  > " + line));
-        }
-        return lines;
-    }
-
-    private List<String> latestThinkingLines(int maxLines) {
-        String text = thinkingBuffer.toString()
-                .replace("\r\n", "\n")
-                .replace('\r', '\n')
-                .trim();
-        if (text.isEmpty()) {
-            return List.of();
-        }
-        String[] rawLines = text.split("\\R+");
-        int start = Math.max(0, rawLines.length - maxLines);
-        int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns());
-        int maxChars = Math.max(20, cols - 6);
-        List<String> lines = new ArrayList<>();
-        for (int i = start; i < rawLines.length; i++) {
-            String line = rawLines[i].replaceAll("\\s+", " ").trim();
-            if (line.isEmpty()) {
-                continue;
-            }
-            lines.add(truncateVisible(line, maxChars));
-        }
-        return lines;
-    }
-
-    private String truncateVisible(String text, int maxChars) {
-        if (text.length() <= maxChars) {
-            return text;
-        }
-        if (maxChars <= 1) {
-            return "…";
-        }
-        return text.substring(0, maxChars - 1) + "…";
-    }
-
-    private void trimThinkingBuffer() {
-        int max = 4096;
-        if (thinkingBuffer.length() <= max) {
-            return;
-        }
-        thinkingBuffer.delete(0, thinkingBuffer.length() - max);
     }
 
     private static String stripAnsi(String s) {

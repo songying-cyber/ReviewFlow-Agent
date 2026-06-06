@@ -606,8 +606,87 @@ public class Agent {
         List<ToolExecutionResult> results = toolRegistry.executeTools(invocations);
         for (ToolExecutionResult result : results) {
             log.debug("Tool result preview [{}]: {}", result.name(), preview(result.result(), 300));
+            emitToolResultSummary(result);
         }
         return results;
+    }
+
+    private void emitToolResultSummary(ToolExecutionResult result) {
+        if (result == null || result.name() == null) {
+            return;
+        }
+        String summary = switch (result.name()) {
+            case "web_search" -> webSearchSummary(result);
+            case "web_fetch" -> webFetchSummary(result);
+            default -> "";
+        };
+        if (!summary.isBlank()) {
+            renderer().stream().println(AnsiStyle.subtle("  → " + summary));
+        }
+    }
+
+    private String webSearchSummary(ToolExecutionResult result) {
+        String text = result.result() == null ? "" : result.result();
+        if (text.startsWith("搜索失败") || text.startsWith("⚠️") || text.contains("未找到相关结果")) {
+            return compactOneLine(text, 120);
+        }
+        long count = text.lines().filter(line -> line.matches("^\\d+\\.\\s+.*")).count();
+        String query = extractJsonArg(result.argumentsJson(), "query");
+        String label = query.isBlank() ? "搜索结果" : "搜索 \"" + query + "\"";
+        return count > 0
+                ? label + " 返回 " + count + " 条结果"
+                : label + " 已返回结果";
+    }
+
+    private String webFetchSummary(ToolExecutionResult result) {
+        String text = result.result() == null ? "" : result.result();
+        String url = extractJsonArg(result.argumentsJson(), "url");
+        String target = url.isBlank() ? "页面" : compactOneLine(url.replaceFirst("^https?://", ""), 80);
+        if (text.startsWith("抓取失败") || text.startsWith("❌")) {
+            return "抓取 " + target + " 失败: " + compactOneLine(text, 100);
+        }
+        String title = text.lines()
+                .filter(line -> line.startsWith("📄 标题:"))
+                .map(line -> line.substring("📄 标题:".length()).trim())
+                .findFirst()
+                .orElse("");
+        String length = text.lines()
+                .filter(line -> line.startsWith("📏 正文"))
+                .findFirst()
+                .orElse("");
+        if (!title.isBlank() && !length.isBlank()) {
+            return "抓取 " + target + " 完成: " + title + " · " + length.replace("📏 ", "");
+        }
+        if (!title.isBlank()) {
+            return "抓取 " + target + " 完成: " + title;
+        }
+        return "抓取 " + target + " 完成";
+    }
+
+    private String extractJsonArg(String json, String key) {
+        if (json == null || json.isBlank() || key == null || key.isBlank()) {
+            return "";
+        }
+        try {
+            return new ObjectMapper().readTree(json).path(key).asText("");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String compactOneLine(String text, int maxLength) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String value = text.replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .lines()
+                .map(String::trim)
+                .filter(line -> !line.isEmpty())
+                .findFirst()
+                .orElse("")
+                .replaceAll("\\s+", " ");
+        return value.length() > maxLength ? value.substring(0, Math.max(0, maxLength - 3)) + "..." : value;
     }
 
     private void appendImageToolMessages(List<ToolExecutionResult> toolResults) {

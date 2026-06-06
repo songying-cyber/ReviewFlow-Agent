@@ -12,7 +12,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStreamWriter;
 import java.io.PrintStream;
+import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -130,6 +132,12 @@ class InlineRendererTest {
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        Mockito.doAnswer(invocation -> {
+            writer.flush();
+            return null;
+        }).when(terminal).flush();
 
         InlineRenderer renderer = new InlineRenderer(terminal,
                 new PrintStream(sink, true, StandardCharsets.UTF_8));
@@ -150,11 +158,17 @@ class InlineRendererTest {
     }
 
     @Test
-    void thinkingPanelRendersDynamicQuotedReasoningAndClears() {
+    void thinkingPanelRendersJLineActivityReasoningAndClears() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        Mockito.doAnswer(invocation -> {
+            writer.flush();
+            return null;
+        }).when(terminal).flush();
 
         InlineRenderer renderer = new InlineRenderer(terminal,
                 new PrintStream(sink, true, StandardCharsets.UTF_8));
@@ -165,13 +179,16 @@ class InlineRendererTest {
             String rendered = sink.toString(StandardCharsets.UTF_8);
             assertTrue(renderer.supportsThinkingPanel());
             assertTrue(rendered.contains("Thinking"), rendered);
-            assertTrue(rendered.contains("> 先分析用户输入"), rendered);
-            assertTrue(rendered.contains("> 再检查状态栏边界"), rendered);
+            assertTrue(rendered.contains("先分析用户输入"), rendered);
+            assertTrue(rendered.contains("再检查状态栏边界"), rendered);
+            assertTrue(rendered.contains(">"),
+                    "JLine activity display should show live reasoning quote content: " + rendered);
 
             sink.reset();
             renderer.endThinking();
             String cleared = sink.toString(StandardCharsets.UTF_8);
-            assertTrue(cleared.contains(AnsiSeq.CLEAR_TO_EOS), cleared);
+            assertFalse(cleared.contains(AnsiSeq.CLEAR_LINE),
+                    "activity clearing should be owned by JLine Display, not hand-written clear-line ANSI: " + cleared);
         } finally {
             renderer.close();
         }

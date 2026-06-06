@@ -78,7 +78,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - 主入口：`Agent.java`
 - 退出条件由 LLM 自决（不返回 tool_calls 即结束）
 - `AgentBudget` 三种兜底：token 超预算 / 连续 3 轮相同调用 / 50 轮硬上限
-- 流式输出 reasoning_content + content；inline ReAct 路径先显示动态 `Thinking...` 面板，reasoning_content 以灰色引用行显示在面板内，content 或 tool call 开始前清掉临时面板，并把已收到的 reasoning 以灰色 `> ...` 引用块落到正文区；plain / 非 inline 路径同一次输入只打印一次 `🧠 思考过程` 标题
+- 流式输出 reasoning_content + content；inline ReAct 路径先用 JLine `Display` 显示动态 `Thinking...` activity 区，reasoning_content 在该区域以灰色 `> ...` 引用预览，content 或 tool call 开始前清掉临时态，并把已收到的完整 reasoning 引用块落到正文区；plain / 非 inline 路径同一次输入只打印一次 `🧠 思考过程` 标题
 - 流式头标签用 `π 回复`（非 `最终结果`）
 
 ### Long Context Engineering
@@ -168,7 +168,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - 当前开屏 Banner 是无右侧盒线边框的简洁布局，避免 ANSI/CJK 字宽导致竖线错位
 - InlineRenderer 复用 JLine 4 的编辑能力，默认提示符是 `* `，右提示显示 `message / @path / @image`
 - BottomStatusBar 是输入期 inline status：状态区在当前 prompt 下方保留 1 行间距后渲染两行（强状态行 / 操作提示行），输入提交后清掉状态区和后续空白；不能再用 JLine `Status` / DECSTBM / 绝对光标行号锚到物理底部；强状态行显示 `idle` / `react` / `plan` / `team` 阶段，并常驻展示 `MCP ready/total` 与 `Skill enabled/total`
-- InlineRenderer 独立维护 ReAct thinking panel：LLM 请求开始时启动定时刷新，reasoning delta 更新面板尾部引用行；content / tool / cancel / error 边界必须调用 `endThinking()` 清理临时面板。Agent.StreamRenderer 负责在 content / tool call 前把 reasoning 作为灰色引用块写入 transcript，避免只闪过不留痕
+- InlineRenderer 通过 JLine `Display` 维护 ReAct thinking 临时 activity 区：LLM 请求开始时显示 `Thinking...` 状态行，reasoning delta 以灰色 `> ...` 引用预览；动画 tick 只推进 spinner，重绘 / diff / 清理由 `Display.update(...)` 管理，不再手写 `\r` / `CLEAR_LINE` 刷屏。content / tool / cancel / error 边界必须调用 `endThinking()` 清理临时态。Agent.StreamRenderer 负责在 content / tool call 前把完整 reasoning 作为灰色引用块写入 transcript，避免只闪过不留痕
 - 交互期输出优先走 `Renderer.stream()`；`Main`、`PlanExecuteAgent`、`Planner`、`AgentOrchestrator` 都可接收同一个 renderer 输出流，避免绕过 inline renderer 直接写 stdout
 - `CodeIndex` 通过 `ProgressListener` 上报索引开始 / 文件数量 / 进度 / 完成或失败，`/index` 绑定当前 renderer 输出流；内部异常细节写 logger
 

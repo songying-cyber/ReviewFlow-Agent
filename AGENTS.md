@@ -77,7 +77,7 @@ src/main/java/com/paicli/
 - 开屏 Banner 使用无右边框的简洁布局，避免 CJK/ANSI 字宽导致右侧竖线错位；Phase 22 后默认是 π 主题彩色 logo + Qoder 风格首屏，只展示模型、MCP、Skill、ReAct 状态和三条 getting-started tips，不再把 MCP server 明细刷成启动日志。
 - inline 模式使用 JLine 4 的 LineReader 编辑能力，默认提示符是 `* `，右提示显示 `message / @path / @image`。
 - `BottomStatusBar` 现在是输入期 inline status：状态区在当前 prompt 下方保留 1 行间距后渲染两行（强状态行 + 操作提示行），输入提交后清掉状态区和后续空白；不要用 JLine `Status` / DECSTBM / 绝对光标行号把 prompt 或 status 锚到物理底部；强状态行包含 phase / model / ctx / HITL / MCP / Skill / input / output / cached / 估算成本 / elapsed 状态。
-- ReAct LLM 调用期间，inline renderer 会在输入区上方显示动态 `Thinking...` 面板；reasoning delta 先进入该面板，content 或 tool call 开始前会清掉临时面板，并把已收到的 reasoning 以灰色 `> ...` 引用块落到正文区，然后再输出 `π 回复` / 工具调用。plain / 非 inline 路径继续在正文区显示 `🧠 思考过程`。
+- ReAct LLM 调用期间，inline renderer 会用 JLine `Display` 显示 `Thinking...` 临时 activity 区：动画 tick 只推进 spinner，重绘 / diff / 清理由 JLine 管理；reasoning delta 会在 activity 区以灰色 `> ...` 引用预览，content 或 tool call 开始前清掉临时态，并把已收到的 reasoning 以灰色引用块落到正文区，然后再输出 `π 回复` / 工具调用。不要在 thinking 动画里新增裸 `\r` / `CLEAR_LINE` / `System.out.print` 刷屏逻辑。plain / 非 inline 路径继续在正文区显示 `🧠 思考过程`。
 - 交互期输出应优先走 `Renderer.stream()`；`Main`、`PlanExecuteAgent`、`Planner`、`AgentOrchestrator` 都支持把输出流接到 inline renderer，避免直接争抢 stdout。`CodeIndex` 的索引进度通过 `ProgressListener` 注入，`/index` 应绑定到当前 renderer 输出流。
 - Phase 22 开始，`InlineRenderer` 可绑定当前 `LineReader`；当 `LineReader.isReading()` 为 true 时，`Renderer.stream()` 的完整行输出优先通过 `LineReader#printAbove` 显示在输入行上方，未绑定 / 非读取态 / 测试路径回退到原 `PrintStream`。
 - ReAct 正常结束后不再把 `📊 Token: ...` 打进正文区；token/cost/elapsed 会保留在底部强状态行，phase 回到 `idle`。

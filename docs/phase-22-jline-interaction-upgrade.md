@@ -62,7 +62,7 @@ Terminal
 - 强状态行显示 phase / model / ctx / token / cost / HITL / elapsed / task count。
 - ReAct token/cost/elapsed 默认进入强状态行，不再作为 `📊 Token: ...` 正文行输出。
 - 弱提示行根据当前状态动态变化。
-- ReAct 显示 thinking / tools / streaming / idle；thinking 阶段由 inline renderer 的动态面板承载，不再把 reasoning 直接刷进正文区。
+- ReAct 显示 thinking / tools / streaming / idle；thinking 阶段由 inline renderer 的 JLine `Display` activity 区承载，实时显示 spinner 和灰色 `> ...` reasoning 预览。动画可以保留低频 tick，但 tick 只更新状态模型，实际重绘 / diff / 清理由 `Display.update(...)` 完成，不手写 `\r`、`CLEAR_LINE` 或裸 stdout 刷屏。
 - Plan 显示当前 task、完成数、失败数。
 - Team 显示 worker/reviewer 状态。
 - MCP 显示 starting/ready/error 数量。

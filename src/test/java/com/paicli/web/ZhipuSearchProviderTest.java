@@ -37,7 +37,9 @@ class ZhipuSearchProviderTest {
                 // 把所有请求重写到 mock server，绕开 hardcoded endpoint
                 .addInterceptor(chain -> {
                     var original = chain.request();
-                    var newUrl = server.url("/api/paas/v4/tools/web_search");
+                    assertEquals("https://open.bigmodel.cn/api/paas/v4/web_search",
+                            original.url().toString());
+                    var newUrl = server.url("/api/paas/v4/web_search");
                     return chain.proceed(original.newBuilder().url(newUrl).build());
                 })
                 .build();

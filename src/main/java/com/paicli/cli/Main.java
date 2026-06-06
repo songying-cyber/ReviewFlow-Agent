@@ -2077,10 +2077,10 @@ public class Main {
                 ? "0 skills"
                 : info.skillsEnabled() + "/" + info.skillsTotal() + " skills";
         String ready = "Model " + model + " (" + provider + ")";
-        String capabilities = "ReAct · Plan · MCP · Browser · Image";
+        String capabilities = "ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG";
         String state = mcp + " · " + skills + " · ReAct";
         List<String> lines = new ArrayList<>(List.of(
-                "   " + AnsiStyle.section("████████") + "    " + AnsiStyle.emphasis("PaiCLI") + " " + AnsiStyle.section("π") + "  " + AnsiStyle.subtle("v" + VERSION),
+                "   " + AnsiStyle.section("██████████") + "    " + AnsiStyle.emphasis("PaiCLI") + " " + AnsiStyle.section("π") + "  " + AnsiStyle.subtle("v" + VERSION),
                 "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(ready),
                 "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(state),
                 "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(capabilities),

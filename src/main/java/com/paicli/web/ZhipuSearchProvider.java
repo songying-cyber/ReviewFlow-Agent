@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
  *   <li>价格 0.01–0.05 元/次，比 SerpAPI 便宜 5–10 倍</li>
  * </ul>
  *
- * <p>Endpoint: {@code POST https://open.bigmodel.cn/api/paas/v4/tools/web_search}
+ * <p>Endpoint: {@code POST https://open.bigmodel.cn/api/paas/v4/web_search}
  *
  * <p>支持的搜索引擎：
  * <ul>
@@ -42,7 +42,7 @@ public class ZhipuSearchProvider implements SearchProvider {
 
     private static final Logger log = LoggerFactory.getLogger(ZhipuSearchProvider.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final String ENDPOINT = "https://open.bigmodel.cn/api/paas/v4/tools/web_search";
+    private static final String ENDPOINT = "https://open.bigmodel.cn/api/paas/v4/web_search";
     private static final MediaType JSON_MEDIA = MediaType.parse("application/json; charset=utf-8");
     private static final Set<String> ALLOWED_ENGINES = Set.of(
             "search_std", "search_pro", "search_pro_sogou", "search_pro_quark");
