@@ -647,10 +647,12 @@ public class Main {
                 }
 
                 // 运行 Agent
+                String submittedInput = input;
                 input = mentionExpander.expand(input);
                 input = localPathMentionExpander.expand(input);
                 ui.println();
                 renderer.beginTurn();
+                printSubmittedPrompt(ui, submittedInput);
                 final String taskInput = input;
                 Callable<String> runTask;
                 String snapshotMode;
@@ -947,6 +949,15 @@ public class Main {
 
     static boolean defaultSpaciousPrompt(boolean statusBarAvailable) {
         return false;
+    }
+
+    static void printSubmittedPrompt(PrintStream out, String input) {
+        String visible = input == null ? "" : input.strip();
+        if (visible.isEmpty()) {
+            return;
+        }
+        out.println(AnsiStyle.subtle("* ") + visible);
+        out.println();
     }
 
     static void configureAwtForCli() {

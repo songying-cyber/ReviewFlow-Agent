@@ -53,6 +53,11 @@ public final class BottomStatusBar implements AutoCloseable {
         this.current = mergeEnvironment(info, current);
     }
 
+    /** 当前 StatusInfo 快照，供 thinking 面板等组件复用同一份格式化结果。 */
+    public StatusInfo currentStatus() {
+        return current;
+    }
+
     /** 立即触发一次重绘（不等节流间隔）。 */
     public void flushNow() {
         // Inline status is drawn as part of prepareInputLine(); there is no background throttle to flush.

@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -78,6 +80,18 @@ class MainInputNormalizationTest {
     void promptDoesNotUseBottomSpaciousModeByDefault() {
         assertFalse(Main.defaultSpaciousPrompt(false));
         assertFalse(Main.defaultSpaciousPrompt(true));
+    }
+
+    @Test
+    void submittedPromptIsRenderedBackIntoTranscript() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+
+        Main.printSubmittedPrompt(new PrintStream(sink, true, StandardCharsets.UTF_8), "  沉默王二是谁？  ");
+
+        String emitted = sink.toString(StandardCharsets.UTF_8);
+        assertTrue(emitted.contains("* "), emitted);
+        assertTrue(emitted.contains("沉默王二是谁？"), emitted);
+        assertTrue(emitted.endsWith("\n\n"), emitted);
     }
 
     @Test

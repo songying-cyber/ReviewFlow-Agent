@@ -62,7 +62,9 @@ public final class InlineRenderer implements Renderer {
         this.statusBar = TerminalCapabilities.supportsScrollRegion(terminal)
                 ? new BottomStatusBar(terminal, out)
                 : null;
-        this.activityDisplay = statusBar == null ? null : new InlineActivityDisplay(terminal, out);
+        this.activityDisplay = statusBar == null
+                ? null
+                : new InlineActivityDisplay(terminal, out, statusBar);
         this.blockRegistry = new BlockRegistry();
         this.stream = createTranscriptStream(out);
     }
@@ -204,6 +206,9 @@ public final class InlineRenderer implements Renderer {
     public void updateStatus(StatusInfo status) {
         if (statusBar != null) {
             statusBar.update(status);
+        }
+        if (activityDisplay != null) {
+            activityDisplay.refreshIfActive();
         }
     }
 

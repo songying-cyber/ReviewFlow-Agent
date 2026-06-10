@@ -31,6 +31,7 @@ Terminal
 
 - 交互期所有用户可见输出优先走 `Renderer.stream()`。
 - inline 模式下 `Renderer.stream()` 优先通过 `LineReader#printAbove` 输出到当前输入行上方。
+- 普通任务提交后先把本轮原始用户 prompt 以 `* <内容>` 回写到 transcript，再进入 mention 展开、Thinking 面板和工具调用，避免输入提交行被状态区清理或 activity 重绘吞掉。
 - ReAct inline 模式下 LLM 请求期间显示动态 `Thinking...` 面板；reasoning delta 以灰色引用行出现在面板中，content 开始前清理面板再进入正常 transcript。
 - 状态区在当前 prompt 下方保留 1 行间距后渲染，输入提交后清掉状态区和后续空白；不再使用 JLine `Status` 把状态区固定到物理终端底部。
 - 非交互、测试、plain renderer 和降级路径继续使用普通 `PrintStream`。

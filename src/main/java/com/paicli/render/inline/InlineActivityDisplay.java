@@ -1,5 +1,6 @@
 package com.paicli.render.inline;
 
+import com.paicli.render.StatusInfo;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
@@ -33,6 +34,7 @@ final class InlineActivityDisplay implements AutoCloseable {
     private final Display display;
     private final ScheduledExecutorService scheduler;
     private final StringBuilder reasoning = new StringBuilder();
+    private final BottomStatusBar statusBar;
 
     private ScheduledFuture<?> tickTask;
     private boolean active;
@@ -42,14 +44,31 @@ final class InlineActivityDisplay implements AutoCloseable {
     private int frame;
 
     InlineActivityDisplay(Terminal terminal, PrintStream renderLock) {
+        this(terminal, renderLock, null);
+    }
+
+    InlineActivityDisplay(Terminal terminal, PrintStream renderLock, BottomStatusBar statusBar) {
         this.terminal = terminal;
         this.renderLock = renderLock;
+        this.statusBar = statusBar;
         this.display = new Display(terminal, false);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "paicli-activity-display");
             t.setDaemon(true);
             return t;
         });
+    }
+
+    /** thinking 面板是否正在显示——给 InlineRenderer 决定是否在 status 更新时触发重绘。 */
+    synchronized boolean isActive() {
+        return active && !closed;
+    }
+
+    /** 当 statusBar 数据变化时，让 thinking 面板首行的实时状态条立即跟进。 */
+    synchronized void refreshIfActive() {
+        if (active && !closed) {
+            renderLocked();
+        }
     }
 
     synchronized void begin(String label) {
@@ -153,6 +172,9 @@ final class InlineActivityDisplay implements AutoCloseable {
     private List<AttributedString> buildLines() {
         int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns());
         List<AttributedString> lines = new ArrayList<>();
+        // 顶部：从 BottomStatusBar 拿到的实时状态行（反白）+ 提示行（暗色）
+        // 让 thinking 面板自带运行控制面板的视觉锚点，避免思考期间用户看不到 token / elapsed 在变化。
+        appendStatusHeader(lines, cols);
         lines.add(fit(": " + label + dots() + " (ESC 取消, " + elapsedSeconds() + "s)",
                 cols, STATUS_STYLE));
 
@@ -163,12 +185,23 @@ final class InlineActivityDisplay implements AutoCloseable {
             AttributedString quote = new AttributedString("> " + quoteLines.get(i), QUOTE_STYLE);
             for (AttributedString part : quote.columnSplitLength(quoteWidth, true, true, terminal)) {
                 lines.add(fit("  " + part.toString(), cols, QUOTE_STYLE));
-                if (lines.size() > MAX_REASONING_ROWS + 1) {
+                if (lines.size() > MAX_REASONING_ROWS + 3) {
                     return lines;
                 }
             }
         }
         return lines;
+    }
+
+    private void appendStatusHeader(List<AttributedString> lines, int cols) {
+        if (statusBar == null) {
+            return;
+        }
+        StatusInfo info = statusBar.currentStatus();
+        if (info == null) {
+            return;
+        }
+        lines.addAll(BottomStatusBar.formatStatusLines(info, cols));
     }
 
     private List<String> reasoningLines() {

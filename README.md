@@ -256,6 +256,7 @@ Tips for getting started:
 - 🔄 ReAct Agent 循环（思考-行动-观察）
 - 🛠️ 工具调用（文件操作、Shell命令、项目创建、代码语义检索、联网搜索、MCP 动态工具）
 - 💬 交互式命令行界面
+- 📝 普通任务提交后会先把本轮原始 prompt 以 `* <内容>` 写回 transcript，再进入 Thinking / 工具调用，避免状态区清理后用户输入从可见历史里消失
 - 🧠 默认通过流式接口获取模型输出；inline ReAct 会用 JLine `Display` 显示动态 `Thinking...` activity 区，实时预览灰色 `> ...` reasoning，并在回复 / 工具调用开始前把完整 reasoning 引用块落到正文区；web_search / web_fetch 会在折叠头展示 query / URL，并在执行后输出一行结果摘要；plain / 非 inline 路径继续按流式展示 `🧠 思考过程` 与 `π 回复`
 - 🖥️ 终端会对常见 Markdown（标题、列表、表格、代码块）做渲染后再显示，避免直接暴露原始标记符号
 
