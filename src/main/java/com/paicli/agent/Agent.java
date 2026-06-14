@@ -714,7 +714,7 @@ public class Agent {
         if (normalizedAnswer.isEmpty()) {
             return "🧠 思考过程:\n" + normalizedReasoning;
         }
-        return "🧠 思考过程:\n" + normalizedReasoning + "\n\nπ 回复:\n" + normalizedAnswer;
+        return "🧠 思考过程:\n" + normalizedReasoning + "\n\n▪ " + normalizedAnswer;
     }
 
     private String preview(String content, int maxLength) {
@@ -737,9 +737,7 @@ public class Agent {
      * 1. 在 content 出现之前，只要 reasoning 有实质内容（非空白），就立刻流式打印在"🧠 思考过程"下
      *    同一次用户输入只打印一次"🧠 思考过程"标题；工具调用后的后续推理继续归在同一块下
      * 2. 仅空白的 reasoning delta 会先暂存，不触发标题——避免出现"空的思考过程"
-     * 3. content 一出现就收尾 reasoning 区，打印"π 回复"标题并流式输出 content
-     *    （故意使用"回复"而不是"最终结果"：当模型在调用工具前先 narrate 一段时，"最终结果"会误导用户
-     *    认为下面的内容就是答案；"回复"在 narration 和真正最终回答两种情况下都准确）
+     * 3. content 一出现就收尾 reasoning 区，用低调标记进入正文并流式输出 content
      * 4. 如果 content 启动之后又收到 reasoning（服务器把思考内容追加在答案之后），
      *    缓冲到 lateReasoning，最终在 finish() 用"🧠 补充思考"标题独立展示，不会污染回复区
      */
@@ -858,7 +856,7 @@ public class Agent {
                     pendingReasoning.setLength(0);
                     reasoningStarted = true;
                 }
-                out().println(AnsiStyle.section("π 回复"));
+                out().print(AnsiStyle.answerMarker() + " ");
                 contentRenderer = new TerminalMarkdownRenderer(out());
                 contentStarted = true;
                 streamedOutput = true;
@@ -979,11 +977,11 @@ public class Agent {
             if (reasoning.isEmpty()) {
                 return;
             }
-            out().println(AnsiStyle.subtle(": Thinking"));
+            out().println(AnsiStyle.thinking("Thinking..."));
             for (String line : reasoning.split("\\R+")) {
                 String normalized = line.replaceAll("\\s+", " ").trim();
                 if (!normalized.isEmpty()) {
-                    out().println(AnsiStyle.subtle("  > " + normalized));
+                    out().println(AnsiStyle.subtle("│ " + normalized));
                 }
             }
             out().println();

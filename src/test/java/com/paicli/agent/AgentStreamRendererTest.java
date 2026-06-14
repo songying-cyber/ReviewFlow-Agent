@@ -98,9 +98,9 @@ class AgentStreamRendererTest {
         assertTrue(thinkingRenderer.ended);
         assertTrue(thinkingRenderer.thinking().contains("我先判断用户意图。"));
         assertFalse(transcript.contains("思考过程"), transcript);
-        assertTrue(transcript.contains(": Thinking"), transcript);
-        assertTrue(transcript.contains("> 我先判断用户意图。"), transcript);
-        assertTrue(transcript.contains("回复"), transcript);
+        assertTrue(transcript.contains("Thinking..."), transcript);
+        assertTrue(transcript.contains("│ 我先判断用户意图。"), transcript);
+        assertFalse(transcript.contains("π 回复"), transcript);
         assertTrue(transcript.contains("好的"), transcript);
     }
 

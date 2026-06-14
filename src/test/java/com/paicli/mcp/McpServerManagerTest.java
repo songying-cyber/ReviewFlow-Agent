@@ -10,13 +10,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -102,6 +107,28 @@ class McpServerManagerTest {
                 "bad 应标 ERROR");
         assertNotNull(byName.get("bad").errorMessage());
         assertTrue(registry.hasTool("mcp__good__ok"));
+    }
+
+    @Test
+    void boundedStartupWaitReturnsWhileSlowServerContinuesStarting() throws Exception {
+        webServer.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-03-26\"}}")
+                .setBodyDelay(3, TimeUnit.SECONDS));
+
+        loadServersFromMap(Map.of("slow", httpConfig(webServer)));
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        long started = System.nanoTime();
+        manager.startAll(new PrintStream(out, true, StandardCharsets.UTF_8), Duration.ofMillis(100));
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        McpServer server = manager.server("slow");
+        assertTrue(elapsedMillis < 1500, "bounded startup should return before initialize timeout");
+        assertEquals(McpServerStatus.STARTING, server.status());
+        assertFalse(registry.hasTool("mcp__slow__echo"));
+        assertTrue(out.toString(StandardCharsets.UTF_8).contains("后台继续启动"));
     }
 
     @Test

@@ -1,12 +1,12 @@
 package com.paicli.render.inline;
 
-import com.paicli.render.StatusInfo;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
-import org.jline.utils.Display;
 
 import java.io.PrintStream;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -15,33 +15,31 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JLine-managed transient activity area for model thinking.
+ * Fixed-height transient activity area for model thinking.
  *
- * <p>The timer only advances the spinner clock. All terminal repaint work goes
- * through {@link Display}, so JLine owns cursor movement, diffing, wrapping and
- * terminal flush semantics instead of this class writing raw carriage-return
- * control sequences.
+ * <p>The live area only ever clears and rewrites rows that it printed itself.
+ * It intentionally avoids {@code Display.update(...)} because an independent
+ * JLine Display does not share layout ownership with the transcript and status
+ * renderer; once scrollback moves, Display can clear from the wrong origin.
  */
 final class InlineActivityDisplay implements AutoCloseable {
 
     private static final int MAX_REASONING_CHARS = 4096;
     private static final int MAX_REASONING_ROWS = 4;
-    private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.faint().italic();
+    private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.italic();
     private static final AttributedStyle QUOTE_STYLE = AttributedStyle.DEFAULT.faint().italic();
 
     private final Terminal terminal;
     private final PrintStream renderLock;
-    private final Display display;
     private final ScheduledExecutorService scheduler;
     private final StringBuilder reasoning = new StringBuilder();
-    private final BottomStatusBar statusBar;
-
     private ScheduledFuture<?> tickTask;
     private boolean active;
     private boolean closed;
     private String label = "Thinking";
     private long startedNanos;
     private int frame;
+    private int renderedRows;
 
     InlineActivityDisplay(Terminal terminal, PrintStream renderLock) {
         this(terminal, renderLock, null);
@@ -50,8 +48,6 @@ final class InlineActivityDisplay implements AutoCloseable {
     InlineActivityDisplay(Terminal terminal, PrintStream renderLock, BottomStatusBar statusBar) {
         this.terminal = terminal;
         this.renderLock = renderLock;
-        this.statusBar = statusBar;
-        this.display = new Display(terminal, false);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "paicli-activity-display");
             t.setDaemon(true);
@@ -64,7 +60,7 @@ final class InlineActivityDisplay implements AutoCloseable {
         return active && !closed;
     }
 
-    /** 当 statusBar 数据变化时，让 thinking 面板首行的实时状态条立即跟进。 */
+    /** 当 renderer 状态变化时，如果 thinking 正在显示，则刷新 spinner 和 reasoning 预览。 */
     synchronized void refreshIfActive() {
         if (active && !closed) {
             renderLocked();
@@ -151,57 +147,79 @@ final class InlineActivityDisplay implements AutoCloseable {
             return;
         }
         synchronized (renderLock) {
-            try {
-                display.resize(TerminalCapabilities.safeSize(terminal).getColumns(),
-                        TerminalCapabilities.safeSize(terminal).getRows());
-            } catch (RuntimeException ignored) {
-                // Some mocked or redirected terminals do not expose buffer size.
-                // Display can still repaint with the size captured at construction.
+            PrintWriter writer = terminalWriter();
+            clearRenderedArea(writer);
+            List<AttributedString> lines = buildLines();
+            for (int i = 0; i < lines.size(); i++) {
+                writer.print(lines.get(i).toAnsi(terminal));
+                writer.print(AnsiSeq.CLEAR_TO_EOL);
+                if (i < lines.size() - 1) {
+                    writer.print('\n');
+                }
             }
-            display.update(buildLines(), -1);
+            renderedRows = lines.size();
+            writer.flush();
+            terminal.flush();
         }
     }
 
     private void clearLocked() {
         synchronized (renderLock) {
-            display.update(List.of(), -1);
-            display.reset();
+            PrintWriter writer = terminalWriter();
+            clearRenderedArea(writer);
+            writer.flush();
+            terminal.flush();
         }
     }
 
+    private PrintWriter terminalWriter() {
+        PrintWriter writer = terminal.writer();
+        if (writer != null) {
+            return writer;
+        }
+        return new PrintWriter(renderLock, true, StandardCharsets.UTF_8);
+    }
+
+    private void clearRenderedArea(PrintWriter writer) {
+        if (renderedRows <= 0) {
+            return;
+        }
+        if (renderedRows > 1) {
+            writer.print(AnsiSeq.moveUp(renderedRows - 1));
+        }
+        writer.print('\r');
+        for (int i = 0; i < renderedRows; i++) {
+            writer.print(AnsiSeq.CLEAR_LINE);
+            if (i < renderedRows - 1) {
+                writer.print('\n');
+            }
+        }
+        if (renderedRows > 1) {
+            writer.print(AnsiSeq.moveUp(renderedRows - 1));
+        }
+        writer.print('\r');
+        renderedRows = 0;
+    }
+
     private List<AttributedString> buildLines() {
-        int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns());
+        int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns() - 1);
         List<AttributedString> lines = new ArrayList<>();
-        // 顶部：从 BottomStatusBar 拿到的实时状态行（反白）+ 提示行（暗色）
-        // 让 thinking 面板自带运行控制面板的视觉锚点，避免思考期间用户看不到 token / elapsed 在变化。
-        appendStatusHeader(lines, cols);
-        lines.add(fit(": " + label + dots() + " (ESC 取消, " + elapsedSeconds() + "s)",
+        lines.add(fit("  " + label + dots() + " (esc to cancel, " + elapsedSeconds() + "s)",
                 cols, STATUS_STYLE));
 
         List<String> quoteLines = reasoningLines();
         int quoteWidth = Math.max(12, cols - 4);
         int start = Math.max(0, quoteLines.size() - MAX_REASONING_ROWS);
         for (int i = start; i < quoteLines.size(); i++) {
-            AttributedString quote = new AttributedString("> " + quoteLines.get(i), QUOTE_STYLE);
+            AttributedString quote = new AttributedString("│ " + quoteLines.get(i), QUOTE_STYLE);
             for (AttributedString part : quote.columnSplitLength(quoteWidth, true, true, terminal)) {
                 lines.add(fit("  " + part.toString(), cols, QUOTE_STYLE));
-                if (lines.size() > MAX_REASONING_ROWS + 3) {
+                if (lines.size() > MAX_REASONING_ROWS + 1) {
                     return lines;
                 }
             }
         }
         return lines;
-    }
-
-    private void appendStatusHeader(List<AttributedString> lines, int cols) {
-        if (statusBar == null) {
-            return;
-        }
-        StatusInfo info = statusBar.currentStatus();
-        if (info == null) {
-            return;
-        }
-        lines.addAll(BottomStatusBar.formatStatusLines(info, cols));
     }
 
     private List<String> reasoningLines() {

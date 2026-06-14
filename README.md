@@ -121,7 +121,7 @@ mvn test
 - 用于处理 SPA / JS 渲染 / 防爬墙 / 表单交互页面；微信公众号文章、知乎专栏、推特、小红书等 `web_fetch` 失败站点会引导走浏览器 MCP
 - HITL 的“全部放行”支持 MCP server 维度，连续浏览器操作可对 `chrome-devtools` 一次确认
 - `image` 类型结果会作为图片输入附加到下一轮；文本 fallback 仍保留，用于日志、人类可读摘要和 API 不接受图片时的上下文
-- MCP initialize 默认超时提升到 60 秒，并在长启动期间打印等待进度
+- MCP initialize 默认超时为 60 秒；CLI 首屏默认最多等待 8 秒，超时后先进入交互，未完成的 server 保持 `starting` 并在后台继续启动，可用 `/mcp` 和 `/mcp logs <name>` 追踪
 
 ### 第十四期：CDP 会话复用 + 登录态访问
 
@@ -155,7 +155,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 | 形态 | 启用方式 | 视觉风格 |
 |---|---|---|
-| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、prompt 下方留 1 行间距的两行 inline 状态区（phase / model / ctx / HITL / MCP / Skill / token）、右侧输入提示、行内可折叠工具块（`Read 3 files (ctrl+o to expand)`）、行内 git diff、HITL 单字符 `[y/n/a/s/m]` 提示 |
+| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、JLine `Status` 托管的底部 dock（YOLO/HITL、MCP、Skill、model、ctx、token、cwd）、右侧输入提示、行内可折叠工具块（`Read 3 files (ctrl+o to expand)`）、行内 git diff、HITL 单字符 `[y/n/a/s/m]` 提示 |
 | **lanterna 全屏 TUI** | `PAICLI_RENDERER=lanterna`（或兼容旧 `PAICLI_TUI=true`） | v16 三栏全屏：文件树 + 对话流 + 状态栏 + 底部输入栏，HITL 模态弹窗 |
 | **plain 兜底** | `PAICLI_RENDERER=plain` | 纯 println，无折叠 / 状态栏，等价 v15 行为 |
 
@@ -164,7 +164,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - 通用命令：`/clear`、`/context`、`/memory`、`/memory clear`、`/save <事实>`、`/hitl`、`/hitl on`、`/hitl off`、`/config`、`/exit`
 - 对话历史保存到 `~/.paicli/history/session_*.jsonl`
 - 兼容旧设置：`PAICLI_TUI=true` 自动映射为 `PAICLI_RENDERER=lanterna`（已 deprecated）
-- `PAICLI_NO_STATUSBAR=true` 在 inline 模式下禁用 prompt 下方状态区（不适合 ANSI 光标控制的终端）
+- `PAICLI_NO_STATUSBAR=true` 在 inline 模式下禁用 JLine 底部 dock（不适合 ANSI 光标控制的终端）
 - `NO_COLOR=1` 禁用所有 ANSI 颜色，保留布局
 
 ### 第十七期：LSP 诊断注入（MVP）
@@ -256,8 +256,8 @@ Tips for getting started:
 - 🔄 ReAct Agent 循环（思考-行动-观察）
 - 🛠️ 工具调用（文件操作、Shell命令、项目创建、代码语义检索、联网搜索、MCP 动态工具）
 - 💬 交互式命令行界面
-- 📝 普通任务提交后会先把本轮原始 prompt 以 `* <内容>` 写回 transcript，再进入 Thinking / 工具调用，避免状态区清理后用户输入从可见历史里消失
-- 🧠 默认通过流式接口获取模型输出；inline ReAct 会用 JLine `Display` 显示动态 `Thinking...` activity 区，实时预览灰色 `> ...` reasoning，并在回复 / 工具调用开始前把完整 reasoning 引用块落到正文区；web_search / web_fetch 会在折叠头展示 query / URL，并在执行后输出一行结果摘要；plain / 非 inline 路径继续按流式展示 `🧠 思考过程` 与 `π 回复`
+- 📝 普通任务提交后会先把本轮原始 prompt 以暗色整行块写回 transcript，再进入 Thinking / 工具调用，避免 dock 刷新或 activity 重绘后用户输入从可见历史里消失
+- 🧠 默认通过流式接口获取模型输出；inline ReAct 用固定高度 live thinking 区动态预览 reasoning，content / tool call 开始前清掉 live 区并把完整 reasoning 引用块落到 transcript，回答正文用低调标记起始；web_search / web_fetch 会在折叠头展示 query / URL，并在执行后输出一行结果摘要
 - 🖥️ 终端会对常见 Markdown（标题、列表、表格、代码块）做渲染后再显示，避免直接暴露原始标记符号
 
 ### 第二期

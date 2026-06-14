@@ -12,6 +12,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -83,13 +84,25 @@ class MainInputNormalizationTest {
     }
 
     @Test
+    void mcpStartupWaitCanBeTunedForTerminalSmoke() {
+        String old = System.getProperty("paicli.mcp.startup.wait.seconds");
+        try {
+            System.setProperty("paicli.mcp.startup.wait.seconds", "2");
+
+            assertEquals(Duration.ofSeconds(2), Main.mcpStartupWait());
+        } finally {
+            restoreProperty("paicli.mcp.startup.wait.seconds", old);
+        }
+    }
+
+    @Test
     void submittedPromptIsRenderedBackIntoTranscript() {
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
 
         Main.printSubmittedPrompt(new PrintStream(sink, true, StandardCharsets.UTF_8), "  沉默王二是谁？  ");
 
         String emitted = sink.toString(StandardCharsets.UTF_8);
-        assertTrue(emitted.contains("* "), emitted);
+        assertTrue(emitted.contains(">"), emitted);
         assertTrue(emitted.contains("沉默王二是谁？"), emitted);
         assertTrue(emitted.endsWith("\n\n"), emitted);
     }

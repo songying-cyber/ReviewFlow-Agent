@@ -78,8 +78,8 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - 主入口：`Agent.java`
 - 退出条件由 LLM 自决（不返回 tool_calls 即结束）
 - `AgentBudget` 三种兜底：token 超预算 / 连续 3 轮相同调用 / 50 轮硬上限
-- 流式输出 reasoning_content + content；inline ReAct 路径先用 JLine `Display` 显示动态 `Thinking...` activity 区，reasoning_content 在该区域以灰色 `> ...` 引用预览，content 或 tool call 开始前清掉临时态，并把已收到的完整 reasoning 引用块落到正文区；plain / 非 inline 路径同一次输入只打印一次 `🧠 思考过程` 标题
-- 流式头标签用 `π 回复`（非 `最终结果`）
+- 流式输出 reasoning_content + content；inline ReAct 用固定高度 live thinking 区动态预览 reasoning，同一次输入只把完整 reasoning 引用块落到 transcript 一次；live 区只允许清理自己占用的行，避免覆盖旧输出
+- inline 流式回答用低调 `▪` 标记起始，不再输出强标题；plain / 非流式兜底仍可使用传统 reasoning + answer 文本
 
 ### Long Context Engineering
 
@@ -139,6 +139,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - McpSchemaSanitizer 清洗 inputSchema
 - 所有 mcp__ 工具默认走 HITL + AuditLog
 - resources 双轨：虚拟工具 + @-mention 输入层
+- CLI 首屏默认只等待 MCP 启动 8 秒，慢 server 后台继续初始化并保持 `starting`，用 `/mcp` / `/mcp logs <name>` 追踪
 - notifications 路由：tools/list_changed → 工具全量替换，resources 变化 → cache 失效
 
 ### Chrome DevTools MCP
@@ -167,8 +168,8 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - `NO_COLOR=1`：禁用 ANSI 颜色
 - 当前开屏 Banner 是无右侧盒线边框的简洁布局，避免 ANSI/CJK 字宽导致竖线错位
 - InlineRenderer 复用 JLine 4 的编辑能力，默认提示符是 `* `，右提示显示 `message / @path / @image`
-- BottomStatusBar 是输入期 inline status：状态区在当前 prompt 下方保留 1 行间距后渲染两行（强状态行 / 操作提示行），输入提交后清掉状态区和后续空白；不能再用 JLine `Status` / DECSTBM / 绝对光标行号锚到物理底部；强状态行显示 `idle` / `react` / `plan` / `team` 阶段，并常驻展示 `MCP ready/total` 与 `Skill enabled/total`
-- InlineRenderer 通过 JLine `Display` 维护 ReAct thinking 临时 activity 区：LLM 请求开始时显示 `Thinking...` 状态行，reasoning delta 以灰色 `> ...` 引用预览；动画 tick 只推进 spinner，重绘 / diff / 清理由 `Display.update(...)` 管理，不再手写 `\r` / `CLEAR_LINE` 刷屏。content / tool / cancel / error 边界必须调用 `endThinking()` 清理临时态。Agent.StreamRenderer 负责在 content / tool call 前把完整 reasoning 作为灰色引用块写入 transcript，避免只闪过不留痕
+- BottomStatusBar 是 JLine `Status` 托管的底部 dock：由 JLine 负责滚动区域和状态行位置，不再手写 `\n`、`moveUp`、`CLEAR_TO_EOS` 或绝对光标行号；dock 上层展示 YOLO/HITL 与 MCP/Skill 摘要，下层展示 model、phase、ctx、token、cost、elapsed 与 cwd
+- InlineRenderer 不使用独立 JLine `Display.update()` 维护 thinking 临时区；真实终端验证发现独立 Display 会在 transcript/status 输出后从错误位置向上清屏。当前实现用固定高度 live 区重写自身行，content/tool 边界先清理 live 区再追加 transcript。
 - 交互期输出优先走 `Renderer.stream()`；`Main`、`PlanExecuteAgent`、`Planner`、`AgentOrchestrator` 都可接收同一个 renderer 输出流，避免绕过 inline renderer 直接写 stdout
 - `CodeIndex` 通过 `ProgressListener` 上报索引开始 / 文件数量 / 进度 / 完成或失败，`/index` 绑定当前 renderer 输出流；内部异常细节写 logger
 

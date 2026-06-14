@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InlineActivityDisplayTest {
 
     @Test
-    void thinkingPanelEmbedsStatusHeaderWhenStatusBarHasData() throws Exception {
+    void thinkingPanelKeepsStatusOutOfLiveArea() throws Exception {
         ByteArrayOutputStream terminalSink = new ByteArrayOutputStream();
         Terminal terminal = mockAnsiTerminal(terminalSink);
         BottomStatusBar statusBar = new BottomStatusBar(terminal,
@@ -36,13 +36,12 @@ class InlineActivityDisplayTest {
         }
 
         String output = terminalSink.toString(StandardCharsets.UTF_8);
-        assertTrue(output.contains("PaiCLI"), "thinking panel header should include PaiCLI: " + output);
-        assertTrue(output.contains("glm-5.1"), "thinking panel header should include model: " + output);
-        assertTrue(output.contains("thinking"), "thinking panel header should reflect phase: " + output);
-        assertTrue(output.contains("3.2s"), "thinking panel header should reflect elapsed: " + output);
-        assertTrue(output.contains("Auto Model"),
-                "thinking panel should keep the dim footer cue: " + output);
+        assertFalse(output.contains("PaiCLI"), "thinking panel should not duplicate status bar: " + output);
+        assertFalse(output.contains("glm-5.1"), "thinking panel should not duplicate model status: " + output);
+        assertFalse(output.contains("Auto Model"), "thinking panel should not duplicate footer cue: " + output);
         assertTrue(output.contains("Thinking"), "thinking panel should keep the spinner label: " + output);
+        assertTrue(output.contains("| trying to read file") || output.contains("│ trying to read file"),
+                "thinking panel should show quoted reasoning: " + output);
     }
 
     @Test

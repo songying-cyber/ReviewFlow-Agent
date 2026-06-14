@@ -181,14 +181,14 @@ class InlineRendererTest {
             assertTrue(rendered.contains("Thinking"), rendered);
             assertTrue(rendered.contains("先分析用户输入"), rendered);
             assertTrue(rendered.contains("再检查状态栏边界"), rendered);
-            assertTrue(rendered.contains(">"),
-                    "JLine activity display should show live reasoning quote content: " + rendered);
+            assertTrue(rendered.contains("|") || rendered.contains("│"),
+                    "activity display should show live reasoning quote content: " + rendered);
 
             sink.reset();
             renderer.endThinking();
             String cleared = sink.toString(StandardCharsets.UTF_8);
-            assertFalse(cleared.contains(AnsiSeq.CLEAR_LINE),
-                    "activity clearing should be owned by JLine Display, not hand-written clear-line ANSI: " + cleared);
+            assertFalse(cleared.contains(AnsiSeq.CLEAR_TO_EOS),
+                    "activity clearing must not clear to screen end and erase transcript scrollback: " + cleared);
         } finally {
             renderer.close();
         }

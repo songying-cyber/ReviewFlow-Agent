@@ -69,6 +69,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -260,7 +261,7 @@ public class Main {
                     startupNote = bootstrapResult.message();
                 }
                 mcpServerManager.loadConfiguredServers();
-                mcpServerManager.startAll();
+                mcpServerManager.startAll(ui, mcpStartupWait());
                 Runtime.getRuntime().addShutdownHook(new Thread(mcpServerManager::close, "paicli-mcp-shutdown"));
             } catch (Exception e) {
                 startupNote = "MCP 初始化失败: " + e.getMessage();
@@ -956,8 +957,19 @@ public class Main {
         if (visible.isEmpty()) {
             return;
         }
-        out.println(AnsiStyle.subtle("* ") + visible);
+        out.println(AnsiStyle.userMessageBlock(visible, terminalColumns()));
         out.println();
+    }
+
+    private static int terminalColumns() {
+        String columns = System.getenv("COLUMNS");
+        if (columns != null && !columns.isBlank()) {
+            try {
+                return Math.max(40, Integer.parseInt(columns.trim()));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 120;
     }
 
     static void configureAwtForCli() {
@@ -1771,6 +1783,22 @@ public class Main {
             return next;
         }
         return current + "\n" + next;
+    }
+
+    static Duration mcpStartupWait() {
+        String configured = System.getProperty("paicli.mcp.startup.wait.seconds");
+        if (configured == null || configured.isBlank()) {
+            configured = System.getenv("PAICLI_MCP_STARTUP_WAIT_SECONDS");
+        }
+        if (configured == null || configured.isBlank()) {
+            return Duration.ofSeconds(8);
+        }
+        try {
+            long seconds = Long.parseLong(configured.trim());
+            return seconds > 0 ? Duration.ofSeconds(seconds) : Duration.ofSeconds(8);
+        } catch (NumberFormatException ignored) {
+            return Duration.ofSeconds(8);
+        }
     }
 
     static String normalizeLineEndings(String rawInput) {

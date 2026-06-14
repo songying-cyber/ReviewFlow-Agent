@@ -23,7 +23,7 @@ Terminal
       -> prompt / right prompt / history / completer / highlighter / widgets
   -> InlineRenderer
       -> printAbove output bridge
-      -> inline status under prompt
+      -> JLine Status bottom dock
       -> foldable blocks / tool calls / diff / HITL / plan review
 ```
 
@@ -31,9 +31,9 @@ Terminal
 
 - 交互期所有用户可见输出优先走 `Renderer.stream()`。
 - inline 模式下 `Renderer.stream()` 优先通过 `LineReader#printAbove` 输出到当前输入行上方。
-- 普通任务提交后先把本轮原始用户 prompt 以 `* <内容>` 回写到 transcript，再进入 mention 展开、Thinking 面板和工具调用，避免输入提交行被状态区清理或 activity 重绘吞掉。
-- ReAct inline 模式下 LLM 请求期间显示动态 `Thinking...` 面板；reasoning delta 以灰色引用行出现在面板中，content 开始前清理面板再进入正常 transcript。
-- 状态区在当前 prompt 下方保留 1 行间距后渲染，输入提交后清掉状态区和后续空白；不再使用 JLine `Status` 把状态区固定到物理终端底部。
+- 普通任务提交后先把本轮原始用户 prompt 以暗色整行块回写到 transcript，再进入 mention 展开、Thinking 面板和工具调用，避免输入提交行被 dock 刷新或 activity 重绘吞掉。
+- ReAct inline 模式下 LLM 请求期间显示固定高度 live thinking 区；reasoning delta 以灰色引用行出现在 live 区，content / tool call 开始前只清理 live 区自己占用的行，再进入正常 transcript。
+- 底部 dock 使用 JLine `Status` 托管，JLine 负责滚动区域和 dock 重绘；业务代码不再手写 `\n`、`moveUp`、`CLEAR_TO_EOS` 或绝对光标行号去拼状态区。
 - 非交互、测试、plain renderer 和降级路径继续使用普通 `PrintStream`。
 - 输出写入必须同步，避免并行工具、后台任务、MCP 通知抢终端。
 
@@ -58,12 +58,12 @@ Terminal
 
 ## 22.2 底部状态栏升级
 
-目标：底部不只是提示，而是运行控制面板。
+目标：底部不只是提示，而是 JLine 原生托管的运行控制面板。
 
-- 强状态行显示 phase / model / ctx / token / cost / HITL / elapsed / task count。
+- dock 上层显示 YOLO/HITL 与 MCP/Skill 摘要。
+- dock 下层显示 Auto Model / model / phase / ctx 百分比与 token / cost / elapsed / cwd。
 - ReAct token/cost/elapsed 默认进入强状态行，不再作为 `📊 Token: ...` 正文行输出。
-- 弱提示行根据当前状态动态变化。
-- ReAct 显示 thinking / tools / streaming / idle；thinking 阶段由 inline renderer 的 JLine `Display` activity 区承载，实时显示 spinner 和灰色 `> ...` reasoning 预览。动画可以保留低频 tick，但 tick 只更新状态模型，实际重绘 / diff / 清理由 `Display.update(...)` 完成，不手写 `\r`、`CLEAR_LINE` 或裸 stdout 刷屏。
+- ReAct 显示 thinking / tools / streaming / idle；thinking 阶段由固定高度 live 区承载，tick 只重写自己占用的几行，不使用独立 JLine `Display.update()` 或 `CLEAR_TO_EOS` 清屏。
 - Plan 显示当前 task、完成数、失败数。
 - Team 显示 worker/reviewer 状态。
 - MCP 显示 starting/ready/error 数量。
@@ -133,7 +133,7 @@ HITL：
 
 目标：后台任务不会打断输入，但能持续反馈。
 
-- MCP server 启动进度异步显示。
+- MCP server 启动进度异步显示；CLI 首屏只做有界等待，默认 8 秒后进入 prompt，未完成 server 留在 `starting` 并后台继续初始化。
 - `/task` 后台任务完成后通知。
 - RAG 索引进度持续显示。
 - LSP 诊断注入提示。
