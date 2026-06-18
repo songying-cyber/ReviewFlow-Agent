@@ -42,14 +42,28 @@ public final class AnsiStyle {
 
     public static String userMessageBlock(String text, int columns) {
         String safe = text == null ? "" : text.strip();
-        String content = "  >  " + safe;
         int width = Math.max(20, columns);
-        int padding = Math.max(1, width - displayWidth(content));
+        String[] lines = safe.isEmpty() ? new String[]{""} : safe.split("\\R", -1);
+        StringBuilder rendered = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            if (i > 0) {
+                rendered.append('\n');
+            }
+            rendered.append(userMessageBlockLine(lines[i], width));
+        }
+        return rendered.toString();
+    }
+
+    private static String userMessageBlockLine(String text, int width) {
+        String safe = text == null ? "" : text;
+        String prefix = "  >  ";
+        String content = prefix + safe;
+        int padding = Math.max(0, width - displayWidth(content));
         String line = content + " ".repeat(padding);
         if (!ENABLED) {
             return line.stripTrailing();
         }
-        return BG_PANEL + PURPLE + "  >  " + RESET + BG_PANEL + safe + " ".repeat(padding) + RESET;
+        return BG_PANEL + PURPLE + prefix + RESET + BG_PANEL + safe + " ".repeat(padding) + RESET;
     }
 
     public static String codeLabel(String text) {
@@ -81,14 +95,18 @@ public final class AnsiStyle {
 
     private static int displayWidth(String text) {
         int width = 0;
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            Character.UnicodeBlock block = Character.UnicodeBlock.of(ch);
+        for (int i = 0; i < text.length(); ) {
+            int codePoint = text.codePointAt(i);
+            Character.UnicodeBlock block = Character.UnicodeBlock.of(codePoint);
             width += block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
                     || block == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION
                     || block == Character.UnicodeBlock.HALFWIDTH_AND_FULLWIDTH_FORMS
                     || block == Character.UnicodeBlock.HIRAGANA
-                    || block == Character.UnicodeBlock.KATAKANA ? 2 : 1;
+                    || block == Character.UnicodeBlock.KATAKANA
+                    || block == Character.UnicodeBlock.EMOTICONS
+                    || block == Character.UnicodeBlock.MISCELLANEOUS_SYMBOLS_AND_PICTOGRAPHS
+                    || block == Character.UnicodeBlock.TRANSPORT_AND_MAP_SYMBOLS ? 2 : 1;
+            i += Character.charCount(codePoint);
         }
         return width;
     }

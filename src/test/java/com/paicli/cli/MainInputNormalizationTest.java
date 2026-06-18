@@ -104,7 +104,20 @@ class MainInputNormalizationTest {
         String emitted = sink.toString(StandardCharsets.UTF_8);
         assertTrue(emitted.contains(">"), emitted);
         assertTrue(emitted.contains("沉默王二是谁？"), emitted);
-        assertTrue(emitted.endsWith("\n\n"), emitted);
+        assertTrue(emitted.endsWith("\n"), emitted);
+        assertFalse(emitted.endsWith("\n\n"), emitted);
+    }
+
+    @Test
+    void submittedSingleLinePromptDoesNotAddExtraBlankLine() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+
+        Main.printSubmittedPrompt(new PrintStream(sink, true, StandardCharsets.UTF_8), "你好啊");
+
+        String emitted = sink.toString(StandardCharsets.UTF_8);
+        assertEquals(1, emitted.chars().filter(ch -> ch == '\n').count(), emitted);
+        assertTrue(emitted.contains(">"), emitted);
+        assertTrue(emitted.contains("你好啊"), emitted);
     }
 
     @Test

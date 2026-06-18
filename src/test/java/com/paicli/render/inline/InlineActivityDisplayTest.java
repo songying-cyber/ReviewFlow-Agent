@@ -40,6 +40,8 @@ class InlineActivityDisplayTest {
         assertFalse(output.contains("glm-5.1"), "thinking panel should not duplicate model status: " + output);
         assertFalse(output.contains("Auto Model"), "thinking panel should not duplicate footer cue: " + output);
         assertTrue(output.contains("Thinking"), "thinking panel should keep the spinner label: " + output);
+        assertTrue(output.contains("Thinking... (esc to cancel,"),
+                "thinking panel should keep a stable label and move the animation to the spinner: " + output);
         assertTrue(output.contains("| trying to read file") || output.contains("│ trying to read file"),
                 "thinking panel should show quoted reasoning: " + output);
     }

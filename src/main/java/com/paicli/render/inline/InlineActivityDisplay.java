@@ -26,6 +26,7 @@ final class InlineActivityDisplay implements AutoCloseable {
 
     private static final int MAX_REASONING_CHARS = 4096;
     private static final int MAX_REASONING_ROWS = 4;
+    private static final String[] SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.italic();
     private static final AttributedStyle QUOTE_STYLE = AttributedStyle.DEFAULT.faint().italic();
 
@@ -204,7 +205,7 @@ final class InlineActivityDisplay implements AutoCloseable {
     private List<AttributedString> buildLines() {
         int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns() - 1);
         List<AttributedString> lines = new ArrayList<>();
-        lines.add(fit("  " + label + dots() + " (esc to cancel, " + elapsedSeconds() + "s)",
+        lines.add(fit("  " + spinner() + " " + label + "... (esc to cancel, " + elapsedSeconds() + "s)",
                 cols, STATUS_STYLE));
 
         List<String> quoteLines = reasoningLines();
@@ -253,13 +254,8 @@ final class InlineActivityDisplay implements AutoCloseable {
                 style);
     }
 
-    private String dots() {
-        return switch (frame % 4) {
-            case 0 -> ".";
-            case 1 -> "..";
-            case 2 -> "...";
-            default -> "....";
-        };
+    private String spinner() {
+        return SPINNER_FRAMES[Math.floorMod(frame, SPINNER_FRAMES.length)];
     }
 
     private long elapsedSeconds() {

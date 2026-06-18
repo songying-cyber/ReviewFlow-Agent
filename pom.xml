@@ -17,6 +17,8 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- 日常打包优先给手工验收产物；回归测试用 mvn test -Pquick / -Pphase16-smoke / -DskipTests=false 显式触发。 -->
+        <skipTests>true</skipTests>
     </properties>
 
     <dependencies>
@@ -136,6 +138,7 @@
                 <version>3.2.5</version>
                 <configuration>
                     <argLine>-Dfile.encoding=UTF-8</argLine>
+                    <skipTests>${skipTests}</skipTests>
                 </configuration>
             </plugin>
             <plugin>
@@ -175,6 +178,9 @@
     <profiles>
         <profile>
             <id>quick</id>
+            <properties>
+                <skipTests>false</skipTests>
+            </properties>
             <build>
                 <plugins>
                     <plugin>
@@ -199,6 +205,9 @@
 
         <profile>
             <id>phase16-smoke</id>
+            <properties>
+                <skipTests>false</skipTests>
+            </properties>
             <build>
                 <plugins>
                     <plugin>
