@@ -43,7 +43,9 @@ mvn test -DskipTests=false                  # 全量回归
 | Plan-and-Execute | `PlanExecuteAgent.java` | `/plan` |
 | Multi-Agent | `AgentOrchestrator.java` | `/team` |
 
-内置工具 9 个：`read_file` / `write_file` / `list_dir` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`
+核心内置工具 11 个：`read_file` / `write_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`
+
+代码库理解默认走 Claude Code 式实时探索：`glob_files` 找候选文件、`grep_code` 精确定位符号或字符串、`read_file` 按需读取具体行段。`search_code` 是 RAG 语义辅助，适合模糊自然语言、关键词不明确、常规搜索无果、巨型/跨知识检索场景，不作为精确代码定位的首选。
 
 MCP 动态工具：`mcp__{server}__{tool}`（+ resources 虚拟工具）
 
@@ -97,7 +99,8 @@ src/main/java/com/paicli/
 ### Memory
 
 - 长期记忆只通过 `/save` 或用户明确要求保存；不要自动提取事实
-- 长期记忆只保存跨会话稳定事实，不保存临时指令
+- 长期记忆只保存跨会话稳定事实，不保存临时指令；默认项目级作用域，跨项目通用偏好才用 global
+- 长期记忆必须可审计和可删除：`/memory list` / `/memory search <关键词>` / `/memory delete <id>` / `/memory clear`
 - 两道压缩不要混淆：shortTermMemory 压缩 vs conversationHistory 压缩（后者是防 window 超限的关键）
 
 ### HITL + 策略层
@@ -171,6 +174,7 @@ src/main/java/com/paicli/
 
 | 场景 | 命令 |
 |------|------|
+| 代码搜索工具 | `mvn test -Dtest=ToolRegistryTest,ApprovalPolicyTest` |
 | 命令解析 | `mvn test -Dtest=CliCommandParserTest,PlanReviewInputParserTest,MainInputNormalizationTest` |
 | DAG/Plan | `mvn test -Dtest=ExecutionPlanTest` |
 | Multi-Agent | `mvn test -Dtest=AgentRoleTest,AgentMessageTest,AgentOrchestratorTest` |
@@ -187,8 +191,9 @@ src/main/java/com/paicli/
 | CLI 命令 | Main.java + CliCommandParser.java |
 | 规划/DAG | PlanExecuteAgent.java + Planner.java + ExecutionPlan.java |
 | 工具调用 | ToolRegistry.java + Agent.java |
+| 代码搜索 | ToolRegistry.java (`glob_files` / `grep_code` / `read_file`) |
 | 模型/API | llm/*Client.java + LlmClientFactory.java |
-| RAG | CodeRetriever.java + CodeIndex.java + VectorStore.java |
+| RAG 语义辅助 | CodeRetriever.java + CodeIndex.java + VectorStore.java |
 | Multi-Agent | AgentOrchestrator.java + SubAgent.java |
 | MCP | McpServerManager.java + McpClient.java |
 | TUI/渲染 | render/Renderer.java + RendererFactory.java |

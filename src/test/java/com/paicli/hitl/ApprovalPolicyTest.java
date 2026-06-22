@@ -39,6 +39,12 @@ class ApprovalPolicyTest {
     }
 
     @Test
+    void deterministicCodeSearchDoesNotRequireApproval() {
+        assertFalse(ApprovalPolicy.requiresApproval("glob_files"));
+        assertFalse(ApprovalPolicy.requiresApproval("grep_code"));
+    }
+
+    @Test
     void unknownToolDoesNotRequireApproval() {
         assertFalse(ApprovalPolicy.requiresApproval("unknown_tool"));
     }

@@ -21,8 +21,9 @@
 - Memory 策略：
   - short / balanced 保留压缩
   - long 跳过自动摘要压缩，扩大短期记忆预算
-- RAG 策略：
-  - `search_code` 未传 `top_k` 时按上下文模式自适应
+- 代码检索策略：
+  - 精确定位默认走 `glob_files` / `grep_code` / `read_file` 现用现查，避免把 RAG 当成代码理解首选路径
+  - `search_code` 作为 RAG 语义辅助，未传 `top_k` 时按上下文模式自适应
   - short=5，balanced=10，long=20
 - MCP resources 索引：
   - long 模式下把已知 resources 的 URI / 名称 / 描述 / mimeType 注入 system prompt
@@ -59,7 +60,7 @@ src/main/java/com/paicli/context/
 - `AbstractOpenAiCompatibleClient`：解析 cached input tokens
 - `AgentBudget`：按模型上下文窗口动态计算 token 预算
 - `MemoryManager` / `TokenBudget` / `ConversationMemory`：长短上下文策略与预算同步
-- `ToolRegistry`：`search_code` 默认 topK 自适应
+- `ToolRegistry`：`glob_files` / `grep_code` / `read_file` 提供实时确定性代码定位，`search_code` 默认 topK 自适应
 - `McpServerManager`：生成 MCP resources prompt index
 - `Agent` / `PlanExecuteAgent` / `AgentOrchestrator` / `SubAgent`：注入长上下文策略与资源索引
 - `Main`：Banner、模型切换后的上下文策略提示、Plan/Team resource index 供应器

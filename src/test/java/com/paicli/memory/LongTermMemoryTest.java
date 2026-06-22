@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -99,5 +100,30 @@ class LongTermMemoryTest {
 
         LongTermMemory reloaded = new LongTermMemory(tempDir.toFile());
         assertEquals(timestamp, reloaded.retrieve("f1").orElseThrow().getTimestamp());
+    }
+
+    @Test
+    void shouldFilterProjectScopedMemories() {
+        memory.store(new MemoryEntry("global", "默认用中文回答", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "global"), 10));
+        memory.store(new MemoryEntry("project-a", "项目A使用 Java 17", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "project", "project", "/repo/a"), 10));
+        memory.store(new MemoryEntry("project-b", "项目B使用 Python", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "project", "project", "/repo/b"), 10));
+
+        var visible = memory.getAll("/repo/a");
+
+        assertEquals(2, visible.size());
+        assertTrue(visible.stream().anyMatch(entry -> entry.getId().equals("global")));
+        assertTrue(visible.stream().anyMatch(entry -> entry.getId().equals("project-a")));
+        assertTrue(visible.stream().noneMatch(entry -> entry.getId().equals("project-b")));
+    }
+
+    @Test
+    void legacyMemoriesWithoutScopeRemainGlobal() {
+        MemoryEntry legacy = new MemoryEntry("legacy", "历史偏好", MemoryEntry.MemoryType.FACT, null, 10);
+
+        assertEquals("global", LongTermMemory.scopeOf(legacy));
+        assertTrue(LongTermMemory.isVisibleInProject(legacy, "/repo/current"));
     }
 }

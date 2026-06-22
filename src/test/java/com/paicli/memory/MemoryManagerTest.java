@@ -56,6 +56,37 @@ class MemoryManagerTest {
     }
 
     @Test
+    void shouldStoreProjectScopedFactsByDefault() {
+        LongTermMemory longTermMemory = new LongTermMemory(tempDir.toFile());
+        MemoryManager memoryManager = new MemoryManager(new StubGLMClient(List.of()), 32768, 128000, longTermMemory);
+        memoryManager.setProjectPath("/repo/current");
+
+        memoryManager.storeFact("当前项目使用 Java 17");
+        memoryManager.storeFact("默认用中文回答", "global");
+
+        MemoryEntry projectEntry = longTermMemory.search("Java", 5, memoryManager.getCurrentProject()).get(0);
+        assertEquals("project", projectEntry.getMetadata().get("scope"));
+        assertTrue(projectEntry.getMetadata().get("project").endsWith("/repo/current"));
+        assertEquals("global", longTermMemory.search("中文", 5).get(0).getMetadata().get("scope"));
+    }
+
+    @Test
+    void shouldSearchOnlyCurrentProjectAndGlobalFacts() {
+        LongTermMemory longTermMemory = new LongTermMemory(tempDir.toFile());
+        MemoryManager memoryManager = new MemoryManager(new StubGLMClient(List.of()), 32768, 128000, longTermMemory);
+        memoryManager.setProjectPath("/repo/current");
+        longTermMemory.store(new MemoryEntry("current", "当前项目使用 Java 17", MemoryEntry.MemoryType.FACT,
+                java.util.Map.of("scope", "project", "project", memoryManager.getCurrentProject()), 10));
+        longTermMemory.store(new MemoryEntry("other", "其他项目使用 Java 8", MemoryEntry.MemoryType.FACT,
+                java.util.Map.of("scope", "project", "project", "/repo/other"), 10));
+
+        List<MemoryEntry> results = memoryManager.searchLongTerm("Java", 10);
+
+        assertEquals(1, results.size());
+        assertEquals("current", results.get(0).getId());
+    }
+
+    @Test
     void compressionTriggerRatioAppliesToAllModelsUniformly() {
         // 验证：长 window 模型也使用统一的 90% 压缩触发阈值，没有"长模式不压缩"的二元开关
         MemoryManager memoryManager = new MemoryManager(new GLMClient("test-key"));

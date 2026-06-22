@@ -62,7 +62,12 @@ public class MemoryRetriever {
      * 注入给模型，否则容易让模型把当前请求误读成历史事实。
      */
     public List<MemoryEntry> retrieveLongTerm(String query, int limit) {
+        return retrieveLongTerm(query, limit, null);
+    }
+
+    public List<MemoryEntry> retrieveLongTerm(String query, int limit, String projectKey) {
         return longTermMemory.getAll().stream()
+                .filter(entry -> LongTermMemory.isVisibleInProject(entry, projectKey))
                 .map(entry -> new ScoredEntry(entry, computeRelevanceScore(entry, query) * 1.2, false))
                 .filter(scoredEntry -> scoredEntry.score() > 0)
                 .sorted(Comparator.comparingDouble(ScoredEntry::score).reversed())
@@ -75,7 +80,11 @@ public class MemoryRetriever {
      * 构建上下文：将相关记忆组装成文本，用于注入到 LLM 的 system prompt 中
      */
     public String buildContextForQuery(String query, int maxTokens) {
-        List<MemoryEntry> relevant = retrieveLongTerm(query, 10);
+        return buildContextForQuery(query, maxTokens, null);
+    }
+
+    public String buildContextForQuery(String query, int maxTokens, String projectKey) {
+        List<MemoryEntry> relevant = retrieveLongTerm(query, 10, projectKey);
         if (relevant.isEmpty()) return "";
 
         StringBuilder context = new StringBuilder();

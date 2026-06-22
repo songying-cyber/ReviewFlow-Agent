@@ -36,12 +36,21 @@ import com.paicli.web.WebFetcher;
 import java.io.File;
 import java.io.InputStreamReader;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * 工具注册表 - 管理所有可用工具
@@ -52,6 +61,13 @@ public class ToolRegistry {
     private static final int DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS = 90;
     private static final int MAX_PARALLEL_TOOLS = 4;
     private static final int MAX_COMMAND_OUTPUT_CHARS = 8_000;
+    private static final int MAX_READ_FILE_LINES = 2_000;
+    private static final int MAX_GREP_RESULTS = 200;
+    private static final int MAX_GREP_CONTEXT_LINES = 5;
+    private static final long MAX_SEARCH_FILE_BYTES = 2 * 1024 * 1024;
+    private static final Set<String> SEARCH_EXCLUDED_DIRS = Set.of(
+            ".git", ".paicli", "target", "node_modules", "dist", "build", "coverage", ".idea", ".gradle"
+    );
     // write_file 单次写入字节数上限。LLM 想塞超大内容时通常是误生成（重复粘贴 / hallucinate 大段日志），
     // 5MB 对常规代码生成 / 文档撰写完全够用，超过即拒，避免磁盘灌满与误覆盖。
     private static final int MAX_WRITE_FILE_BYTES = 5 * 1024 * 1024;
@@ -72,7 +88,7 @@ public class ToolRegistry {
     private ContextProfile contextProfile = ContextProfile.from(null);
     private BrowserGuard browserGuard;
     private BrowserConnector browserConnector;
-    private java.util.function.Consumer<String> memorySaver;
+    private BiConsumer<String, String> memorySaver;
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
     private java.util.function.BiConsumer<String, String[]> writeFileObserver = (p, ba) -> {};
@@ -145,7 +161,11 @@ public class ToolRegistry {
         this.browserConnector = browserConnector;
     }
 
-    public void setMemorySaver(java.util.function.Consumer<String> memorySaver) {
+    public void setMemorySaver(Consumer<String> memorySaver) {
+        this.memorySaver = memorySaver == null ? null : (fact, scope) -> memorySaver.accept(fact);
+    }
+
+    public void setScopedMemorySaver(BiConsumer<String, String> memorySaver) {
         this.memorySaver = memorySaver;
     }
 
@@ -200,12 +220,16 @@ public class ToolRegistry {
         // read_file 工具
         tools.put("read_file", new Tool(
                 "read_file",
-                "读取文件内容（仅限项目根目录之内）",
-                createParameters(new Param("path", "string", "文件路径", true)),
+                "读取文件内容（仅限项目根目录之内）；可用 offset/limit 按行读取，避免把大文件整段塞进上下文",
+                createParameters(
+                        new Param("path", "string", "文件路径", true),
+                        new Param("offset", "integer", "起始行号，1 表示第一行；省略时读取全文", false),
+                        new Param("limit", "integer", "最多读取多少行；省略时读取全文，最大 2000 行", false)
+                ),
                 args -> {
                     Path safe = pathGuard.resolveSafe(args.get("path"));
                     try {
-                        return "文件内容:\n" + Files.readString(safe);
+                        return readFileForTool(safe, args);
                     } catch (Exception e) {
                         return "读取文件失败: " + e.getMessage();
                     }
@@ -280,6 +304,206 @@ public class ToolRegistry {
                     }
                 }
         ));
+
+        tools.put("glob_files", new Tool(
+                "glob_files",
+                "按文件名 glob 查找项目内文件（只读、实时、尊重常见忽略目录）；适合先定位候选文件，例如 **/*Service.java",
+                createParameters(
+                        new Param("pattern", "string", "glob 模式，例如 **/*.java、**/*Controller*、README.md", true),
+                        new Param("path", "string", "搜索起始目录，默认 .", false),
+                        new Param("max_results", "integer", "最多返回结果数，默认 50，上限 200", false)
+                ),
+                args -> globFiles(args)
+        ));
+
+        tools.put("grep_code", new Tool(
+                "grep_code",
+                "在项目内按关键字或正则实时搜索代码（只读、返回文件和行号）；适合精确符号/字符串定位，找到后再 read_file 读取上下文",
+                createParameters(
+                        new Param("pattern", "string", "要搜索的关键字或正则", true),
+                        new Param("path", "string", "搜索起始目录，默认 .", false),
+                        new Param("glob", "string", "可选文件 glob 过滤，例如 **/*.java", false),
+                        new Param("regex", "boolean", "是否按 Java 正则解释 pattern，默认 false 表示字面量搜索", false),
+                        new Param("case_sensitive", "boolean", "是否大小写敏感，默认 true", false),
+                        new Param("context_lines", "integer", "每条命中前后上下文行数，默认 0，上限 5", false),
+                        new Param("max_results", "integer", "最多返回命中数，默认 50，上限 200", false)
+                ),
+                args -> grepCode(args)
+        ));
+    }
+
+    private String readFileForTool(Path file, Map<String, String> args) throws IOException {
+        if (!Files.isRegularFile(file)) {
+            return "读取文件失败: 不是普通文件";
+        }
+        boolean ranged = args.containsKey("offset") || args.containsKey("limit");
+        if (!ranged) {
+            return "文件内容:\n" + Files.readString(file);
+        }
+
+        int offset = Math.max(1, parseInt(args.get("offset"), 1));
+        int limit = Math.max(1, Math.min(parseInt(args.get("limit"), 200), MAX_READ_FILE_LINES));
+        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        int total = lines.size();
+        if (offset > total) {
+            return "文件内容: " + file.getFileName() + " 共 " + total + " 行，offset 超出范围";
+        }
+
+        int from = offset - 1;
+        int to = Math.min(from + limit, total);
+        StringBuilder sb = new StringBuilder();
+        sb.append("文件内容: ").append(file.getFileName())
+                .append(" (lines ").append(offset).append("-").append(to)
+                .append(" of ").append(total).append(")\n");
+        for (int i = from; i < to; i++) {
+            sb.append(String.format("%5d | %s%n", i + 1, lines.get(i)));
+        }
+        if (to < total) {
+            sb.append("...(已截断，可用 offset=").append(to + 1).append(" 继续读取)");
+        }
+        return sb.toString().trim();
+    }
+
+    private String globFiles(Map<String, String> args) {
+        String pattern = args.get("pattern");
+        if (pattern == null || pattern.isBlank()) {
+            return "文件匹配失败: pattern 不能为空";
+        }
+        Path root = pathGuard.resolveSafe(args.getOrDefault("path", "."));
+        int maxResults = clamp(parseInt(args.get("max_results"), 50), 1, MAX_GREP_RESULTS);
+        Path projectRoot = pathGuard.getRootPath();
+        PathMatcher matcher = projectRoot.getFileSystem().getPathMatcher("glob:" + normalizeGlob(pattern));
+        PathMatcher fileNameMatcher = projectRoot.getFileSystem().getPathMatcher("glob:" + normalizeFileNameGlob(pattern));
+        List<String> matches = new ArrayList<>();
+
+        try {
+            Files.walkFileTree(root, new SearchFileVisitor(projectRoot, path -> {
+                if (matches.size() >= maxResults) {
+                    return;
+                }
+                Path relative = projectRoot.relativize(path);
+                if (matcher.matches(relative) || fileNameMatcher.matches(path.getFileName())) {
+                    matches.add(relative.toString());
+                }
+            }));
+        } catch (Exception e) {
+            return "文件匹配失败: " + e.getMessage();
+        }
+
+        if (matches.isEmpty()) {
+            return "未找到匹配文件: " + pattern;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("匹配文件 ").append(matches.size()).append(" 个");
+        if (matches.size() >= maxResults) {
+            sb.append("（已达到上限 ").append(maxResults).append("）");
+        }
+        sb.append(":\n");
+        for (int i = 0; i < matches.size(); i++) {
+            sb.append(i + 1).append(". ").append(matches.get(i)).append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    private String grepCode(Map<String, String> args) {
+        String query = args.get("pattern");
+        if (query == null || query.isBlank()) {
+            return "代码搜索失败: pattern 不能为空";
+        }
+        Path root = pathGuard.resolveSafe(args.getOrDefault("path", "."));
+        Path projectRoot = pathGuard.getRootPath();
+        int maxResults = clamp(parseInt(args.get("max_results"), 50), 1, MAX_GREP_RESULTS);
+        int contextLines = clamp(parseInt(args.get("context_lines"), 0), 0, MAX_GREP_CONTEXT_LINES);
+        boolean regex = parseBoolean(args.get("regex"), false);
+        boolean caseSensitive = parseBoolean(args.get("case_sensitive"), true);
+        PathMatcher globMatcher = null;
+        PathMatcher fileNameGlobMatcher = null;
+        if (args.get("glob") != null && !args.get("glob").isBlank()) {
+            globMatcher = projectRoot.getFileSystem().getPathMatcher("glob:" + normalizeGlob(args.get("glob")));
+            fileNameGlobMatcher = projectRoot.getFileSystem().getPathMatcher("glob:" + normalizeFileNameGlob(args.get("glob")));
+        }
+
+        Pattern contentPattern;
+        try {
+            int flags = caseSensitive ? 0 : Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
+            contentPattern = Pattern.compile(regex ? query : Pattern.quote(query), flags);
+        } catch (PatternSyntaxException e) {
+            return "代码搜索失败: 正则表达式无效: " + e.getMessage();
+        }
+
+        List<GrepMatch> matches = new ArrayList<>();
+        PathMatcher finalGlobMatcher = globMatcher;
+        PathMatcher finalFileNameGlobMatcher = fileNameGlobMatcher;
+        try {
+            Files.walkFileTree(root, new SearchFileVisitor(projectRoot, path -> {
+                if (matches.size() >= maxResults || !Files.isRegularFile(path)) {
+                    return;
+                }
+                Path relative = projectRoot.relativize(path);
+                if (finalGlobMatcher != null
+                        && !finalGlobMatcher.matches(relative)
+                        && !finalFileNameGlobMatcher.matches(path.getFileName())) {
+                    return;
+                }
+                collectMatches(path, relative, contentPattern, contextLines, maxResults, matches);
+            }));
+        } catch (Exception e) {
+            return "代码搜索失败: " + e.getMessage();
+        }
+
+        if (matches.isEmpty()) {
+            return "未找到匹配内容: " + query;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("匹配结果 ").append(matches.size()).append(" 条");
+        if (matches.size() >= maxResults) {
+            sb.append("（已达到上限 ").append(maxResults).append("）");
+        }
+        sb.append(":\n");
+        for (int i = 0; i < matches.size(); i++) {
+            GrepMatch match = matches.get(i);
+            sb.append(i + 1).append(". ").append(match.file()).append(":").append(match.lineNumber()).append("\n");
+            for (ContextLine line : match.context()) {
+                String marker = line.lineNumber() == match.lineNumber() ? ">" : " ";
+                sb.append(String.format("   %s%5d | %s%n", marker, line.lineNumber(), line.text()));
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    private void collectMatches(Path file, Path relative, Pattern contentPattern, int contextLines,
+                                int maxResults, List<GrepMatch> matches) {
+        try {
+            if (Files.size(file) > MAX_SEARCH_FILE_BYTES || isLikelyBinary(file)) {
+                return;
+            }
+            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+            for (int i = 0; i < lines.size() && matches.size() < maxResults; i++) {
+                String line = lines.get(i);
+                if (contentPattern.matcher(line).find()) {
+                    int from = Math.max(0, i - contextLines);
+                    int to = Math.min(lines.size() - 1, i + contextLines);
+                    List<ContextLine> context = new ArrayList<>();
+                    for (int j = from; j <= to; j++) {
+                        context.add(new ContextLine(j + 1, lines.get(j)));
+                    }
+                    matches.add(new GrepMatch(relative.toString(), i + 1, context));
+                }
+            }
+        } catch (Exception ignored) {
+            // 编码不支持、权限异常或短暂文件变化时跳过该文件，保持搜索路径 fail-soft。
+        }
+    }
+
+    private boolean isLikelyBinary(Path file) throws IOException {
+        byte[] bytes = Files.readAllBytes(file);
+        int sample = Math.min(bytes.length, 4096);
+        for (int i = 0; i < sample; i++) {
+            if (bytes[i] == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -349,7 +573,7 @@ public class ToolRegistry {
     private void registerRagTools() {
         tools.put("search_code", new Tool(
                 "search_code",
-                "语义检索代码库，根据自然语言描述查找相关代码块；默认 top_k=5，可显式指定（上限 30）",
+                "RAG 语义辅助检索代码库，根据自然语言描述查找相关代码块；精确符号/字符串定位请优先用 grep_code/glob_files/read_file；默认 top_k=5，可显式指定（上限 30）",
                 createParameters(
                         new Param("query", "string", "自然语言查询描述，例如'用户登录的实现'", true),
                         new Param("top_k", "integer", "返回结果数量（默认 5，上限 30）", false)
@@ -479,8 +703,11 @@ public class ToolRegistry {
     private void registerMemoryTools() {
         tools.put("save_memory", new Tool(
                 "save_memory",
-                "当且仅当用户明确说“记一下”“记住”“以后记得”或要求保存长期偏好/稳定事实时调用，把精炼事实写入长期记忆；不要保存一次性任务请求、临时文件名或模型猜测。",
-                createParameters(new Param("fact", "string", "要长期保存的稳定事实或用户偏好，必须精炼、可跨会话复用", true)),
+                "当且仅当用户明确说“记一下”“记住”“以后记得”或要求保存长期偏好/稳定事实时调用，把精炼事实写入长期记忆；scope 默认 project，跨项目偏好才用 global；不要保存一次性任务请求、临时文件名或模型猜测。",
+                createParameters(
+                        new Param("fact", "string", "要长期保存的稳定事实或用户偏好，必须精炼、可跨会话复用", true),
+                        new Param("scope", "string", "记忆作用域：project 或 global。默认 project；跨项目长期偏好才用 global", false)
+                ),
                 args -> {
                     String fact = args.get("fact");
                     if (fact == null || fact.isBlank()) {
@@ -490,8 +717,9 @@ public class ToolRegistry {
                         return "保存长期记忆失败: 记忆保存器未初始化";
                     }
                     String normalized = fact.trim();
-                    memorySaver.accept(normalized);
-                    return "💾 已保存到长期记忆: " + normalized;
+                    String scope = "global".equalsIgnoreCase(args.get("scope")) ? "global" : "project";
+                    memorySaver.accept(normalized, scope);
+                    return "💾 已保存到长期记忆(" + scope + "): " + normalized;
                 }
         ));
     }
@@ -521,6 +749,72 @@ public class ToolRegistry {
             return fallback;
         }
     }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(value, max));
+    }
+
+    private static boolean parseBoolean(String value, boolean fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        return "true".equalsIgnoreCase(value.trim()) || "1".equals(value.trim())
+                || "yes".equalsIgnoreCase(value.trim());
+    }
+
+    private static String normalizeGlob(String pattern) {
+        String normalized = pattern == null ? "**/*" : pattern.replace('\\', '/').trim();
+        if (normalized.isEmpty()) {
+            return "**/*";
+        }
+        if (!normalized.contains("/") && !normalized.startsWith("**")) {
+            return "**/" + normalized;
+        }
+        return normalized;
+    }
+
+    private static String normalizeFileNameGlob(String pattern) {
+        String normalized = pattern == null ? "*" : pattern.replace('\\', '/').trim();
+        if (normalized.isEmpty()) {
+            return "*";
+        }
+        int slash = normalized.lastIndexOf('/');
+        return slash >= 0 ? normalized.substring(slash + 1) : normalized;
+    }
+
+    private static final class SearchFileVisitor extends SimpleFileVisitor<Path> {
+        private final Path projectRoot;
+        private final java.util.function.Consumer<Path> fileConsumer;
+
+        private SearchFileVisitor(Path projectRoot, java.util.function.Consumer<Path> fileConsumer) {
+            this.projectRoot = projectRoot;
+            this.fileConsumer = fileConsumer;
+        }
+
+        @Override
+        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+            String name = dir.getFileName() == null ? "" : dir.getFileName().toString();
+            if (!dir.equals(projectRoot) && SEARCH_EXCLUDED_DIRS.contains(name)) {
+                return FileVisitResult.SKIP_SUBTREE;
+            }
+            return FileVisitResult.CONTINUE;
+        }
+
+        @Override
+        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+            fileConsumer.accept(file);
+            return FileVisitResult.CONTINUE;
+        }
+
+        @Override
+        public FileVisitResult visitFileFailed(Path file, IOException exc) {
+            return FileVisitResult.CONTINUE;
+        }
+    }
+
+    private record ContextLine(int lineNumber, String text) {}
+
+    private record GrepMatch(String file, int lineNumber, List<ContextLine> context) {}
 
     private synchronized SearchProvider searchProvider() {
         if (searchProvider == null) {

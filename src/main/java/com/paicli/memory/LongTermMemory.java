@@ -74,9 +74,14 @@ public class LongTermMemory implements Memory {
 
     @Override
     public List<MemoryEntry> search(String query, int limit) {
+        return search(query, limit, null);
+    }
+
+    public List<MemoryEntry> search(String query, int limit, String projectKey) {
         Set<String> queryTokens = MemoryQueryTokenizer.tokenize(query);
 
         return entries.values().stream()
+                .filter(entry -> isVisibleInProject(entry, projectKey))
                 .filter(entry -> {
                     if (MemoryQueryTokenizer.matches(entry.getContent(), queryTokens)) {
                         return true;
@@ -91,6 +96,12 @@ public class LongTermMemory implements Memory {
     @Override
     public List<MemoryEntry> getAll() {
         return new ArrayList<>(entries.values());
+    }
+
+    public List<MemoryEntry> getAll(String projectKey) {
+        return entries.values().stream()
+                .filter(entry -> isVisibleInProject(entry, projectKey))
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -128,6 +139,23 @@ public class LongTermMemory implements Memory {
         return entries.values().stream()
                 .filter(entry -> entry.getType() == type)
                 .collect(Collectors.toList());
+    }
+
+    public static boolean isVisibleInProject(MemoryEntry entry, String projectKey) {
+        String scope = scopeOf(entry);
+        if ("global".equals(scope)) {
+            return true;
+        }
+        String entryProject = entry.getMetadata().get("project");
+        return projectKey != null && !projectKey.isBlank() && Objects.equals(entryProject, projectKey);
+    }
+
+    public static String scopeOf(MemoryEntry entry) {
+        String scope = entry.getMetadata().get("scope");
+        if ("project".equalsIgnoreCase(scope)) {
+            return "project";
+        }
+        return "global";
     }
 
     /**

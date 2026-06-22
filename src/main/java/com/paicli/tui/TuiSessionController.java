@@ -6,6 +6,8 @@ import com.paicli.agent.PlanExecuteAgent;
 import com.paicli.config.PaiCliConfig;
 import com.paicli.hitl.HitlHandler;
 import com.paicli.llm.LlmClient;
+import com.paicli.memory.LongTermMemory;
+import com.paicli.memory.MemoryEntry;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.runtime.CancellationToken;
 import com.paicli.snapshot.RestoreResult;
@@ -123,7 +125,30 @@ public final class TuiSessionController implements AutoCloseable {
         }
         if ("/memory".equals(lower) || "/mem".equals(lower)) {
             appendSystem(reactAgent.getMemoryManager().getSystemStatus()
-                    + "\n/memory clear - 清空长期记忆\n/save <事实> - 手动保存到长期记忆");
+                    + "\n/memory list - 查看长期记忆"
+                    + "\n/memory search <关键词> - 搜索当前项目可见长期记忆"
+                    + "\n/memory delete <id> - 删除单条长期记忆"
+                    + "\n/memory clear - 清空长期记忆"
+                    + "\n/save <事实> - 保存项目级长期记忆"
+                    + "\n/save --global <事实> - 保存全局长期记忆");
+            return true;
+        }
+        if ("/memory list".equals(lower) || "/mem list".equals(lower)) {
+            appendSystem(formatMemoryEntries(reactAgent.getMemoryManager().listLongTerm()));
+            return true;
+        }
+        if (lower.startsWith("/memory search ") || lower.startsWith("/mem search ")) {
+            int prefixLength = lower.startsWith("/mem search ") ? 12 : 15;
+            String query = input.substring(prefixLength).trim();
+            appendSystem(formatMemoryEntries(reactAgent.getMemoryManager().searchLongTerm(query, 20)));
+            return true;
+        }
+        if (lower.startsWith("/memory delete ") || lower.startsWith("/mem delete ")) {
+            int prefixLength = lower.startsWith("/mem delete ") ? 12 : 15;
+            String id = input.substring(prefixLength).trim();
+            appendSystem(reactAgent.getMemoryManager().deleteLongTerm(id)
+                    ? "已删除长期记忆: " + id
+                    : "未找到长期记忆: " + id);
             return true;
         }
         if ("/memory clear".equals(lower) || "/mem clear".equals(lower)) {
@@ -133,11 +158,18 @@ public final class TuiSessionController implements AutoCloseable {
         }
         if (lower.startsWith("/save ")) {
             String fact = input.substring(6).trim();
+            String scope = "project";
+            if (fact.regionMatches(true, 0, "--global ", 0, 9)) {
+                scope = "global";
+                fact = fact.substring(9).trim();
+            } else if (fact.regionMatches(true, 0, "--project ", 0, 10)) {
+                fact = fact.substring(10).trim();
+            }
             if (fact.isEmpty()) {
                 appendSystem("请提供要保存的内容，例如 /save 这个项目使用 Java 17");
             } else {
-                reactAgent.getMemoryManager().storeFact(fact);
-                appendSystem("已保存到长期记忆: " + fact);
+                reactAgent.getMemoryManager().storeFact(fact, scope);
+                appendSystem("已保存到长期记忆(" + scope + "): " + fact);
             }
             return true;
         }
@@ -363,6 +395,21 @@ public final class TuiSessionController implements AutoCloseable {
             return "";
         }
         return output.replaceAll("\\u001B\\[[;\\d]*m", "").trim();
+    }
+
+    private static String formatMemoryEntries(List<MemoryEntry> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return "没有匹配的长期记忆。";
+        }
+        StringBuilder sb = new StringBuilder("长期记忆：\n");
+        for (MemoryEntry entry : entries) {
+            sb.append("- ")
+                    .append(entry.getId())
+                    .append(" [").append(LongTermMemory.scopeOf(entry)).append("] ")
+                    .append(entry.getContent())
+                    .append("\n");
+        }
+        return sb.toString().trim();
     }
 
     @Override

@@ -109,6 +109,30 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesMemoryListSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/memory list");
+
+        assertEquals(CliCommandParser.CommandType.MEMORY_LIST, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesMemorySearchSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/memory search Chrome 登录态");
+
+        assertEquals(CliCommandParser.CommandType.MEMORY_SEARCH, command.type());
+        assertEquals("Chrome 登录态", command.payload());
+    }
+
+    @Test
+    void parsesMemoryDeleteSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/memory delete fact-abcd1234");
+
+        assertEquals(CliCommandParser.CommandType.MEMORY_DELETE, command.type());
+        assertEquals("fact-abcd1234", command.payload());
+    }
+
+    @Test
     void parsesSaveSlashCommand() {
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("/save 记住这个事实");
 

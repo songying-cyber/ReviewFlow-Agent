@@ -4,6 +4,7 @@ import com.paicli.browser.BrowserConnector;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +34,85 @@ class ToolRegistryTest {
         String result = registry.executeTool("execute_command", "{\"command\":\"find / -name \\\"pom.xml\\\" -type f | head -20\"}");
 
         assertTrue(result.contains("策略拒绝"));
+    }
+
+    @Test
+    void shouldReadRequestedLineRange(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Sample.java");
+        Files.writeString(file, String.join("\n",
+                "class Sample {",
+                "  void first() {}",
+                "  void second() {}",
+                "}"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("read_file", "{\"path\":\"Sample.java\",\"offset\":2,\"limit\":2}");
+
+        assertTrue(result.contains("lines 2-3 of 4"));
+        assertTrue(result.contains("2 |   void first() {}"));
+        assertTrue(result.contains("3 |   void second() {}"));
+        assertTrue(!result.contains("class Sample {"));
+    }
+
+    @Test
+    void shouldGlobFilesInsideProject(@TempDir Path tempDir) throws Exception {
+        Files.createDirectories(tempDir.resolve("src/main/java/com/example"));
+        Files.writeString(tempDir.resolve("src/main/java/com/example/UserService.java"), "class UserService {}\n");
+        Files.writeString(tempDir.resolve("README.md"), "# demo\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("glob_files", "{\"pattern\":\"**/*Service.java\"}");
+
+        assertTrue(result.contains("src/main/java/com/example/UserService.java"));
+        assertTrue(!result.contains("README.md"));
+    }
+
+    @Test
+    void shouldGlobRootFileByName(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("README.md"), "# demo\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("glob_files", "{\"pattern\":\"README.md\"}");
+
+        assertTrue(result.contains("README.md"));
+    }
+
+    @Test
+    void shouldGrepCodeWithLineNumbersAndContext(@TempDir Path tempDir) throws Exception {
+        Files.createDirectories(tempDir.resolve("src/main/java/com/example"));
+        Files.writeString(tempDir.resolve("src/main/java/com/example/UserService.java"), String.join("\n",
+                "class UserService {",
+                "  User getUserById(String id) {",
+                "    return repository.findById(id);",
+                "  }",
+                "}"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("grep_code",
+                "{\"pattern\":\"getUserById\",\"glob\":\"**/*.java\",\"context_lines\":1}");
+
+        assertTrue(result.contains("src/main/java/com/example/UserService.java:2"));
+        assertTrue(result.contains(">    2 |   User getUserById(String id) {"));
+        assertTrue(result.contains("     3 |     return repository.findById(id);"));
+    }
+
+    @Test
+    void shouldSkipCommonDependencyDirectoriesWhenGrepping(@TempDir Path tempDir) throws Exception {
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.createDirectories(tempDir.resolve("node_modules/pkg"));
+        Files.writeString(tempDir.resolve("src/App.java"), "class App { String marker = \"targetSymbol\"; }\n");
+        Files.writeString(tempDir.resolve("node_modules/pkg/Generated.java"), "class Generated { String marker = \"targetSymbol\"; }\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("grep_code", "{\"pattern\":\"targetSymbol\",\"max_results\":10}");
+
+        assertTrue(result.contains("src/App.java:1"));
+        assertTrue(!result.contains("node_modules"));
     }
 
     @Test
@@ -140,5 +220,17 @@ class ToolRegistryTest {
 
         assertEquals(List.of("访问 yuque.com 时复用登录态"), saved);
         assertTrue(result.contains("已保存到长期记忆"));
+    }
+
+    @Test
+    void saveMemoryToolPassesScopeToScopedSaver() {
+        ToolRegistry registry = new ToolRegistry();
+        List<String> saved = new ArrayList<>();
+        registry.setScopedMemorySaver((fact, scope) -> saved.add(scope + ":" + fact));
+
+        String result = registry.executeTool("save_memory", "{\"fact\":\"默认用中文回答\",\"scope\":\"global\"}");
+
+        assertEquals(List.of("global:默认用中文回答"), saved);
+        assertTrue(result.contains("长期记忆(global)"));
     }
 }

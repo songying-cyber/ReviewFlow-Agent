@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -85,5 +86,20 @@ class MemoryRetrieverTest {
         var results = retriever.retrieve("偏好设置", 5);
         assertFalse(results.isEmpty());
         assertEquals("f1", results.get(0).getId());
+    }
+
+    @Test
+    void shouldInjectOnlyGlobalAndCurrentProjectLongTermMemory() {
+        longTerm.store(new MemoryEntry("global", "默认用中文回答", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "global"), 10));
+        longTerm.store(new MemoryEntry("current", "当前项目使用 Java 17", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "project", "project", "/repo/current"), 10));
+        longTerm.store(new MemoryEntry("other", "其他项目使用 Python", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "project", "project", "/repo/other"), 10));
+
+        String context = retriever.buildContextForQuery("项目 使用", 300, "/repo/current");
+
+        assertTrue(context.contains("当前项目使用 Java 17"));
+        assertFalse(context.contains("其他项目使用 Python"));
     }
 }

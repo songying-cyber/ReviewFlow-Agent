@@ -6,7 +6,7 @@ import java.util.Set;
  * 危险操作识别策略 - 基于静态规则判断哪些工具调用需要人工确认
  *
  * 设计原则：
- * - 读取类操作（read_file、list_dir、search_code）不需要确认，无副作用
+ * - 读取类操作（read_file、list_dir、glob_files、grep_code、search_code）不需要确认，无副作用
  * - 写入/执行类操作（write_file、execute_command）需要确认，有潜在破坏性
  * - create_project 属于写入操作，默认需要确认
  * - revert_turn 会批量回写工作区文件，默认需要确认

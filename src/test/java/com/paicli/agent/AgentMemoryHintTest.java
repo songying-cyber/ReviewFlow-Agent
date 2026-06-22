@@ -40,6 +40,7 @@ class AgentMemoryHintTest {
                     .map(MemoryEntry::getContent)
                     .toList();
             assertTrue(facts.contains("访问 yuque.com（语雀）时优先复用用户已登录的 Chrome 登录态。"));
+            assertEquals("global", agent.getMemoryManager().getLongTermMemory().getAll().get(0).getMetadata().get("scope"));
         } finally {
             if (oldMemoryDir == null) {
                 System.clearProperty("paicli.memory.dir");

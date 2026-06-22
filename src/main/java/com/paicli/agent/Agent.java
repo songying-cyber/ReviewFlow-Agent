@@ -66,7 +66,8 @@ public class Agent {
         this.memoryManager = new MemoryManager(llmClient);
         this.historyCompactor = new ConversationHistoryCompactor(llmClient);
         this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
-        this.toolRegistry.setMemorySaver(memoryManager::storeFact);
+        this.memoryManager.setProjectPath(this.toolRegistry.getProjectPath());
+        this.toolRegistry.setScopedMemorySaver(memoryManager::storeFact);
         conversationHistory.add(LlmClient.Message.system(buildSystemPrompt("")));
     }
 
@@ -370,7 +371,7 @@ public class Agent {
                 .toList();
         String fact = ExplicitMemoryHints.browserLoginFact(userInput, recentTexts);
         if (fact != null && !fact.isBlank()) {
-            memoryManager.storeFact(fact);
+            memoryManager.storeFact(fact, "global");
         }
     }
 

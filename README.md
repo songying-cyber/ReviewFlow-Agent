@@ -24,7 +24,7 @@ mvn test -DskipTests=false
 ### 第一期：ReAct Agent CLI
 
 - 单轮对话驱动的 `ReAct` 循环
-- 支持工具调用：读文件、写文件、列目录、执行命令、创建项目、代码语义检索、联网搜索、MCP 动态工具
+- 支持工具调用：读文件、写文件、列目录、文件 glob、代码 grep、执行命令、创建项目、RAG 语义辅助检索、联网搜索、MCP 动态工具
 - 更适合简单任务或单步操作
 
 ### 第二期：Plan-and-Execute + DAG
@@ -38,10 +38,10 @@ mvn test -DskipTests=false
 ### 第三期：Memory + 上下文工程
 
 - 短期记忆管理当前对话与工具结果
-- 长期记忆通过 `/save <事实>` 或用户明确说“记一下 / 记住”时的 `save_memory` 保存关键事实，跨会话复用
+- 长期记忆通过 `/save <事实>` 或用户明确说“记一下 / 记住”时的 `save_memory` 保存关键事实，默认项目级作用域，跨会话复用
 - 注入给模型的相关记忆只使用长期稳定事实，不把当前轮短期对话误当成“历史记忆”
 - 对话接近预算时自动做摘要压缩
-- 新增 `/memory` 查看状态、`/memory clear` 清空长期记忆、`/save` 手动保存事实；Agent 在用户明确说“记一下 / 记住”时可调用 `save_memory`
+- 新增 `/memory` 查看状态、`/memory list/search/delete/clear` 管理长期记忆、`/save` 手动保存事实；Agent 在用户明确说“记一下 / 记住”时可调用 `save_memory`
 
 ### 第四期：RAG 检索 + 代码库理解
 
@@ -50,7 +50,7 @@ mvn test -DskipTests=false
 - 代码分块（文件/类/方法粒度）与 AST 解析
 - 代码关系图谱（extends/implements/imports/calls/contains）
 - 新增 `/index`、`/search`、`/graph` CLI 命令
-- Agent 自动调用 `search_code` 工具理解代码库
+- `search_code` 作为语义辅助检索工具；精确代码定位默认走 `glob_files` / `grep_code` / `read_file` 现用现查
 
 ### 第五期：Multi-Agent 协作 + 角色分工
 
@@ -108,8 +108,8 @@ mvn test -DskipTests=false
 - `LlmClient` 声明模型能力：`maxContextWindow()`、`supportsPromptCaching()`、`promptCacheMode()`
 - GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window，StepFun 默认 256k window，Kimi K2.6 默认 256k window
 - `AgentBudget` 按当前模型动态计算预算，默认 `80% * maxContextWindow`，仍可用系统属性覆盖
-- short / balanced / long 三种上下文模式：长上下文模式跳过摘要压缩，RAG 默认 topK 提升到 20
-- `search_code` 未显式传 `top_k` 时按上下文模式自适应
+- short / balanced / long 三种上下文模式：长上下文模式跳过摘要压缩，语义检索 topK 可提升到 20
+- `search_code` 未显式传 `top_k` 时按上下文模式自适应；默认代码定位仍优先实时 grep/read
 - 长上下文模式下自动把 MCP resources 的 URI / 描述索引注入 system prompt，不自动注入正文
 - inline 模式下 Token / cached input tokens / 估算成本 / 耗时进入底部状态栏，避免占用正文输出区
 - `/context` 会显示当前上下文模式、prompt cache 模式、RAG topK、resources 自动索引状态
@@ -254,7 +254,7 @@ Tips for getting started:
 
 - 🤖 基于 GLM-5.1 的智能对话
 - 🔄 ReAct Agent 循环（思考-行动-观察）
-- 🛠️ 工具调用（文件操作、Shell命令、项目创建、代码语义检索、联网搜索、MCP 动态工具）
+- 🛠️ 工具调用（文件操作、确定性代码搜索、Shell命令、项目创建、RAG 语义检索、联网搜索、MCP 动态工具）
 - 💬 交互式命令行界面
 - 📝 普通任务提交后会先把本轮原始 prompt 以 `>` 暗色整行块写回 transcript；输入态仍显示 `* `，单行提交只占一行，不额外追加空白行。随后再进入 Thinking / 工具调用，避免 dock 刷新或 activity 重绘后用户输入从可见历史里消失
 - 🧠 默认通过流式接口获取模型输出；inline ReAct 用固定高度 live thinking 区动态预览 reasoning，content / tool call 开始前清掉 live 区并把完整 reasoning 引用块落到 transcript，回答正文用低调标记起始；web_search / web_fetch 会在折叠头展示 query / URL，并在执行后输出一行结果摘要
@@ -276,7 +276,7 @@ Tips for getting started:
 
 ### 第四期
 
-- 🔍 代码库语义检索（自然语言搜代码）
+- 🔍 代码库实时搜索 + RAG 语义辅助（精确定位优先 glob/grep/read，自然语言模糊查询再 search_code）
 - 🕸️ 代码关系图谱（类继承、接口实现、方法调用）
 - 📡 本地 Ollama Embedding + 远程 API 可配置
 - 🗃️ SQLite 向量存储与持久化
@@ -347,7 +347,8 @@ export KIMI_MODEL=kimi-k2.6
 ```
 
 长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
-长期记忆只保存显式保存意图下的稳定事实：`/save <事实>`，或用户在自然语言里明确说“记一下 / 记住 / 以后记得”时由 Agent 调用 `save_memory`。它不应包含一次性任务请求或临时文件名/目录名。
+长期记忆只保存显式保存意图下的稳定事实：`/save <事实>`，或用户在自然语言里明确说“记一下 / 记住 / 以后记得”时由 Agent 调用 `save_memory`。默认保存为当前项目作用域；跨项目通用偏好可用 `/save --global <事实>` 或 `save_memory(scope=global)`。它不应包含一次性任务请求或临时文件名/目录名。
+可用 `/memory list` 查看长期记忆，`/memory search <关键词>` 搜索当前项目可见记忆，`/memory delete <id>` 删除单条记忆。
 代码索引默认保存在 `~/.paicli/rag/codebase.db`。
 调试日志默认滚动写入 `~/.paicli/logs/paicli.log`，旧日志会按保留天数和总容量自动清理。
 ReAct / Plan task / SubAgent / Planner 的模型 `reasoning_content` 会以 `LLM reasoning [...]` 形式写入该日志，便于排查模型为什么选择某个工具或路径。
@@ -570,9 +571,11 @@ I
 - `read_file` - 读取文件内容
 - `write_file` - 写入文件内容
 - `list_dir` - 列出目录内容
+- `glob_files` - 按文件名 glob 实时查找项目内文件（只读，自动跳过常见构建/依赖目录）
+- `grep_code` - 按关键字或正则实时搜索项目内代码，返回文件、行号与可选上下文
 - `execute_command` - 在当前项目目录执行短时 Shell 命令（默认 60 秒超时，黑名单拦截破坏性命令）
 - `create_project` - 创建项目结构（java/python/node）
-- `search_code` - 语义检索代码库（自然语言查询）
+- `search_code` - 语义检索代码库（自然语言查询，适合作为模糊语义或常规搜索无果时的辅助）
 - `web_search` - 搜索互联网获取实时信息
 - `web_fetch` - 抓取已知 URL 并提取正文 Markdown
 - `revert_turn` - 恢复到最近第 N 个 pre-turn 快照（走 HITL 与审计）
@@ -581,7 +584,7 @@ I
 
 同一轮模型返回多个工具调用时，PaiCLI 会并行执行这些工具；如果工具之间有依赖关系，模型应分多轮调用。
 
-文件类工具（`read_file` / `write_file` / `list_dir` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。`revert_turn` 会批量回写工作区，默认触发 HITL 和审计。所有 `mcp__` 前缀工具默认触发 HITL 和审计。详见 `/policy`。
+文件类与代码检索工具（`read_file` / `write_file` / `list_dir` / `glob_files` / `grep_code` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。`revert_turn` 会批量回写工作区，默认触发 HITL 和审计。所有 `mcp__` 前缀工具默认触发 HITL 和审计。详见 `/policy`。
 
 ## 命令
 
@@ -607,11 +610,14 @@ I
 - `/snapshot clean` - 清理当前项目 Side-Git 快照目录
 - `/restore <N>` - 恢复到最近第 N 个 pre-turn 快照
 - `/memory` / `/mem` - 查看记忆系统状态
+- `/memory list` - 查看长期记忆列表
+- `/memory search <关键词>` - 搜索当前项目可见长期记忆
+- `/memory delete <id>` - 删除单条长期记忆
 - `/memory clear` - 清空长期记忆
-- `/save <事实>` - 手动保存关键事实到长期记忆
-- `save_memory` - Agent 内置工具，仅在用户明确要求保存长期偏好或稳定事实时调用；“复用已登录 Chrome，记一下”这类浏览器登录态偏好会写入长期记忆，供新会话检索
+- `/save <事实>` - 手动保存项目级关键事实到长期记忆；`/save --global <事实>` 保存跨项目通用偏好
+- `save_memory` - Agent 内置工具，仅在用户明确要求保存长期偏好或稳定事实时调用；默认 `scope=project`，跨项目通用偏好才用 `scope=global`
 - `/index [路径]` - 索引代码库（默认当前目录）
-- `/search <查询>` - 语义检索代码
+- `/search <查询>` - 语义检索代码（RAG 辅助路径）
 - `/graph <类名>` - 查看代码关系图谱
 - `/clear` - 清空对话历史
 - `/exit` / `/quit` - 退出程序

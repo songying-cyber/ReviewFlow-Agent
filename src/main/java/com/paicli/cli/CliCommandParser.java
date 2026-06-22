@@ -15,6 +15,9 @@ final class CliCommandParser {
         SWITCH_HITL,
         MEMORY_STATUS,
         MEMORY_CLEAR,
+        MEMORY_LIST,
+        MEMORY_DELETE,
+        MEMORY_SEARCH,
         MEMORY_SAVE,
         INDEX_CODE,
         SEARCH_CODE,
@@ -121,6 +124,26 @@ final class CliCommandParser {
 
         if (trimmed.equalsIgnoreCase("/memory clear") || trimmed.equalsIgnoreCase("/mem clear")) {
             return new ParsedCommand(CommandType.MEMORY_CLEAR, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/memory list") || trimmed.equalsIgnoreCase("/mem list")) {
+            return new ParsedCommand(CommandType.MEMORY_LIST, null);
+        }
+
+        if (trimmed.regionMatches(true, 0, "/memory delete ", 0, 15)) {
+            return new ParsedCommand(CommandType.MEMORY_DELETE, trimmed.substring(15).trim());
+        }
+
+        if (trimmed.regionMatches(true, 0, "/mem delete ", 0, 12)) {
+            return new ParsedCommand(CommandType.MEMORY_DELETE, trimmed.substring(12).trim());
+        }
+
+        if (trimmed.regionMatches(true, 0, "/memory search ", 0, 15)) {
+            return new ParsedCommand(CommandType.MEMORY_SEARCH, trimmed.substring(15).trim());
+        }
+
+        if (trimmed.regionMatches(true, 0, "/mem search ", 0, 12)) {
+            return new ParsedCommand(CommandType.MEMORY_SEARCH, trimmed.substring(12).trim());
         }
 
         if (trimmed.equalsIgnoreCase("/save")) {

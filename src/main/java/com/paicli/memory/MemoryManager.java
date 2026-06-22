@@ -5,6 +5,7 @@ import com.paicli.context.ContextProfile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -23,6 +24,7 @@ public class MemoryManager {
     private final MemoryRetriever retriever;
     private TokenBudget tokenBudget;
     private ContextProfile contextProfile;
+    private String currentProject;
 
     public MemoryManager(LlmClient llmClient) {
         this(llmClient, ContextProfile.from(llmClient), null);
@@ -48,6 +50,7 @@ public class MemoryManager {
         this.compressor = new ContextCompressor(llmClient);
         this.retriever = new MemoryRetriever(shortTermMemory, this.longTermMemory);
         this.tokenBudget = new TokenBudget(contextProfile.maxContextWindow());
+        this.currentProject = defaultProjectKey();
     }
 
     public void setLlmClient(LlmClient llmClient) {
@@ -59,6 +62,13 @@ public class MemoryManager {
         this.contextProfile = contextProfile;
         this.tokenBudget = new TokenBudget(contextProfile.maxContextWindow());
         this.shortTermMemory.setMaxTokens(contextProfile.shortTermMemoryBudget());
+    }
+
+    public void setProjectPath(String projectPath) {
+        if (projectPath == null || projectPath.isBlank()) {
+            return;
+        }
+        this.currentProject = normalizeProjectKey(projectPath);
     }
 
     /**
@@ -117,11 +127,19 @@ public class MemoryManager {
      * 存储关键事实到长期记忆
      */
     public void storeFact(String fact) {
+        storeFact(fact, "project");
+    }
+
+    public void storeFact(String fact, String scope) {
+        String normalizedScope = normalizeScope(scope);
+        Map<String, String> metadata = "global".equals(normalizedScope)
+                ? Map.of("source", "fact", "scope", "global")
+                : Map.of("source", "fact", "scope", "project", "project", currentProject);
         MemoryEntry entry = new MemoryEntry(
                 "fact-" + UUID.randomUUID().toString().substring(0, 8),
                 fact,
                 MemoryEntry.MemoryType.FACT,
-                Map.of("source", "fact"),
+                metadata,
                 MemoryEntry.estimateTokens(fact)
         );
         longTermMemory.store(entry);
@@ -134,11 +152,23 @@ public class MemoryManager {
         return retriever.retrieve(query, limit);
     }
 
+    public List<MemoryEntry> listLongTerm() {
+        return longTermMemory.getAll();
+    }
+
+    public List<MemoryEntry> searchLongTerm(String query, int limit) {
+        return longTermMemory.search(query, limit, currentProject);
+    }
+
+    public boolean deleteLongTerm(String id) {
+        return longTermMemory.delete(id);
+    }
+
     /**
      * 构建用于 LLM 的记忆上下文
      */
     public String buildContextForQuery(String query, int maxTokens) {
-        return retriever.buildContextForQuery(query, maxTokens);
+        return retriever.buildContextForQuery(query, maxTokens, currentProject);
     }
 
     /**
@@ -203,4 +233,30 @@ public class MemoryManager {
     public LongTermMemory getLongTermMemory() { return longTermMemory; }
     public TokenBudget getTokenBudget() { return tokenBudget; }
     public ContextProfile getContextProfile() { return contextProfile; }
+
+    public String getCurrentProject() { return currentProject; }
+
+    private static String normalizeScope(String scope) {
+        if (scope == null || scope.isBlank()) {
+            return "project";
+        }
+        String normalized = scope.trim().toLowerCase();
+        return "global".equals(normalized) ? "global" : "project";
+    }
+
+    private static String defaultProjectKey() {
+        return normalizeProjectKey(System.getProperty("user.dir"));
+    }
+
+    private static String normalizeProjectKey(String path) {
+        try {
+            Path candidate = Path.of(path).toAbsolutePath().normalize();
+            if (java.nio.file.Files.exists(candidate)) {
+                return candidate.toRealPath().toString();
+            }
+            return candidate.toString();
+        } catch (Exception e) {
+            return Path.of(path).toAbsolutePath().normalize().toString();
+        }
+    }
 }

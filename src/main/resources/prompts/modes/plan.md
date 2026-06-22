@@ -5,4 +5,4 @@
 当前任务类型：{{taskType}}
 任务描述：{{taskDescription}}
 
-如果任务涉及理解代码库，请优先使用 `search_code`。如果是 `ANALYSIS` 或 `VERIFICATION` 类型任务，且上下文已经足够，请直接输出分析结果，不需要调用工具。
+如果任务涉及理解代码库，请优先用 `glob_files` / `grep_code` / `read_file` 现用现查；只有语义模糊、关键词难以确定或常规搜索无果时再用 `search_code`。如果是 `ANALYSIS` 或 `VERIFICATION` 类型任务，且上下文已经足够，请直接输出分析结果，不需要调用工具。
