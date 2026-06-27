@@ -32,7 +32,7 @@ Terminal
 - 交互期所有用户可见输出优先走 `Renderer.stream()`。
 - inline 模式下 `Renderer.stream()` 优先通过 `LineReader#printAbove` 输出到当前输入行上方。
 - inline 启动顺序必须先 `Renderer.start()` / 初始化 Status dock，再通过 `InlineRenderer.installStartupScreen(...)` 把完整 Banner + tips 挂到 `LineReader.CALLBACK_INIT`；首次进入 `readLine` 时由 `printAbove` 一次性渲染首屏，保证 logo、tips、输入行和底部 dock 在同一个 JLine 生命周期里协调。
-- 普通任务提交后先把本轮原始用户 prompt 以 `>` 暗色整行块回写到 transcript；输入态仍使用 `* `，单行输入只回显一行，不额外追加空白行。随后再进入 mention 展开、Thinking 面板和工具调用，避免输入提交行被 dock 刷新或 activity 重绘吞掉。
+- 普通任务和斜杠命令提交后先把本轮原始输入以 `>` 暗色整行块回写到 transcript；输入态仍使用 `* `，单行输入只回显一行，不额外追加空白行。普通任务随后再进入 mention 展开、Thinking 面板和工具调用，避免输入提交行被 dock 刷新或 activity 重绘吞掉。
 - ReAct inline 模式下 LLM 请求期间显示固定高度 live thinking 区；reasoning delta 以灰色引用行出现在 live 区，content / tool call 开始前只清理 live 区自己占用的行，再进入正常 transcript。
 - 底部 dock 使用 JLine `Status` 托管，JLine 负责滚动区域和 dock 重绘；业务代码不再手写 `\n`、`moveUp`、`CLEAR_TO_EOS` 去拼状态区。输入期把 LineReader 光标定位到 dock 上方一行，让输入行和 Status 同处底部区域。
 - 非交互、测试、plain renderer 和降级路径继续使用普通 `PrintStream`。

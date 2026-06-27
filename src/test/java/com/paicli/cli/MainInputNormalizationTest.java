@@ -121,6 +121,18 @@ class MainInputNormalizationTest {
     }
 
     @Test
+    void submittedSlashCommandIsRenderedBackIntoTranscript() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+
+        Main.printSubmittedInput(null, new PrintStream(sink, true, StandardCharsets.UTF_8), "/memory list");
+
+        String emitted = sink.toString(StandardCharsets.UTF_8);
+        assertTrue(emitted.contains(">"), emitted);
+        assertTrue(emitted.contains("/memory list"), emitted);
+        assertEquals(1, emitted.chars().filter(ch -> ch == '\n').count(), emitted);
+    }
+
+    @Test
     void configuresAwtHeadlessOnMac() {
         String oldOs = System.getProperty("os.name");
         String oldHeadless = System.getProperty("java.awt.headless");
