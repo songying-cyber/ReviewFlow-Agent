@@ -1,6 +1,9 @@
 package com.paicli.tool;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.browser.BrowserConnector;
+import com.paicli.mcp.protocol.McpToolDescriptor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -13,9 +16,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolRegistryTest {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
     void shouldRunCommandInProjectDirectory(@TempDir Path tempDir) {
@@ -116,6 +121,58 @@ class ToolRegistryTest {
     }
 
     @Test
+    void shouldExposePartialWhenGrepReachesHeadLimit(@TempDir Path tempDir) throws Exception {
+        String previous = System.getProperty("paicli.search.disable.rg");
+        System.setProperty("paicli.search.disable.rg", "true");
+        try {
+            Files.writeString(tempDir.resolve("Many.java"), String.join("\n",
+                    "class Many {",
+                    "  String first = \"needle\";",
+                    "  String second = \"needle\";",
+                    "}"));
+            ToolRegistry registry = new ToolRegistry();
+            registry.setProjectPath(tempDir.toString());
+
+            String result = registry.executeTool("grep_code",
+                    "{\"pattern\":\"needle\",\"head_limit\":1,\"max_results\":10}");
+
+            assertTrue(result.contains("Many.java:2"));
+            assertTrue(!result.contains("Many.java:3"));
+            assertTrue(result.contains("partial: true"));
+            assertTrue(result.contains("head_limit=1"));
+            assertTrue(result.contains("suggested_reads"));
+            assertTrue(result.contains("read_file {\"path\":\"Many.java\""));
+        } finally {
+            restoreSystemProperty("paicli.search.disable.rg", previous);
+        }
+    }
+
+    @Test
+    void shouldExposePartialWhenGrepResultReachesCharacterBudget(@TempDir Path tempDir) throws Exception {
+        String previous = System.getProperty("paicli.search.disable.rg");
+        System.setProperty("paicli.search.disable.rg", "true");
+        try {
+            String longNeedleLine = "needle " + "x".repeat(1200);
+            Files.writeString(tempDir.resolve("Budget.java"), String.join("\n",
+                    "class Budget {",
+                    "  String first = \"" + longNeedleLine + "\";",
+                    "  String second = \"" + longNeedleLine + "\";",
+                    "}"));
+            ToolRegistry registry = new ToolRegistry();
+            registry.setProjectPath(tempDir.toString());
+
+            String result = registry.executeTool("grep_code",
+                    "{\"pattern\":\"needle\",\"max_results\":10,\"max_chars\":1000}");
+
+            assertTrue(result.contains("Budget.java:2"));
+            assertTrue(result.contains("partial: true"));
+            assertTrue(result.contains("max_chars=1000"));
+        } finally {
+            restoreSystemProperty("paicli.search.disable.rg", previous);
+        }
+    }
+
+    @Test
     void shouldTimeoutLongRunningCommandWithoutHanging(@TempDir Path tempDir) {
         ToolRegistry registry = new ToolRegistry(1);
         registry.setProjectPath(tempDir.toString());
@@ -123,6 +180,64 @@ class ToolRegistryTest {
         String result = registry.executeTool("execute_command", "{\"command\":\"sleep 2\"}");
 
         assertTrue(result.contains("命令执行超时"));
+    }
+
+    @Test
+    void shouldRouteWebSearchThroughStepSearchMcpForStep37Flash() throws Exception {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setCurrentModel("step", "step-3.7-flash");
+        registry.registerMcpTool(stepSearchDescriptor("web_search", """
+                {
+                  "type": "object",
+                  "properties": {
+                    "query": {"type": "string"},
+                    "top_k": {"type": "integer"}
+                  }
+                }
+                """), args -> "step-result:" + args);
+
+        String result = registry.executeTool("web_search", "{\"query\":\"Step 3.7 Flash\",\"top_k\":3}");
+
+        assertTrue(result.contains("[StepSearch]"));
+        assertTrue(result.contains("step-result"));
+        assertTrue(result.contains("\"query\":\"Step 3.7 Flash\""));
+        assertTrue(result.contains("\"top_k\":3"));
+    }
+
+    @Test
+    void shouldRouteWebFetchThroughStepSearchMcpForStep37Flash() throws Exception {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setCurrentModel("step", "step-3.7-flash");
+        registry.registerMcpTool(stepSearchDescriptor("web_fetch", """
+                {
+                  "type": "object",
+                  "properties": {
+                    "url": {"type": "string"},
+                    "max_chars": {"type": "integer"}
+                  }
+                }
+                """), args -> "step-fetch:" + args);
+
+        String result = registry.executeTool("web_fetch",
+                "{\"url\":\"https://platform.stepfun.com/docs/zh/step-plan/integrations/search-mcp\",\"max_chars\":1200}");
+
+        assertTrue(result.contains("[StepSearch]"));
+        assertTrue(result.contains("step-fetch"));
+        assertTrue(result.contains("\"url\":\"https://platform.stepfun.com/docs/zh/step-plan/integrations/search-mcp\""));
+        assertTrue(result.contains("\"max_chars\":1200"));
+    }
+
+    @Test
+    void shouldNotRouteStepSearchForOlderStepModel() throws Exception {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setCurrentModel("step", "step-3.5-flash");
+        registry.registerMcpTool(stepSearchDescriptor("web_search", """
+                {"type": "object", "properties": {"query": {"type": "string"}}}
+                """), args -> "step-result:" + args);
+
+        String result = registry.executeTool("web_search", "{\"query\":\"Step 3.7 Flash\"}");
+
+        assertFalse(result.contains("step-result"));
     }
 
     @Test
@@ -157,6 +272,16 @@ class ToolRegistryTest {
         assertEquals("result-first", results.get(0).result());
         assertEquals("call_2", results.get(1).id());
         assertEquals("result-second", results.get(1).result());
+    }
+
+    private static McpToolDescriptor stepSearchDescriptor(String name, String schema) throws Exception {
+        JsonNode inputSchema = MAPPER.readTree(schema);
+        return new McpToolDescriptor(
+                "step_search",
+                name,
+                "mcp__step_search__" + name,
+                "StepSearch " + name,
+                inputSchema);
     }
 
     @Test
@@ -232,5 +357,13 @@ class ToolRegistryTest {
 
         assertEquals(List.of("global:默认用中文回答"), saved);
         assertTrue(result.contains("长期记忆(global)"));
+    }
+
+    private static void restoreSystemProperty(String key, String previous) {
+        if (previous == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, previous);
+        }
     }
 }

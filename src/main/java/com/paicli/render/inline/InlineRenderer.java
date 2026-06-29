@@ -146,6 +146,11 @@ public final class InlineRenderer implements Renderer {
     }
 
     @Override
+    public int terminalColumns() {
+        return Math.max(40, TerminalCapabilities.safeSize(terminal).getColumns());
+    }
+
+    @Override
     public boolean supportsThinkingPanel() {
         return activityDisplay != null;
     }

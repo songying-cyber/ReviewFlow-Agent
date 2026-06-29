@@ -7,9 +7,7 @@
 首次进入仓库时，请优先阅读：
 
 1. `AGENTS.md`
-2. `README.md`
-3. 与当前任务直接相关的源码文件
-
+2. 与当前任务直接相关的源码文件
 
 可以实现类似的效果吗：Read 1 file, searched memories (ctrl+o to expand) Read 3 files (ctrl+o to expand)
 

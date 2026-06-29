@@ -13,7 +13,8 @@ class AnsiStyleTest {
         String line = AnsiStyle.userMessageBlock("abc", 8);
 
         assertFalse(line.contains("\n"), line);
-        assertTrue(stripAnsi(line).startsWith("  >  abc"), line);
+        assertTrue(stripAnsi(line).startsWith("> abc"), line);
+        assertFalse(stripAnsi(line).startsWith(" "), line);
     }
 
     @Test

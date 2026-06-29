@@ -138,6 +138,37 @@ class AbstractOpenAiCompatibleClientImageInputTest {
     }
 
     @Test
+    void deepseekClientKeepsReasoningContentForThinkingToolCalls() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse()
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody("""
+                            data: {"choices":[{"delta":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":12,"completion_tokens":1}}
+
+                            data: [DONE]
+
+                            """));
+            DeepSeekClient client = new DeepSeekClient("test-key", "deepseek-v4-pro",
+                    server.url("/chat/completions").toString());
+
+            client.chat(List.of(LlmClient.Message.assistant(
+                    "hidden reasoning",
+                    "",
+                    List.of(new LlmClient.ToolCall(
+                            "call_1",
+                            new LlmClient.ToolCall.Function("read_file", "{\"path\":\"README.md\"}")
+                    ))
+            )), null);
+
+            JsonNode message = MAPPER.readTree(server.takeRequest().getBody().readUtf8())
+                    .path("messages").get(0);
+
+            assertEquals("hidden reasoning", message.path("reasoning_content").asText());
+            assertEquals("call_1", message.path("tool_calls").get(0).path("id").asText());
+        }
+    }
+
+    @Test
     void parsesReasoningFieldAliasesFromStreamingDeltas() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.enqueue(new MockResponse()

@@ -96,6 +96,7 @@ public class AgentOrchestrator {
         this.out = out == null ? System.out : out;
         this.toolRegistry = toolRegistry;
         this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
+        this.toolRegistry.setCurrentModel(llmClient.getProviderName(), llmClient.getModelName());
         memoryManager.setProjectPath(this.toolRegistry.getProjectPath());
         this.toolRegistry.setScopedMemorySaver(memoryManager::storeFact);
         this.planner = new SubAgent("planner", AgentRole.PLANNER, llmClient, toolRegistry);

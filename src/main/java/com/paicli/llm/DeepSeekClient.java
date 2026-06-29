@@ -6,19 +6,25 @@ public class DeepSeekClient extends AbstractOpenAiCompatibleClient {
     private static final String DEFAULT_MODEL = "deepseek-v4-flash";
     private final String apiKey;
     private final String model;
+    private final String apiUrl;
 
     public DeepSeekClient(String apiKey) {
         this(apiKey, DEFAULT_MODEL);
     }
 
     public DeepSeekClient(String apiKey, String model) {
+        this(apiKey, model, API_URL);
+    }
+
+    DeepSeekClient(String apiKey, String model, String apiUrl) {
         this.apiKey = apiKey;
         this.model = model != null && !model.isBlank() ? model : DEFAULT_MODEL;
+        this.apiUrl = apiUrl != null && !apiUrl.isBlank() ? apiUrl : API_URL;
     }
 
     @Override
     protected String getApiUrl() {
-        return API_URL;
+        return apiUrl;
     }
 
     @Override
@@ -29,6 +35,11 @@ public class DeepSeekClient extends AbstractOpenAiCompatibleClient {
     @Override
     protected String getApiKey() {
         return apiKey;
+    }
+
+    @Override
+    protected boolean shouldSendReasoningContentInRequestHistory() {
+        return true;
     }
 
     @Override

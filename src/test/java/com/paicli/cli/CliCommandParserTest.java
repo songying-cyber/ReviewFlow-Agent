@@ -66,6 +66,41 @@ class CliCommandParserTest {
         assertEquals("kimi", moonshot.provider());
         assertNull(moonshot.model());
         assertEquals(false, moonshot.explicitModel());
+
+        Main.ModelSelection freeLlmApi = Main.resolveModelSelection("free-llm-api");
+        assertEquals("freellmapi", freeLlmApi.provider());
+        assertNull(freeLlmApi.model());
+        assertEquals(false, freeLlmApi.explicitModel());
+    }
+
+    @Test
+    void parsesConfigProviderPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse(
+                "/config provider freellmapi --base-url http://localhost:5173/v1 --model auto");
+
+        assertEquals(CliCommandParser.CommandType.CONFIG, command.type());
+        assertEquals("provider freellmapi --base-url http://localhost:5173/v1 --model auto", command.payload());
+    }
+
+    @Test
+    void parsesProviderConfigUpdate() {
+        Main.ProviderConfigUpdate update = Main.parseProviderConfigUpdate(
+                "provider free-llm-api --base-url http://localhost:5173/v1 --api-key sk-test --model auto --default");
+
+        assertNull(update.error());
+        assertEquals("freellmapi", update.provider());
+        assertEquals("http://localhost:5173/v1", update.baseUrl());
+        assertEquals("sk-test", update.apiKey());
+        assertEquals("auto", update.model());
+        assertEquals(true, update.setDefault());
+    }
+
+    @Test
+    void redactsApiKeyInSubmittedInput() {
+        String redacted = Main.redactSensitiveInput(
+                "/config provider freellmapi --api-key sk-secret --model auto");
+
+        assertEquals("/config provider freellmapi --api-key *** --model auto", redacted);
     }
 
     @Test

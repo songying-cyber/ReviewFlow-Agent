@@ -85,6 +85,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 /**
  * PaiCLI v16.1.0 - Terminal-First Agent IDE
@@ -115,6 +116,10 @@ public class Main {
     private static final String ARROW_DOWN = "[B";
     private static final String APP_ARROW_UP = "OA";
     private static final String APP_ARROW_DOWN = "OB";
+    private static final Pattern SENSITIVE_FLAG_VALUE = Pattern.compile(
+            "(?i)(--?(?:api[_-]?key|authorization|password|passwd|secret|token)\\s+)(\\S+)");
+    private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
+            "(?i)((?:api[_-]?key|authorization|password|passwd|secret|token)\\s*[=:]\\s*)(\\S+)");
     private static final int CTRL_O = 15;
     private static final String DEFAULT_CHROME_DEVTOOLS_MCP_JSON = """
             {
@@ -198,12 +203,13 @@ public class Main {
         LlmClient llmClient = LlmClientFactory.createFromConfig(config);
         if (llmClient == null) {
             System.err.println("❌ 错误: 未找到可用的 API Key");
-            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY 或 KIMI_API_KEY");
+            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY、KIMI_API_KEY 或 FREELLMAPI_API_KEY");
             System.exit(1);
         }
         AtomicReference<LlmClient> llmClientRef = new AtomicReference<>(llmClient);
 
         try (Terminal terminal = TerminalBuilder.builder().system(true).dumb(true).build()) {
+            refreshTerminalColumns(terminal);
             TerminalHitlHandler terminalHitlHandler = new TerminalHitlHandler(false);
             SwitchableHitlHandler hitlHandler = new SwitchableHitlHandler(terminalHitlHandler);
             HitlToolRegistry hitlToolRegistry = new HitlToolRegistry(hitlHandler);
@@ -338,6 +344,7 @@ public class Main {
             bindEscToClearInput(lineReader);
 
             while (true) {
+                refreshTerminalColumns(terminal);
                 PromptInput promptInput;
                 try {
                     promptInput = readPromptInput(terminal, lineReader, renderer,
@@ -490,7 +497,8 @@ public class Main {
                             ui.println("   其它 provider 使用你配置里的具体模型：");
                             ui.println("   /model deepseek      - 切换到 DeepSeek（读取配置模型）");
                             ui.println("   /model step          - 切换到 StepFun（读取配置模型）");
-                            ui.println("   /model kimi          - 切换到 Kimi（读取配置模型）\n");
+                            ui.println("   /model kimi          - 切换到 Kimi（读取配置模型）");
+                            ui.println("   /model freellmapi    - 切换到本地 FreeLLMAPI（读取配置模型）\n");
                         } else {
                             ModelSelection target = resolveModelSelection(selection);
                             if (target.explicitModel()) {
@@ -536,7 +544,12 @@ public class Main {
                         continue;
                     }
                     case CONFIG -> {
-                        handleConfigPalette(renderer, config, llmClient, hitlHandler, skillRegistry);
+                        if (command.payload() == null || command.payload().isBlank()) {
+                            handleConfigPalette(renderer, config, llmClient, hitlHandler, skillRegistry);
+                        } else {
+                            ui.println(handleConfigCommand(config, command.payload()));
+                            renderer.updateStatus(statusInfo(llmClient, hitlHandler, "idle", mcpServerManager, skillRegistry));
+                        }
                         continue;
                     }
                     case AUDIT_TAIL -> {
@@ -1015,14 +1028,30 @@ public class Main {
     }
 
     static void printSubmittedInput(Renderer renderer, PrintStream out, String input) {
+        String visible = redactSensitiveInput(input);
         if (renderer instanceof InlineRenderer inline) {
-            inline.printSubmittedPrompt(input);
+            inline.printSubmittedPrompt(visible);
         } else {
-            printSubmittedPrompt(out, input);
+            printSubmittedPrompt(out, visible);
         }
     }
 
+    static String redactSensitiveInput(String input) {
+        if (input == null || input.isBlank()) {
+            return input;
+        }
+        String redacted = SENSITIVE_FLAG_VALUE.matcher(input).replaceAll("$1***");
+        return SENSITIVE_ASSIGNMENT.matcher(redacted).replaceAll("$1***");
+    }
+
     private static int terminalColumns() {
+        String configured = System.getProperty("paicli.render.columns");
+        if (configured != null && !configured.isBlank()) {
+            try {
+                return Math.max(40, Integer.parseInt(configured.trim()));
+            } catch (NumberFormatException ignored) {
+            }
+        }
         String columns = System.getenv("COLUMNS");
         if (columns != null && !columns.isBlank()) {
             try {
@@ -1031,6 +1060,13 @@ public class Main {
             }
         }
         return 120;
+    }
+
+    private static void refreshTerminalColumns(Terminal terminal) {
+        if (terminal == null || terminal.getSize() == null || terminal.getSize().getColumns() <= 0) {
+            return;
+        }
+        System.setProperty("paicli.render.columns", String.valueOf(Math.max(40, terminal.getSize().getColumns())));
     }
 
     static void configureAwtForCli() {
@@ -1259,6 +1295,8 @@ public class Main {
                 new SlashCommandHint("/model deepseek", "/model deepseek", "切换到 DeepSeek（读取配置模型）"),
                 new SlashCommandHint("/model step", "/model step", "切换到 StepFun（读取配置模型）"),
                 new SlashCommandHint("/model kimi", "/model kimi", "切换到 Kimi（读取配置模型）"),
+                new SlashCommandHint("/model freellmapi", "/model freellmapi", "切换到本地 FreeLLMAPI（读取配置模型）"),
+                new SlashCommandHint("/config provider freellmapi ", "/config provider freellmapi <选项>", "配置本地 FreeLLMAPI provider"),
                 new SlashCommandHint("/plan", "/plan", "下一条任务使用 Plan-and-Execute 模式"),
                 new SlashCommandHint("/plan ", "/plan <任务内容>", "直接用计划模式执行这条任务"),
                 new SlashCommandHint("/team", "/team", "下一条任务使用 Multi-Agent 协作模式"),
@@ -1422,7 +1460,7 @@ public class Main {
             return;
         }
         String hint = switch (selected) {
-            case 0, 1 -> "💡 GLM: /model glm-5.1 / /model glm-5v-turbo；其它: /model deepseek|step|kimi 读取配置模型";
+            case 0, 1 -> "💡 GLM: /model glm-5.1 / /model glm-5v-turbo；其它: /model deepseek|step|kimi|freellmapi 读取配置模型";
             case 2 -> "💡 切换 HITL: /hitl on / /hitl off";
             case 3 -> "💡 管理 Skill: /skill list / /skill on <name> / /skill off <name>";
             case 4 -> "💡 切换渲染器（重启后生效）: PAICLI_RENDERER=inline|lanterna|plain";
@@ -1430,6 +1468,175 @@ public class Main {
             default -> "(unknown)";
         };
         renderer.stream().println(hint);
+    }
+
+    static String handleConfigCommand(PaiCliConfig config, String payload) {
+        ProviderConfigUpdate update = parseProviderConfigUpdate(payload);
+        if (update.error() != null) {
+            return "❌ " + update.error() + "\n" + providerConfigUsage();
+        }
+
+        PaiCliConfig.ProviderConfig providerConfig = ensureProviderConfig(config, update.provider());
+        if (update.apiKey() != null) {
+            providerConfig.setApiKey(update.apiKey());
+        }
+        if (update.baseUrl() != null) {
+            providerConfig.setBaseUrl(update.baseUrl());
+        }
+        if (update.model() != null) {
+            providerConfig.setModel(update.model());
+        }
+        if (update.setDefault()) {
+            config.setDefaultProvider(update.provider());
+        }
+        config.save();
+
+        StringBuilder out = new StringBuilder();
+        out.append("✅ 已保存 provider 配置: ").append(update.provider()).append('\n');
+        out.append("   model: ").append(providerConfig.getModel() == null || providerConfig.getModel().isBlank()
+                ? "(默认)" : providerConfig.getModel()).append('\n');
+        out.append("   baseUrl: ").append(providerConfig.getBaseUrl() == null || providerConfig.getBaseUrl().isBlank()
+                ? "(默认)" : providerConfig.getBaseUrl()).append('\n');
+        out.append("   apiKey: ").append(maskSecret(providerConfig.getApiKey())).append('\n');
+        if (update.setDefault()) {
+            out.append("   默认 provider 已设为 ").append(update.provider()).append('\n');
+        }
+        out.append("   立即切换: /model ").append(update.provider());
+        return out.toString();
+    }
+
+    static ProviderConfigUpdate parseProviderConfigUpdate(String payload) {
+        List<String> args = splitArgs(payload);
+        if (args.size() < 2 || !"provider".equalsIgnoreCase(args.get(0))) {
+            return ProviderConfigUpdate.error("用法不正确");
+        }
+
+        String provider = normalizeProviderName(args.get(1));
+        if (!isSupportedProvider(provider)) {
+            return ProviderConfigUpdate.error("暂不支持 provider: " + args.get(1));
+        }
+
+        String apiKey = null;
+        String baseUrl = null;
+        String model = null;
+        boolean setDefault = false;
+        for (int i = 2; i < args.size(); i++) {
+            String token = args.get(i);
+            if ("--default".equalsIgnoreCase(token) || "--set-default".equalsIgnoreCase(token)) {
+                setDefault = true;
+                continue;
+            }
+
+            String key;
+            String value;
+            int equals = token.indexOf('=');
+            if (equals > 0) {
+                key = token.substring(0, equals);
+                value = token.substring(equals + 1);
+            } else {
+                key = token;
+                if (i + 1 >= args.size()) {
+                    return ProviderConfigUpdate.error("缺少 " + key + " 的值");
+                }
+                value = args.get(++i);
+            }
+
+            switch (normalizeConfigKey(key)) {
+                case "api-key" -> apiKey = value;
+                case "base-url" -> baseUrl = value;
+                case "model" -> model = value;
+                default -> {
+                    return ProviderConfigUpdate.error("未知配置项: " + key);
+                }
+            }
+        }
+
+        if (apiKey == null && baseUrl == null && model == null && !setDefault) {
+            return ProviderConfigUpdate.error("至少提供一个配置项");
+        }
+        return new ProviderConfigUpdate(provider, apiKey, baseUrl, model, setDefault, null);
+    }
+
+    private static String providerConfigUsage() {
+        return """
+                用法:
+                  /config provider freellmapi --base-url http://localhost:5173/v1 --api-key <key> --model auto
+                  /config provider freellmapi --model qwen/qwen3-coder:free --default
+                  /model freellmapi
+                """.stripTrailing();
+    }
+
+    private static List<String> splitArgs(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        List<String> args = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        char quote = 0;
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (quote != 0) {
+                if (ch == quote) {
+                    quote = 0;
+                } else {
+                    current.append(ch);
+                }
+                continue;
+            }
+            if (ch == '\'' || ch == '"') {
+                quote = ch;
+                continue;
+            }
+            if (Character.isWhitespace(ch)) {
+                if (!current.isEmpty()) {
+                    args.add(current.toString());
+                    current.setLength(0);
+                }
+                continue;
+            }
+            current.append(ch);
+        }
+        if (!current.isEmpty()) {
+            args.add(current.toString());
+        }
+        return args;
+    }
+
+    private static String normalizeConfigKey(String raw) {
+        String key = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        while (key.startsWith("-")) {
+            key = key.substring(1);
+        }
+        return switch (key) {
+            case "apikey", "api_key", "key" -> "api-key";
+            case "baseurl", "base_url", "url" -> "base-url";
+            default -> key;
+        };
+    }
+
+    private static String normalizeProviderName(String raw) {
+        String provider = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        return switch (provider) {
+            case "stepfun", "step-fun" -> "step";
+            case "moonshot", "moonshotai", "moonshot-ai" -> "kimi";
+            case "free-llm-api", "free_llm_api", "freellm", "free-llm" -> "freellmapi";
+            default -> provider;
+        };
+    }
+
+    private static boolean isSupportedProvider(String provider) {
+        return List.of("glm", "deepseek", "step", "kimi", "freellmapi").contains(provider);
+    }
+
+    private static String maskSecret(String value) {
+        if (value == null || value.isBlank()) {
+            return "(未配置)";
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() <= 8) {
+            return "****";
+        }
+        return trimmed.substring(0, 4) + "..." + trimmed.substring(trimmed.length() - 4);
     }
 
     static void bindCtrlOToFoldableBlocks(LineReader lineReader, InlineRenderer inline) {
@@ -2126,6 +2333,8 @@ public class Main {
             case "deepseek" -> new ModelSelection("deepseek", null, false);
             case "step", "stepfun", "step-fun" -> new ModelSelection("step", null, false);
             case "kimi", "moonshot", "moonshotai", "moonshot-ai" -> new ModelSelection("kimi", null, false);
+            case "freellmapi", "free-llm-api", "free_llm_api", "freellm", "free-llm" ->
+                    new ModelSelection("freellmapi", null, false);
             default -> {
                 if (normalized.startsWith("glm-")) {
                     yield new ModelSelection("glm", value, true);
@@ -2280,6 +2489,13 @@ public class Main {
     }
 
     record ModelSelection(String provider, String model, boolean explicitModel) {
+    }
+
+    record ProviderConfigUpdate(String provider, String apiKey, String baseUrl, String model,
+                                boolean setDefault, String error) {
+        static ProviderConfigUpdate error(String error) {
+            return new ProviderConfigUpdate(null, null, null, null, false, error);
+        }
     }
 
     private record MemorySaveRequest(String fact, String scope) {

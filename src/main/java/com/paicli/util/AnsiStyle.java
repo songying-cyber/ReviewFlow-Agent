@@ -56,7 +56,7 @@ public final class AnsiStyle {
 
     private static String userMessageBlockLine(String text, int width) {
         String safe = text == null ? "" : text;
-        String prefix = "  >  ";
+        String prefix = "> ";
         String content = prefix + safe;
         int padding = Math.max(0, width - displayWidth(content));
         String line = content + " ".repeat(padding);

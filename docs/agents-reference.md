@@ -11,7 +11,7 @@ For the primary entry point, see `/AGENTS.md`.
 ### API Key
 
 1. `~/.paicli/config.json` 中对应 provider 的 `apiKey`
-2. 环境变量：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY`（Kimi 兼容 `MOONSHOT_API_KEY`）
+2. 环境变量：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`（Kimi 兼容 `MOONSHOT_API_KEY`）
 3. 仓库当前目录下的 `.env`
 4. 用户主目录下的 `.env`
 
@@ -67,7 +67,8 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 2. 项目级：`.paicli/mcp.json`
 3. 按 server 名 merge，项目级覆盖用户级
 
-格式兼容 Claude Code：`command` + `args` = stdio，`url` + `headers` = Streamable HTTP。内置变量：`${PROJECT_DIR}`、`${HOME}`。
+格式兼容 Claude Code：`command` + `args` = stdio，`url` + `headers` = Streamable HTTP。内置变量：`${PROJECT_DIR}`、`${HOME}`；其他 `${VAR}` 从系统环境变量、系统属性、项目 `.env`、用户 `~/.env` 读取。
+检测到 `STEP_API_KEY` 时自动内置 `step_search` 远程 MCP（显式同名配置优先），用于 Step 3.7 Flash 的 `web_search` / `web_fetch` 优先代理。
 
 ---
 
@@ -80,11 +81,12 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - `AgentBudget` 三种兜底：token 超预算 / 连续 3 轮相同调用 / 50 轮硬上限
 - 流式输出 reasoning_content + content；inline ReAct 用固定高度 live thinking 区动态预览 reasoning，同一次输入只把完整 reasoning 引用块落到 transcript 一次；live 区只允许清理自己占用的行，避免覆盖旧输出
 - inline 流式回答用低调 `▪` 标记起始，不再输出强标题；plain / 非流式兜底仍可使用传统 reasoning + answer 文本
+- `TerminalMarkdownRenderer` 渲染 Markdown 表格时按终端列宽分配列宽，长内容在单元格内部换行；CJK 字符按显示宽度计算，避免表格行被终端自动折断后错位
 
 ### Long Context Engineering
 
 - `ContextProfile` 计算 short/balanced/long 模式
-- GLM-5.1: 200k / DeepSeek V4: 1M / StepFun: 256k / Kimi K2.6: 256k
+- GLM-5.1: 200k / DeepSeek V4: 1M / StepFun: 256k / Kimi K2.6: 256k / FreeLLMAPI: 128k
 - long 模式(>=100k)：跳过 Memory 自动摘要，search_code 语义辅助 topK=20，MCP resources 自动索引；精确代码定位仍优先实时 glob/grep/read
 - prompt caching：能力声明 + cached usage 解析
 
@@ -131,6 +133,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 
 - `web_search`：SearchProvider 接口，返回 SearchResult 列表
 - `web_fetch`：NetworkPolicy → WebFetcher → HtmlExtractor，SPA/防爬墙返回空正文 + 边界提示
+- StepSearch 优先级：当前模型 provider=`step` 且 model 以 `step-3.7-flash` 开头，并且自动/显式 `mcp__step_search__web_search` / `mcp__step_search__web_fetch` 已注册时，内置 `web_search` / `web_fetch` 会先代理到 StepSearch MCP；MCP 未就绪或返回不可用结果时回退原实现。
 - JS 渲染 fallback 到 Chrome DevTools MCP
 
 ### MCP Protocol
@@ -189,7 +192,8 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 
 ### Prompt Layering (Phase 19)
 
-- 组装顺序：base → personality → mode → approval → project_context → skills → context_mgmt → handoff
+- 组装顺序：base → personality → mode → approval → runtime_context → project_context → skills → context_mgmt → handoff
+- runtime_context 每轮注入当前日期和系统时区，供最新信息、相对日期和联网决策使用
 - 覆盖优先级：jar 内置 < 用户级 ~/.paicli/prompts/ < 项目级 .paicli/prompts/
 - 必要校验：base.md 和最终 prompt 必须包含 `## Language`
 
@@ -233,7 +237,7 @@ LLM 生成计划 JSON / 简单任务最小计划 / 重编号 task_1..N / 依赖�
 DAG 拓扑排序 / 可执行任务判定 / 进度可视化
 
 ### ToolRegistry.java
-11 个核心内置工具 + MCP 动态工具 / executeTools() 并行入口 / ToolInvocation / ToolExecutionResult。代码理解默认路径是 `glob_files` / `grep_code` / `read_file` 现用现查，`search_code` 保留为 RAG 语义辅助。
+11 个核心内置工具 + MCP 动态工具 / executeTools() 并行入口 / ToolInvocation / ToolExecutionResult。代码理解默认路径是 `glob_files` / `grep_code` / `read_file` 现用现查，`grep_code` 优先走 ripgrep 并按 `max_results` / `head_limit` / `max_chars` 渐进返回，`search_code` 保留为 RAG 语义辅助。确定性搜索链路的回归样例见 `docs/code-search-golden-set.md`。
 
 ### MCP Package
 McpServerManager / McpClient / JsonRpcClient / StdioTransport / StreamableHttpTransport / McpSchemaSanitizer / resources/ / mention/ / notifications/
@@ -243,9 +247,10 @@ TuiBootstrap / LanternaWindow / TuiSessionController / pane/ / hitl/ / history/ 
 
 ### LLM Clients
 - GLMClient：glm-5.1，glm-5v 开头切多模态接口
-- DeepSeekClient：deepseek-v4-flash
+- DeepSeekClient：deepseek-v4-flash，thinking + tool calls 带回 reasoning_content
 - StepClient：step-3.5-flash，可通过 STEP_BASE_URL 切通道
 - KimiClient：kimi-k2.6，thinking + tool calls 带回 reasoning_content
+- FreeLlmApiClient：auto，默认 http://localhost:5173/v1，OpenAI-compatible 本地网关；可用 `/config provider freellmapi ...` 写入配置后 `/model freellmapi` 切换
 
 ---
 
@@ -264,6 +269,9 @@ GLM_API_KEY=your_api_key_here
 # MOONSHOT_API_KEY=your_moonshot_api_key_here
 # KIMI_MODEL=kimi-k2.6
 # KIMI_BASE_URL=https://api.moonshot.ai/v1
+# FREELLMAPI_API_KEY=your_freellmapi_unified_key_here
+# FREELLMAPI_MODEL=auto
+# FREELLMAPI_BASE_URL=http://localhost:5173/v1
 EMBEDDING_PROVIDER=ollama
 EMBEDDING_MODEL=nomic-embed-text:latest
 EMBEDDING_BASE_URL=http://localhost:11434

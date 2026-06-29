@@ -195,6 +195,7 @@ class MainInputNormalizationTest {
         assertTrue(choices.contains("/model glm-5v-turbo"), choices);
         assertTrue(choices.contains("/model step"), choices);
         assertTrue(choices.contains("/model kimi"), choices);
+        assertTrue(choices.contains("/model freellmapi"), choices);
         assertTrue(choices.contains("/browser status"), choices);
         assertFalse(choices.contains("do you wish"), choices);
         assertTrue(choices.lines().count() < Main.slashCommandHints().size(),

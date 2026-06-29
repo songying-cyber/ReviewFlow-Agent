@@ -61,6 +61,16 @@ class PaiCliCompleterTest {
     }
 
     @Test
+    void completesConfigProviderCommand() {
+        PaiCliCompleter completer = new PaiCliCompleter(List::of);
+        List<Candidate> candidates = new ArrayList<>();
+
+        completer.complete(null, parsed("/config provider fr", "fr"), candidates);
+
+        assertTrue(candidates.stream().anyMatch(c -> c.value().equals("freellmapi ")));
+    }
+
+    @Test
     void completesMcpServerNamesFromResources() {
         PaiCliCompleter completer = new PaiCliCompleter(() -> List.of(
                 new McpResourceDescriptor("chrome-devtools", "file:///a", "a", "", "", "text/plain", null),

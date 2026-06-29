@@ -78,6 +78,11 @@ public interface Renderer extends AutoCloseable {
      */
     PrintStream stream();
 
+    /** 当前输出区域可用列数。Markdown 表格等宽布局按这个值做收缩和换行。 */
+    default int terminalColumns() {
+        return 120;
+    }
+
     /**
      * 渲染一组工具调用的标签和关键参数。
      *

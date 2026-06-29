@@ -28,6 +28,7 @@ class PaiCliHistoryTest {
         history.add("帮我读取 pom.xml");
         history.add("GLM_API_KEY=secret");
         history.add("Authorization: Bearer abc");
+        history.add("/config provider freellmapi --api-key sk-secret --model auto");
         history.add("@image:data:image/png;base64," + "A".repeat(260));
 
         assertEquals(1, history.size());

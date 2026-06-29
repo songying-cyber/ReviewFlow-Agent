@@ -2,6 +2,7 @@ package com.paicli.util;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminalMarkdownRendererTest {
@@ -84,5 +85,23 @@ class TerminalMarkdownRendererTest {
         assertTrue(rendered.contains("目录名 / 说明"));
         assertTrue(rendered.contains("- src/main/java/com/paicli"));
         assertTrue(rendered.contains("这里存放 PaiCLI 的主要 Java 源码实现与相关模块"));
+    }
+
+    @Test
+    void wrapsWideMultiColumnTableInsideTerminalWidth() {
+        String markdown = """
+                | 特性 | StepFun (Step) | Kimi | GLM | DeepSeek |
+                | --- | --- | --- | --- | --- |
+                | 基础 URL | https://api.stepfun.com/v1 | https://api.moonshot.ai/v1 | 动态选择（glm-5v用多模态API，其他用编码API） | https://api.deepseek.com/chat/completions |
+                | 推理能力 | ✅（需配置 reasoningformat="deepseek-style"） | ✅（需发送推理历史） | ✅ | ✅ |
+                """;
+
+        String rendered = TerminalMarkdownRenderer.render(markdown, 72);
+
+        assertTrue(rendered.contains("| 特性"));
+        assertFalse(rendered.contains("https://api.deepseek.com/chat/completions |"));
+        for (String line : rendered.split("\\R")) {
+            assertTrue(line.length() <= 72, "line exceeds table width: " + line);
+        }
     }
 }

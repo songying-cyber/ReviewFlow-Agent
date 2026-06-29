@@ -66,6 +66,7 @@ public class Agent {
         this.memoryManager = new MemoryManager(llmClient);
         this.historyCompactor = new ConversationHistoryCompactor(llmClient);
         this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
+        this.toolRegistry.setCurrentModel(llmClient.getProviderName(), llmClient.getModelName());
         this.memoryManager.setProjectPath(this.toolRegistry.getProjectPath());
         this.toolRegistry.setScopedMemorySaver(memoryManager::storeFact);
         conversationHistory.add(LlmClient.Message.system(buildSystemPrompt("")));
@@ -76,6 +77,7 @@ public class Agent {
         this.memoryManager.setLlmClient(llmClient);
         this.historyCompactor.setLlmClient(llmClient);
         this.toolRegistry.setContextProfile(memoryManager.getContextProfile());
+        this.toolRegistry.setCurrentModel(llmClient.getProviderName(), llmClient.getModelName());
     }
 
     public void setExternalContextSupplier(Supplier<String> externalContextSupplier) {
@@ -628,12 +630,16 @@ public class Agent {
 
     private String webSearchSummary(ToolExecutionResult result) {
         String text = result.result() == null ? "" : result.result();
+        boolean stepSearch = isStepSearchResult(text);
         if (text.startsWith("搜索失败") || text.startsWith("⚠️") || text.contains("未找到相关结果")) {
             return compactOneLine(text, 120);
         }
         long count = text.lines().filter(line -> line.matches("^\\d+\\.\\s+.*")).count();
         String query = extractJsonArg(result.argumentsJson(), "query");
         String label = query.isBlank() ? "搜索结果" : "搜索 \"" + query + "\"";
+        if (stepSearch) {
+            label = "StepSearch · " + label;
+        }
         return count > 0
                 ? label + " 返回 " + count + " 条结果"
                 : label + " 已返回结果";
@@ -641,10 +647,12 @@ public class Agent {
 
     private String webFetchSummary(ToolExecutionResult result) {
         String text = result.result() == null ? "" : result.result();
+        boolean stepSearch = isStepSearchResult(text);
         String url = extractJsonArg(result.argumentsJson(), "url");
         String target = url.isBlank() ? "页面" : compactOneLine(url.replaceFirst("^https?://", ""), 80);
+        String verb = stepSearch ? "StepSearch · 抓取 " : "抓取 ";
         if (text.startsWith("抓取失败") || text.startsWith("❌")) {
-            return "抓取 " + target + " 失败: " + compactOneLine(text, 100);
+            return verb + target + " 失败: " + compactOneLine(text, 100);
         }
         String title = text.lines()
                 .filter(line -> line.startsWith("📄 标题:"))
@@ -656,12 +664,17 @@ public class Agent {
                 .findFirst()
                 .orElse("");
         if (!title.isBlank() && !length.isBlank()) {
-            return "抓取 " + target + " 完成: " + title + " · " + length.replace("📏 ", "");
+            return verb + target + " 完成: " + title + " · " + length.replace("📏 ", "");
         }
         if (!title.isBlank()) {
-            return "抓取 " + target + " 完成: " + title;
+            return verb + target + " 完成: " + title;
         }
-        return "抓取 " + target + " 完成";
+        return verb + target + " 完成";
+    }
+
+    private boolean isStepSearchResult(String text) {
+        return text != null && text.startsWith("🔍 [StepSearch]")
+                || text != null && text.startsWith("🌐 [StepSearch]");
     }
 
     private String extractJsonArg(String json, String key) {
@@ -822,7 +835,7 @@ public class Agent {
                     return;  // 避免先打印一个空标题，等有完整行或迭代切换时再 flush
                 }
                 printReasoningHeadingIfNeeded();
-                reasoningRenderer = new TerminalMarkdownRenderer(out());
+                reasoningRenderer = newMarkdownRenderer();
                 reasoningRenderer.append(pendingReasoning.toString());
                 pendingReasoning.setLength(0);
                 reasoningStarted = true;
@@ -850,7 +863,7 @@ public class Agent {
                     out().println();
                 } else if (pendingReasoning.length() > 0 && !pendingReasoning.toString().isBlank()) {
                     printReasoningHeadingIfNeeded();
-                    TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(out());
+                    TerminalMarkdownRenderer r = newMarkdownRenderer();
                     r.append(pendingReasoning.toString());
                     r.finish();
                     out().println();
@@ -858,7 +871,7 @@ public class Agent {
                     reasoningStarted = true;
                 }
                 out().print(AnsiStyle.answerMarker() + " ");
-                contentRenderer = new TerminalMarkdownRenderer(out());
+                contentRenderer = newMarkdownRenderer();
                 contentStarted = true;
                 streamedOutput = true;
             }
@@ -888,7 +901,7 @@ public class Agent {
             if (!late.isEmpty()) {
                 out().println();
                 out().println(AnsiStyle.heading("🧠 补充思考"));
-                TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(out());
+                TerminalMarkdownRenderer r = newMarkdownRenderer();
                 r.append(late);
                 r.finish();
                 lateReasoning.setLength(0);
@@ -920,7 +933,7 @@ public class Agent {
             if (!late.isEmpty()) {
                 out().println();
                 out().println(AnsiStyle.heading("🧠 补充思考"));
-                TerminalMarkdownRenderer r = new TerminalMarkdownRenderer(out());
+                TerminalMarkdownRenderer r = newMarkdownRenderer();
                 r.append(late);
                 r.finish();
                 lateReasoning.setLength(0);
@@ -948,11 +961,18 @@ public class Agent {
                 return;
             }
             printReasoningHeadingIfNeeded();
-            TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(out());
+            TerminalMarkdownRenderer renderer = newMarkdownRenderer();
             renderer.append(pending);
             renderer.finish();
             pendingReasoning.setLength(0);
             streamedOutput = true;
+        }
+
+        private TerminalMarkdownRenderer newMarkdownRenderer() {
+            if (renderer != null) {
+                return new TerminalMarkdownRenderer(out(), renderer::terminalColumns);
+            }
+            return new TerminalMarkdownRenderer(out());
         }
 
         private void finishThinkingPanelAndPrintQuote() {

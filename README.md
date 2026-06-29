@@ -15,6 +15,9 @@ mvn test -Pphase16-smoke
 # 常规快速回归，跳过外部进程 / 网络超时 / 命令超时类慢测试
 mvn test -Pquick
 
+# 代码搜索 deterministic golden set
+mvn test -Dtest=CodeSearchGoldenSetTest -DskipTests=false
+
 # 发版或大范围重构前再跑全量
 mvn test -DskipTests=false
 ```
@@ -79,14 +82,15 @@ mvn test -DskipTests=false
 ### 第八期：多模型适配 + 运行时切换
 
 - `LlmClient` 接口抽象 + `AbstractOpenAiCompatibleClient` 模板基类
-- 内置 `GLMClient`、`DeepSeekClient`、`StepClient`、`KimiClient` 四个瘦实现
-- `/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型；`/model deepseek` / `/model step` / `/model kimi` 切 provider 并读取配置里的具体模型
+- 内置 `GLMClient`、`DeepSeekClient`、`StepClient`、`KimiClient`、`FreeLlmApiClient` 五个瘦实现
+- `/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型；`/model deepseek` / `/model step` / `/model kimi` / `/model freellmapi` 切 provider 并读取配置里的具体模型
 - 配置持久化到 `~/.paicli/config.json`，API Key 可从配置、环境变量或 `.env` 读取
 
 ### 第九期：联网能力 + Web 工具
 
 - `web_search` 抽象成 `SearchProvider` 接口，内置三个实现：智谱 Web Search（默认，与 GLM 共用 Key，0.01–0.05 元/次）、SerpAPI（国际通用付费）、SearXNG（开源自托管免费）
 - `web_fetch` 新工具：URL → OkHttp 抓取 → Jsoup 解析 → 简易 readability → Markdown 正文
+- 当当前模型是 `step-3.7-flash*` 且自动/显式 `step_search` 远程 server 已就绪时，内置 `web_search` / `web_fetch` 会优先走 StepSearch MCP；未就绪或调用失败时自动回退到原 provider。
 - 默认安全策略：屏蔽 `file://` / 内网 / loopback；30 秒超时；5MB 响应上限；每分钟 30 次限流
 - 边界明确：SPA / 防爬墙站点会返回空正文 + 已知边界提示，Agent 会 fallback 到浏览器 MCP 路线
 
@@ -94,6 +98,7 @@ mvn test -DskipTests=false
 
 - 新增 `com.paicli.mcp` 模块，支持 stdio 子进程 server 与 Streamable HTTP 远程 server
 - 启动时读取 `~/.paicli/mcp.json` 与 `.paicli/mcp.json`，项目级配置按 server 名覆盖用户级配置
+- MCP `${VAR}` 支持系统环境变量、系统属性、项目 `.env`、用户 `~/.env`；检测到 `STEP_API_KEY` 时自动内置 `step_search` 远程 MCP，显式同名配置优先
 - MCP 工具自动注册为 `mcp__{server}__{tool}`，参数 schema 会清洗 `$ref` / `anyOf` / 超长 description，降低模型调用失败率
 - 所有 MCP 工具默认走 HITL 审批和审计，审计参数会脱敏 token / key / password / Authorization / Bearer 凭证
 - 支持 MCP resources：server 声明 `resources` capability 后，自动注册 `mcp__{server}__list_resources` / `mcp__{server}__read_resource` 虚拟工具
@@ -106,7 +111,7 @@ mvn test -DskipTests=false
 ### 第十二期：长上下文工程
 
 - `LlmClient` 声明模型能力：`maxContextWindow()`、`supportsPromptCaching()`、`promptCacheMode()`
-- GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window，StepFun 默认 256k window，Kimi K2.6 默认 256k window
+- GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window，StepFun 默认 256k window，Kimi K2.6 默认 256k window，FreeLLMAPI 默认按 128k 保守预算
 - `AgentBudget` 按当前模型动态计算预算，默认 `80% * maxContextWindow`，仍可用系统属性覆盖
 - short / balanced / long 三种上下文模式：长上下文模式跳过摘要压缩，语义检索 topK 可提升到 20
 - `search_code` 未显式传 `top_k` 时按上下文模式自适应；默认代码定位仍优先实时 grep/read
@@ -188,7 +193,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 ### 第十九期：Prompt 分层架构（MVP）
 
 - ReAct、Plan task executor、Multi-Agent 三角色、Planner 的 system prompt 已从 Java 硬编码抽离到 `src/main/resources/prompts/`
-- `PromptAssembler` 按 `base -> personality -> mode -> approval -> project_context -> skills -> context_mgmt -> handoff` 组装，动态上下文靠后注入
+- `PromptAssembler` 按 `base -> personality -> mode -> approval -> runtime_context -> project_context -> skills -> context_mgmt -> handoff` 组装；`runtime_context` 注入当前日期/时区，动态项目上下文靠后注入
 - 支持用户级覆盖 `~/.paicli/prompts/...`，支持项目级覆盖 `.paicli/prompts/...`，项目级优先级最高
 - 覆盖是整文件替换；`base.md` 和最终 prompt 必须包含 `## Language`
 - Prompt 改动审计模板见 `docs/prompt-analysis-template.md`
@@ -214,7 +219,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - 用户可通过 `@image:file:///abs/path.png`、`@image:/abs/path.png` 或 `@image:relative/path.png` 引用本地图片
 - 本地图片和 MCP 图片都会按 Claude Code 同类策略预处理：不是 OCR 成文本，而是压缩 / 缩放后作为图片块发送；带 alpha 的 PNG 会铺白底重编码；额外注入来源、尺寸和坐标映射元信息
 - 本地 `@image:` 消息会要求模型优先分析本轮图片；除非用户明确要求结合历史，历史对话和历史工具结果不能替代当前图片内容
-- 新一轮 ReAct / SubAgent 任务开始前会省略历史 image payload，仅保留文本元信息，避免旧截图反复进入上下文；模型 `reasoning_content` 只写日志 / 展示，不回传进下一轮请求历史
+- 新一轮 ReAct / SubAgent 任务开始前会省略历史 image payload，仅保留文本元信息，避免旧截图反复进入上下文；模型 `reasoning_content` 默认只写日志 / 展示，DeepSeek V4 / Kimi thinking tool-call 续轮会按 provider 协议带回上一轮 assistant reasoning
 - 当前边界：不做视频 / 音频、图像生成、TUI sixel 图片预览
 
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
@@ -258,7 +263,7 @@ Tips for getting started:
 - 💬 交互式命令行界面
 - 📝 普通任务和斜杠命令提交后会先把本轮原始输入以 `>` 暗色整行块写回 transcript；输入态仍显示 `* `，单行提交只占一行，不额外追加空白行。普通任务随后再进入 Thinking / 工具调用，避免 dock 刷新或 activity 重绘后用户输入从可见历史里消失
 - 🧠 默认通过流式接口获取模型输出；inline ReAct 用固定高度 live thinking 区动态预览 reasoning，content / tool call 开始前清掉 live 区并把完整 reasoning 引用块落到 transcript，回答正文用低调标记起始；web_search / web_fetch 会在折叠头展示 query / URL，并在执行后输出一行结果摘要
-- 🖥️ 终端会对常见 Markdown（标题、列表、表格、代码块）做渲染后再显示，避免直接暴露原始标记符号
+- 🖥️ 终端会对常见 Markdown（标题、列表、表格、代码块）做渲染后再显示；表格会按当前窗口宽度分配列宽，并在单元格内部换行，避免长 URL / 中文内容把列打散
 
 ### 第二期
 
@@ -304,13 +309,13 @@ Tips for getting started:
 
 ### 第八期
 
-- 🔄 GLM-5.1、GLM-5V-Turbo、DeepSeek V4、阶跃星辰 StepFun 与 Kimi K2.6 多模型，`/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型，`/model deepseek` / `/model step` / `/model kimi` 读取配置模型
+- 🔄 GLM-5.1、GLM-5V-Turbo、DeepSeek V4、阶跃星辰 StepFun、Kimi K2.6 与 FreeLLMAPI 多模型，`/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型，`/model deepseek` / `/model step` / `/model kimi` / `/model freellmapi` 读取配置模型
 - 🧱 `LlmClient` 接口 + 模板方法基类，新增 provider 只需 ~20 行
 - 💾 默认模型持久化到 `~/.paicli/config.json`
 
 ### 第九期
 
-- 🌐 `web_search` 工具支持三条路：智谱 Web Search（与 GLM 共用 Key 默认推荐）、SerpAPI（国际通用付费）、SearXNG（开源自托管免费）
+- 🌐 `web_search` 工具支持四条路：Step 3.7 Flash + StepSearch MCP 优先、智谱 Web Search（与 GLM 共用 Key默认推荐）、SerpAPI（国际通用付费）、SearXNG（开源自托管免费）
 - 📰 `web_fetch` 工具：抓 URL → readability 提取 → 返回 Markdown 正文
 - 🛡️ 内置网络访问策略：屏蔽内网、loopback、`file://`；5MB 响应上限；每分钟 30 次限流
 - 🚧 边界明确：SPA / 防爬墙返回空正文 + 已知边界提示，不重试
@@ -327,7 +332,7 @@ Tips for getting started:
 
 ### 1. 配置 API Key
 
-复制 `.env.example` 为 `.env`，并填入你的 GLM、DeepSeek、StepFun 或 Kimi API Key：
+复制 `.env.example` 为 `.env`，并填入你的 GLM、DeepSeek、StepFun、Kimi 或 FreeLLMAPI API Key：
 
 ```bash
 cp .env.example .env
@@ -344,6 +349,17 @@ export STEP_MODEL=step-3.5-flash
 # 或
 export KIMI_API_KEY=your_kimi_api_key_here
 export KIMI_MODEL=kimi-k2.6
+# 或
+export FREELLMAPI_API_KEY=your_freellmapi_unified_key_here
+export FREELLMAPI_BASE_URL=http://localhost:5173/v1
+export FREELLMAPI_MODEL=auto
+```
+
+也可以在 PaiCLI 内用命令写入 `~/.paicli/config.json`，不会覆盖 Kimi 配置：
+
+```text
+/config provider freellmapi --base-url http://localhost:5173/v1 --api-key <key> --model auto
+/model freellmapi
 ```
 
 长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
@@ -412,12 +428,18 @@ MCP 子系统默认开启。`~/.paicli/mcp.json` 不存在时，PaiCLI 会自动
     "remote-demo": {
       "url": "https://mcp.example.com/v1",
       "headers": {"Authorization": "Bearer ${REMOTE_TOKEN}"}
+    },
+    "step_search": {
+      "url": "https://api.stepfun.com/step_plan/v1/mcp/web_search/mcp",
+      "headers": {"Authorization": "Bearer ${STEP_API_KEY}"}
     }
   }
 }
 ```
 
 `command` 表示 stdio server，`url` 表示 Streamable HTTP server。`${PROJECT_DIR}` / `${HOME}` 是内置变量，其他 `${VAR}` 从环境变量读取；缺失会在启动时直接提示。
+
+`step_search` 是约定名称：如果项目 `.env`、用户 `~/.env` 或系统环境变量里存在 `STEP_API_KEY`，PaiCLI 会自动内置这个远程 MCP；上面的手写配置只用于覆盖默认地址或自定义鉴权。当前模型为 `step-3.7-flash*` 时，内置 `web_search` / `web_fetch` 会优先代理到该 MCP server。
 
 需要复用当前登录态时，Chrome 144+ 推荐打开 `chrome://inspect/#remote-debugging` 并勾选 `Allow remote debugging for this browser instance`。旧版本或需要显式 CDP 端口时，可以启动带远程调试端口和独立 user-data-dir 的 Chrome，并在这个调试 Chrome 中完成登录：
 
@@ -477,7 +499,7 @@ OAuth 和 `sampling/createMessage` 当前未实现；远程 server 需要鉴权�
 # 编译（默认跳过测试）
 mvn clean package
 
-# 运行（需要本地 Ollama 已启动且拉取了 nomic-embed-text）
+# 运行（需要本地 Ollama 已启动且拉取了 nomic-embed-text；grep_code 会优先使用本机 ripgrep，未安装时自动回退）
 java -jar target/paicli-1.0-SNAPSHOT.jar
 ```
 
@@ -572,7 +594,7 @@ I
 - `write_file` - 写入文件内容
 - `list_dir` - 列出目录内容
 - `glob_files` - 按文件名 glob 实时查找项目内文件（只读，自动跳过常见构建/依赖目录）
-- `grep_code` - 按关键字或正则实时搜索项目内代码，返回文件、行号与可选上下文
+- `grep_code` - 按关键字或正则实时搜索项目内代码，优先使用 ripgrep，返回文件、行号、可选上下文、partial 状态与 suggested_reads
 - `execute_command` - 在当前项目目录执行短时 Shell 命令（默认 60 秒超时，黑名单拦截破坏性命令）
 - `create_project` - 创建项目结构（java/python/node）
 - `search_code` - 语义检索代码库（自然语言查询，适合作为模糊语义或常规搜索无果时的辅助）
@@ -700,7 +722,8 @@ src/main/java/com/paicli
 │   ├── GLMClient.java          # GLM API 客户端；glm-5.1 走 Coding endpoint，glm-5v-turbo 走多模态 endpoint
 │   ├── DeepSeekClient.java     # DeepSeek API 客户端
 │   ├── StepClient.java         # 阶跃星辰 StepFun API 客户端
-│   └── KimiClient.java         # Kimi / Moonshot API 客户端
+│   ├── KimiClient.java         # Kimi / Moonshot API 客户端
+│   └── FreeLlmApiClient.java   # 本地 FreeLLMAPI OpenAI-compatible 网关客户端
 ├── context/
 │   ├── ContextMode.java        # short / balanced / long 模式
 │   ├── ContextProfile.java     # 模型窗口与上下文策略

@@ -76,6 +76,25 @@ class LlmClientFactoryTest {
     }
 
     @Test
+    void createsFreeLlmApiClientFromConfiguredProvider() {
+        PaiCliConfig config = new PaiCliConfig();
+        config.setProviders(new LinkedHashMap<>());
+        config.getProviders().put("freellmapi",
+                new PaiCliConfig.ProviderConfig(
+                        "test-free-key",
+                        "http://localhost:5173/v1",
+                        "auto"));
+
+        LlmClient client = LlmClientFactory.create("free-llm-api", config);
+
+        FreeLlmApiClient freeClient = assertInstanceOf(FreeLlmApiClient.class, client);
+        assertEquals("freellmapi", freeClient.getProviderName());
+        assertEquals("auto", freeClient.getModelName());
+        assertEquals("http://localhost:5173/v1/chat/completions", freeClient.getApiUrl());
+        assertEquals(128_000, freeClient.maxContextWindow());
+    }
+
+    @Test
     void returnsNullForUnknownProvider() {
         PaiCliConfig config = new PaiCliConfig();
         config.getProviders().put("unknown", new PaiCliConfig.ProviderConfig("test-key", null, "unknown-model"));

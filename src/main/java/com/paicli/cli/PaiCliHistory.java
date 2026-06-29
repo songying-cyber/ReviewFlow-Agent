@@ -10,6 +10,8 @@ final class PaiCliHistory extends DefaultHistory {
     private static final int MAX_HISTORY_LINE_LENGTH = 8_000;
     private static final Pattern SECRET_ASSIGNMENT = Pattern.compile(
             "(?i).*(api[_-]?key|authorization|bearer|password|passwd|secret|token)\\s*[:=].*");
+    private static final Pattern SECRET_FLAG = Pattern.compile(
+            "(?i).*(--?(api[_-]?key|authorization|password|passwd|secret|token)\\b|\\bbearer\\b).*");
     private static final Pattern BASE64_IMAGE = Pattern.compile(
             "(?i).*(data:image/|@image:data:|[A-Za-z0-9+/]{240,}={0,2}).*");
 
@@ -29,7 +31,9 @@ final class PaiCliHistory extends DefaultHistory {
         if (trimmed.isEmpty() || trimmed.length() > MAX_HISTORY_LINE_LENGTH) {
             return true;
         }
-        if (SECRET_ASSIGNMENT.matcher(trimmed).matches() || BASE64_IMAGE.matcher(trimmed).matches()) {
+        if (SECRET_ASSIGNMENT.matcher(trimmed).matches()
+                || SECRET_FLAG.matcher(trimmed).matches()
+                || BASE64_IMAGE.matcher(trimmed).matches()) {
             return true;
         }
         String lower = trimmed.toLowerCase(Locale.ROOT);

@@ -1,5 +1,7 @@
 package com.paicli.prompt;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -27,6 +29,7 @@ public class PromptAssembler {
         append(prompt, repository.loadRequired("personalities/calm.md"));
         append(prompt, applyVariables(repository.loadRequired(mode.resourcePath()), ctx));
         append(prompt, repository.loadRequired("approvals/" + approvalMode(ctx) + ".md"));
+        append(prompt, runtimeContext());
         append(prompt, dynamicSection("Project Context", ctx.memoryContext(), ctx.externalContext()));
         append(prompt, dynamicSection("Skills", ctx.skillIndex()));
         append(prompt, repository.loadRequired("context/context-management.md"));
@@ -47,6 +50,13 @@ public class PromptAssembler {
             case "auto", "never" -> normalized;
             default -> "suggest";
         };
+    }
+
+    private static String runtimeContext() {
+        ZoneId zone = ZoneId.systemDefault();
+        return "## Runtime Context\n\n"
+                + "- 当前日期: " + LocalDate.now(zone) + "\n"
+                + "- 当前时区: " + zone;
     }
 
     private static String applyVariables(String template, PromptContext context) {

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "unknown-slash-command",
+    "question": "未识别的 /xxx 命令在哪里直接报未知命令，而不是交给 Agent？",
+    "pattern": "未知命令",
+    "glob": "**/Main.java",
+    "expectedPath": "src/main/java/com/paicli/cli/Main.java",
+    "expectedText": "ui.println(\"❌ 未知命令: \" + command.payload())"
+  },
+  {
+    "id": "parallel-tool-execution",
+    "question": "三条执行路径共享的并行工具入口在哪里？",
+    "pattern": "executeTools",
+    "glob": "**/ToolRegistry.java",
+    "expectedPath": "src/main/java/com/paicli/tool/ToolRegistry.java",
+    "expectedText": "public List<ToolExecutionResult> executeTools"
+  },
+  {
+    "id": "image-reference-parser",
+    "question": "@image: 本地图片引用是在哪里解析成多模态消息的？",
+    "pattern": "class ImageReferenceParser",
+    "glob": "**/ImageReferenceParser.java",
+    "expectedPath": "src/main/java/com/paicli/image/ImageReferenceParser.java",
+    "expectedText": "public class ImageReferenceParser"
+  },
+  {
+    "id": "plan-review-escape",
+    "question": "Plan 审阅里 ESC 取消是哪个解析器处理的？",
+    "pattern": "DecisionType.CANCEL",
+    "glob": "**/PlanReviewInputParser.java",
+    "expectedPath": "src/main/java/com/paicli/cli/PlanReviewInputParser.java",
+    "expectedText": "DecisionType.CANCEL"
+  },
+  {
+    "id": "grep-code-tool-registration",
+    "question": "grep_code 工具在哪里注册，参数 schema 在哪里维护？",
+    "pattern": "grep_code",
+    "glob": "**/ToolRegistry.java",
+    "expectedPath": "src/main/java/com/paicli/tool/ToolRegistry.java",
+    "expectedText": "tools.put(\"grep_code\""
+  }
+]

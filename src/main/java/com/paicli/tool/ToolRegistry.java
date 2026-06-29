@@ -49,6 +49,7 @@ import java.util.concurrent.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.Locale;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -64,7 +65,12 @@ public class ToolRegistry {
     private static final int MAX_READ_FILE_LINES = 2_000;
     private static final int MAX_GREP_RESULTS = 200;
     private static final int MAX_GREP_CONTEXT_LINES = 5;
-    private static final long MAX_SEARCH_FILE_BYTES = 2 * 1024 * 1024;
+    private static final int DEFAULT_GREP_MAX_CHARS = 24_000;
+    private static final int MAX_GREP_MAX_CHARS = 60_000;
+    private static final int DEFAULT_GREP_HEAD_LIMIT = 20;
+    private static final String STEP_SEARCH_SERVER = "step_search";
+    private static final String STEP_SEARCH_TOOL = "mcp__" + STEP_SEARCH_SERVER + "__web_search";
+    private static final String STEP_FETCH_TOOL = "mcp__" + STEP_SEARCH_SERVER + "__web_fetch";
     private static final Set<String> SEARCH_EXCLUDED_DIRS = Set.of(
             ".git", ".paicli", "target", "node_modules", "dist", "build", "coverage", ".idea", ".gradle"
     );
@@ -95,6 +101,8 @@ public class ToolRegistry {
     private LspManager lspManager = new LspManager(projectPath);
     private SnapshotService snapshotService = SnapshotService.forProject(Path.of(projectPath));
     private boolean customSnapshotService;
+    private volatile String currentProvider = "";
+    private volatile String currentModel = "";
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -147,6 +155,11 @@ public class ToolRegistry {
 
     public ContextProfile getContextProfile() {
         return contextProfile;
+    }
+
+    public void setCurrentModel(String provider, String model) {
+        this.currentProvider = provider == null ? "" : provider.trim().toLowerCase(Locale.ROOT);
+        this.currentModel = model == null ? "" : model.trim().toLowerCase(Locale.ROOT);
     }
 
     public void setBrowserGuard(BrowserGuard browserGuard) {
@@ -318,7 +331,7 @@ public class ToolRegistry {
 
         tools.put("grep_code", new Tool(
                 "grep_code",
-                "在项目内按关键字或正则实时搜索代码（只读、返回文件和行号）；适合精确符号/字符串定位，找到后再 read_file 读取上下文",
+                "在项目内按关键字或正则实时搜索代码（只读、优先 ripgrep、返回文件和行号）；适合精确符号/字符串定位，找到后再 read_file 读取上下文",
                 createParameters(
                         new Param("pattern", "string", "要搜索的关键字或正则", true),
                         new Param("path", "string", "搜索起始目录，默认 .", false),
@@ -326,7 +339,9 @@ public class ToolRegistry {
                         new Param("regex", "boolean", "是否按 Java 正则解释 pattern，默认 false 表示字面量搜索", false),
                         new Param("case_sensitive", "boolean", "是否大小写敏感，默认 true", false),
                         new Param("context_lines", "integer", "每条命中前后上下文行数，默认 0，上限 5", false),
-                        new Param("max_results", "integer", "最多返回命中数，默认 50，上限 200", false)
+                        new Param("max_results", "integer", "最多返回命中数，默认 50，上限 200", false),
+                        new Param("head_limit", "integer", "单个文件最多返回多少条命中，默认 20，上限 50", false),
+                        new Param("max_chars", "integer", "单次工具结果字符预算，默认 24000，上限 60000", false)
                 ),
                 args -> grepCode(args)
         ));
@@ -416,94 +431,83 @@ public class ToolRegistry {
         int contextLines = clamp(parseInt(args.get("context_lines"), 0), 0, MAX_GREP_CONTEXT_LINES);
         boolean regex = parseBoolean(args.get("regex"), false);
         boolean caseSensitive = parseBoolean(args.get("case_sensitive"), true);
-        PathMatcher globMatcher = null;
-        PathMatcher fileNameGlobMatcher = null;
-        if (args.get("glob") != null && !args.get("glob").isBlank()) {
-            globMatcher = projectRoot.getFileSystem().getPathMatcher("glob:" + normalizeGlob(args.get("glob")));
-            fileNameGlobMatcher = projectRoot.getFileSystem().getPathMatcher("glob:" + normalizeFileNameGlob(args.get("glob")));
-        }
+        int headLimit = clamp(parseInt(args.get("head_limit"), DEFAULT_GREP_HEAD_LIMIT), 1, 50);
+        int maxChars = clamp(parseInt(args.get("max_chars"), DEFAULT_GREP_MAX_CHARS), 1_000, MAX_GREP_MAX_CHARS);
+        CodeSearchRequest request = new CodeSearchRequest(
+                query,
+                root,
+                projectRoot,
+                args.get("glob"),
+                regex,
+                caseSensitive,
+                contextLines,
+                maxResults,
+                headLimit
+        );
+        CodeSearchResult result = new RipgrepCodeSearchEngine(SEARCH_EXCLUDED_DIRS).search(request);
 
-        Pattern contentPattern;
-        try {
-            int flags = caseSensitive ? 0 : Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
-            contentPattern = Pattern.compile(regex ? query : Pattern.quote(query), flags);
-        } catch (PatternSyntaxException e) {
-            return "代码搜索失败: 正则表达式无效: " + e.getMessage();
+        if (!result.partialReason().isBlank() && result.matches().isEmpty()) {
+            return "代码搜索失败: " + result.partialReason();
         }
-
-        List<GrepMatch> matches = new ArrayList<>();
-        PathMatcher finalGlobMatcher = globMatcher;
-        PathMatcher finalFileNameGlobMatcher = fileNameGlobMatcher;
-        try {
-            Files.walkFileTree(root, new SearchFileVisitor(projectRoot, path -> {
-                if (matches.size() >= maxResults || !Files.isRegularFile(path)) {
-                    return;
-                }
-                Path relative = projectRoot.relativize(path);
-                if (finalGlobMatcher != null
-                        && !finalGlobMatcher.matches(relative)
-                        && !finalFileNameGlobMatcher.matches(path.getFileName())) {
-                    return;
-                }
-                collectMatches(path, relative, contentPattern, contextLines, maxResults, matches);
-            }));
-        } catch (Exception e) {
-            return "代码搜索失败: " + e.getMessage();
-        }
-
-        if (matches.isEmpty()) {
+        if (result.matches().isEmpty()) {
             return "未找到匹配内容: " + query;
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("匹配结果 ").append(matches.size()).append(" 条");
-        if (matches.size() >= maxResults) {
-            sb.append("（已达到上限 ").append(maxResults).append("）");
+        sb.append("匹配结果 ").append(result.matches().size()).append(" 条")
+                .append(" (engine=").append(result.engine()).append(")");
+        if (result.partial()) {
+            sb.append("（partial: ").append(result.partialReason()).append("）");
         }
         sb.append(":\n");
-        for (int i = 0; i < matches.size(); i++) {
-            GrepMatch match = matches.get(i);
+        boolean truncatedByChars = false;
+        int rendered = 0;
+        for (int i = 0; i < result.matches().size(); i++) {
+            GrepMatch match = result.matches().get(i);
+            String matchHeader = (i + 1) + ". " + match.file() + ":" + match.lineNumber() + "\n";
+            if (sb.length() + matchHeader.length() > maxChars) {
+                truncatedByChars = true;
+                break;
+            }
             sb.append(i + 1).append(". ").append(match.file()).append(":").append(match.lineNumber()).append("\n");
             for (ContextLine line : match.context()) {
                 String marker = line.lineNumber() == match.lineNumber() ? ">" : " ";
-                sb.append(String.format("   %s%5d | %s%n", marker, line.lineNumber(), line.text()));
+                String contextLine = String.format("   %s%5d | %s%n", marker, line.lineNumber(), line.text());
+                if (sb.length() + contextLine.length() > maxChars) {
+                    truncatedByChars = true;
+                    break;
+                }
+                sb.append(contextLine);
+            }
+            rendered++;
+            if (truncatedByChars) {
+                break;
             }
         }
+        if (truncatedByChars) {
+            sb.append("\npartial: true（已达到 max_chars=").append(maxChars).append("，请缩小 path/glob/pattern 或提高 offset 后 read_file）");
+        } else if (result.partial()) {
+            sb.append("\npartial: true（").append(result.partialReason()).append("，请缩小 path/glob/pattern 继续搜索）");
+        }
+        appendSuggestedReads(sb, result.matches().subList(0, Math.min(rendered, result.matches().size())));
         return sb.toString().trim();
     }
 
-    private void collectMatches(Path file, Path relative, Pattern contentPattern, int contextLines,
-                                int maxResults, List<GrepMatch> matches) {
-        try {
-            if (Files.size(file) > MAX_SEARCH_FILE_BYTES || isLikelyBinary(file)) {
-                return;
-            }
-            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-            for (int i = 0; i < lines.size() && matches.size() < maxResults; i++) {
-                String line = lines.get(i);
-                if (contentPattern.matcher(line).find()) {
-                    int from = Math.max(0, i - contextLines);
-                    int to = Math.min(lines.size() - 1, i + contextLines);
-                    List<ContextLine> context = new ArrayList<>();
-                    for (int j = from; j <= to; j++) {
-                        context.add(new ContextLine(j + 1, lines.get(j)));
-                    }
-                    matches.add(new GrepMatch(relative.toString(), i + 1, context));
-                }
-            }
-        } catch (Exception ignored) {
-            // 编码不支持、权限异常或短暂文件变化时跳过该文件，保持搜索路径 fail-soft。
+    private void appendSuggestedReads(StringBuilder sb, List<GrepMatch> matches) {
+        if (matches.isEmpty()) {
+            return;
         }
-    }
-
-    private boolean isLikelyBinary(Path file) throws IOException {
-        byte[] bytes = Files.readAllBytes(file);
-        int sample = Math.min(bytes.length, 4096);
-        for (int i = 0; i < sample; i++) {
-            if (bytes[i] == 0) {
-                return true;
+        sb.append("\nsuggested_reads:");
+        Set<String> seen = new LinkedHashSet<>();
+        for (GrepMatch match : matches) {
+            if (seen.size() >= 3 || !seen.add(match.file())) {
+                continue;
             }
+            int offset = Math.max(1, match.lineNumber() - 20);
+            sb.append("\n- read_file {\"path\":\"")
+                    .append(match.file().replace("\\", "\\\\").replace("\"", "\\\""))
+                    .append("\",\"offset\":").append(offset)
+                    .append(",\"limit\":80}");
         }
-        return false;
     }
 
     /**
@@ -812,10 +816,6 @@ public class ToolRegistry {
         }
     }
 
-    private record ContextLine(int lineNumber, String text) {}
-
-    private record GrepMatch(String file, int lineNumber, List<ContextLine> context) {}
-
     private synchronized SearchProvider searchProvider() {
         if (searchProvider == null) {
             searchProvider = SearchProviderFactory.create();
@@ -847,6 +847,16 @@ public class ToolRegistry {
     String webSearch(String query, int topK) {
         if (query == null || query.isBlank()) {
             return "搜索关键词不能为空";
+        }
+        if (shouldPreferStepSearch() && tools.containsKey(STEP_SEARCH_TOOL)) {
+            ObjectNode args = mapper.createObjectNode();
+            args.put("query", query.trim());
+            putIfStepToolAccepts(STEP_SEARCH_TOOL, args, topK,
+                    "top_k", "topK", "max_results", "num_results", "limit", "count");
+            ToolOutput output = executeToolOutput(STEP_SEARCH_TOOL, args.toString());
+            if (isUsableMcpOutput(output)) {
+                return "🔍 [StepSearch] " + query.trim() + "\n\n" + output.text().trim();
+            }
         }
         SearchProvider provider = searchProvider();
         if (!provider.isReady()) {
@@ -910,6 +920,16 @@ public class ToolRegistry {
         if (rateReason != null) {
             return "❌ " + rateReason;
         }
+        if (shouldPreferStepSearch() && tools.containsKey(STEP_FETCH_TOOL)) {
+            ObjectNode args = mapper.createObjectNode();
+            args.put("url", url.trim());
+            putIfStepToolAccepts(STEP_FETCH_TOOL, args, maxChars,
+                    "max_chars", "maxChars", "limit", "max_length", "maxLength");
+            ToolOutput output = executeToolOutput(STEP_FETCH_TOOL, args.toString());
+            if (isUsableMcpOutput(output)) {
+                return "🌐 [StepSearch] 抓取: " + url.trim() + "\n\n" + output.text().trim();
+            }
+        }
 
         try {
             WebFetcher.RawResponse raw = webFetcher().fetch(url.trim());
@@ -926,6 +946,39 @@ public class ToolRegistry {
         } catch (Exception e) {
             return "抓取失败: " + e.getMessage();
         }
+    }
+
+    private boolean shouldPreferStepSearch() {
+        return "step".equals(currentProvider) && currentModel.startsWith("step-3.7-flash");
+    }
+
+    private void putIfStepToolAccepts(String toolName, ObjectNode args, int value, String... names) {
+        if (value <= 0 || names == null || names.length == 0) {
+            return;
+        }
+        McpRegisteredTool tool = mcpTools.get(toolName);
+        JsonNode properties = tool == null ? null : tool.descriptor().inputSchema().path("properties");
+        if (properties == null || !properties.isObject()) {
+            return;
+        }
+        for (String name : names) {
+            if (properties.has(name)) {
+                args.put(name, value);
+                return;
+            }
+        }
+    }
+
+    private boolean isUsableMcpOutput(ToolOutput output) {
+        if (output == null || output.text() == null || output.text().isBlank()) {
+            return false;
+        }
+        String text = output.text().trim();
+        return !text.startsWith("[HITL]")
+                && !text.startsWith("🛡️")
+                && !text.startsWith("工具执行失败")
+                && !text.startsWith("未知工具")
+                && !text.startsWith("MCP 工具返回错误");
     }
 
     private String formatFetchResult(FetchResult result) {

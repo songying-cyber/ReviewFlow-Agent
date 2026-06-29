@@ -57,6 +57,7 @@ public class SubAgent {
         this.role = role;
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
+        this.toolRegistry.setCurrentModel(llmClient.getProviderName(), llmClient.getModelName());
         this.conversationHistory = new ArrayList<>();
         this.historyCompactor = new ConversationHistoryCompactor(llmClient);
         this.conversationHistory.add(LlmClient.Message.system(getSystemPrompt()));

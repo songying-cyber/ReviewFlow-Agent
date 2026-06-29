@@ -25,7 +25,6 @@ class McpConfigLoaderTest {
         McpConfigLoader loader = new McpConfigLoader(user, project, tempDir);
         Map<String, McpServerConfig> configs = loader.load();
 
-        assertEquals(1, configs.size());
         // 项目级配置覆盖用户级
         assertEquals("mcp-server-git", configs.get("git").getArgs().get(0));
         // load 不展开 ${VAR}：展开延迟到 prepare()，单 server 错误才能被隔离
@@ -46,6 +45,54 @@ class McpConfigLoaderTest {
 
         assertEquals(tempDir.toAbsolutePath().normalize().toString(), fs.getArgs().get(2));
         assertEquals(System.getProperty("user.home"), fs.getArgs().get(3));
+    }
+
+    @Test
+    void prepareExpandsVariablesFromProjectDotEnv(@TempDir Path tempDir) throws Exception {
+        Path user = tempDir.resolve("user-mcp.json");
+        Files.writeString(user, """
+                {"mcpServers":{"remote":{"url":"https://example.com","headers":{"Authorization":"Bearer ${LOCAL_TEST_TOKEN}"}}}}
+                """);
+        Files.writeString(tempDir.resolve(".env"), "LOCAL_TEST_TOKEN=from_dotenv\n");
+
+        McpConfigLoader loader = new McpConfigLoader(user, tempDir.resolve("missing.json"), tempDir);
+        Map<String, McpServerConfig> configs = loader.load();
+        McpServerConfig remote = configs.get("remote");
+        loader.prepare(remote);
+
+        assertEquals("Bearer from_dotenv", remote.getHeaders().get("Authorization"));
+    }
+
+    @Test
+    void loadAddsBuiltInStepSearchWhenStepApiKeyExistsInProjectDotEnv(@TempDir Path tempDir) throws Exception {
+        Path user = tempDir.resolve("user-mcp.json");
+        Files.writeString(user, """
+                {"mcpServers":{"fs":{"command":"npx","args":["-y","server"]}}}
+                """);
+        Files.writeString(tempDir.resolve(".env"), "STEP_API_KEY=test-step-key\n");
+
+        McpConfigLoader loader = new McpConfigLoader(user, tempDir.resolve("missing.json"), tempDir);
+        Map<String, McpServerConfig> configs = loader.load();
+
+        assertTrue(configs.containsKey("step_search"));
+        assertEquals("https://api.stepfun.com/step_plan/v1/mcp/web_search/mcp",
+                configs.get("step_search").getUrl());
+        assertEquals("Bearer test-step-key", configs.get("step_search").getHeaders().get("Authorization"));
+    }
+
+    @Test
+    void loadDoesNotOverrideExplicitStepSearchConfig(@TempDir Path tempDir) throws Exception {
+        Path user = tempDir.resolve("user-mcp.json");
+        Files.writeString(user, """
+                {"mcpServers":{"step_search":{"url":"https://example.com/custom","headers":{"Authorization":"Bearer custom"}}}}
+                """);
+        Files.writeString(tempDir.resolve(".env"), "STEP_API_KEY=test-step-key\n");
+
+        McpConfigLoader loader = new McpConfigLoader(user, tempDir.resolve("missing.json"), tempDir);
+        Map<String, McpServerConfig> configs = loader.load();
+
+        assertEquals("https://example.com/custom", configs.get("step_search").getUrl());
+        assertEquals("Bearer custom", configs.get("step_search").getHeaders().get("Authorization"));
     }
 
     @Test
