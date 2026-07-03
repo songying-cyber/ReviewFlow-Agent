@@ -18,7 +18,7 @@ class BottomStatusBarTest {
 
     @Test
     void formatStatusLineIncludesAllFields() {
-        StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1000L, 234L, 100L, "¥0.0123",
+        StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1200L, 1000L, 234L, 100L, "¥0.0123",
                 true, 1500L, "running");
         String line = BottomStatusBar.formatFooterLine(info, 200);
         assertTrue(line.contains("Auto Model"), line);
@@ -31,6 +31,18 @@ class BottomStatusBarTest {
         assertTrue(line.contains("cache 100"), line);
         assertTrue(line.contains("¥0.0123"), line);
         assertTrue(line.contains("1.5s"), line);
+    }
+
+    @Test
+    void contextSegmentUsesContextTokensNotUsageTotals() {
+        StatusInfo info = StatusInfo.tokens("glm-5.1", 200_000L, 1200L, 51_000L, 2_000L, 0L,
+                null, false, 0L, "idle");
+        String line = BottomStatusBar.formatFooterLine(info, 200);
+
+        assertTrue(line.contains("ctx"), line);
+        assertTrue(line.contains("1.2k/200.0k"), line);
+        assertTrue(line.contains("in 51.0k out 2.0k"), line);
+        assertFalse(line.contains("53.0k/200.0k"), line);
     }
 
     @Test

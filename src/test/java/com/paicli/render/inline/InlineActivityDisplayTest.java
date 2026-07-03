@@ -24,7 +24,7 @@ class InlineActivityDisplayTest {
         BottomStatusBar statusBar = new BottomStatusBar(terminal,
                 new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
         statusBar.start();
-        statusBar.update(StatusInfo.tokens("glm-5.1", 200_000L, 1234L, 567L, 0L,
+        statusBar.update(StatusInfo.tokens("glm-5.1", 200_000L, 1234L, 1234L, 567L, 0L,
                 null, false, 3200L, "thinking"));
 
         try (InlineActivityDisplay display = new InlineActivityDisplay(terminal,

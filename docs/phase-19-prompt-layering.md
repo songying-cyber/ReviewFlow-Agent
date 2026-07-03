@@ -63,14 +63,16 @@ base
 personality
 mode
 approval
+runtime_context
 project_context
 skills
 context_mgmt
 handoff
 ```
 
-其中 `project_context` 和 `skills` 是运行期动态段：
+其中 `runtime_context`、`project_context` 和 `skills` 是运行期动态段：
 
+- 当前日期 / 系统时区
 - `memoryContext`
 - `externalContext`（例如 MCP resource index）
 - `skillIndex`

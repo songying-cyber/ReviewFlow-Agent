@@ -25,6 +25,9 @@ class PromptAssemblerTest {
                 .build());
 
         assertTrue(prompt.contains("## Language"));
+        assertTrue(prompt.contains("## Runtime Context"));
+        assertTrue(prompt.contains("当前日期"));
+        assertTrue(prompt.contains("只要 `web_search` 在工具列表中，就不要声称无法实时搜索"));
         assertTrue(prompt.contains("## Mode: ReAct Agent"));
         assertTrue(prompt.contains("用户偏好中文"));
         assertTrue(prompt.contains("demo://resource"));

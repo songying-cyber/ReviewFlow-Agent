@@ -43,12 +43,24 @@ public record StatusInfo(
         return new StatusInfo(model, 0L, contextWindow, 0L, 0L, 0L, null, hitlEnabled, 0L, "idle");
     }
 
+    public static StatusInfo idle(String model, long contextWindow, long contextTokens, boolean hitlEnabled) {
+        return new StatusInfo(model, Math.max(0L, contextTokens), contextWindow, 0L, 0L, 0L, null,
+                hitlEnabled, 0L, "idle");
+    }
+
     public static StatusInfo active(String model, long contextWindow, boolean hitlEnabled, String phase) {
         return new StatusInfo(model, 0L, contextWindow, 0L, 0L, 0L, null, hitlEnabled, 0L, phase);
     }
 
+    public static StatusInfo active(String model, long contextWindow, long contextTokens,
+                                    boolean hitlEnabled, String phase) {
+        return new StatusInfo(model, Math.max(0L, contextTokens), contextWindow, 0L, 0L, 0L, null,
+                hitlEnabled, 0L, phase);
+    }
+
     public static StatusInfo tokens(String model,
                                     long contextWindow,
+                                    long contextTokens,
                                     long inputTokens,
                                     long outputTokens,
                                     long cachedInputTokens,
@@ -56,10 +68,9 @@ public record StatusInfo(
                                     boolean hitlEnabled,
                                     long elapsedMillis,
                                     String phase) {
-        long total = Math.max(0L, inputTokens) + Math.max(0L, outputTokens);
         return new StatusInfo(
                 model,
-                total,
+                Math.max(0L, contextTokens),
                 contextWindow,
                 Math.max(0L, inputTokens),
                 Math.max(0L, outputTokens),

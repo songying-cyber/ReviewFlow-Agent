@@ -186,7 +186,6 @@ public class Agent {
                 }
 
                 budget.recordTokens(response.inputTokens(), response.outputTokens(), response.cachedInputTokens());
-                pushStatus(budget, startNanos, "running");
 
                 // 如果有工具调用
                 if (response.hasToolCalls()) {
@@ -212,6 +211,7 @@ public class Agent {
                         conversationHistory.add(LlmClient.Message.tool(toolResult.id(), toolResult.result()));
                     }
                     appendImageToolMessages(toolResults);
+                    pushStatus(budget, startNanos, "running");
 
                     // 继续循环，让 LLM 根据工具结果继续思考
                     continue;
@@ -255,12 +255,27 @@ public class Agent {
      * 清空对话历史（保留系统提示），不影响长期记忆
      */
     public void clearHistory() {
-        LlmClient.Message systemMsg = conversationHistory.get(0);
         conversationHistory.clear();
-        conversationHistory.add(systemMsg);
+        conversationHistory.add(LlmClient.Message.system(buildSystemPrompt("")));
 
         // 清空短期记忆
         memoryManager.clearShortTerm();
+        if (skillContextBuffer != null) {
+            skillContextBuffer.clear();
+        }
+    }
+
+    /** 当前状态栏快照：ctx 表示下一轮请求仍会携带的上下文估算，不含累计 in/out 用量。 */
+    public StatusInfo currentStatus(String phase) {
+        String normalizedPhase = phase == null || phase.isBlank() ? "idle" : phase;
+        String model = llmClient == null ? "—" : llmClient.getModelName();
+        long contextWindow = llmClient == null ? 0L : llmClient.maxContextWindow();
+        boolean hitl = Boolean.TRUE.equals(hitlEnabledSupplier.get());
+        long contextTokens = estimateCurrentContextTokens();
+        if ("idle".equals(normalizedPhase)) {
+            return StatusInfo.idle(model, contextWindow, contextTokens, hitl);
+        }
+        return StatusInfo.active(model, contextWindow, contextTokens, hitl, normalizedPhase);
     }
 
     /**
@@ -441,6 +456,11 @@ public class Agent {
         }
     }
 
+    private long estimateCurrentContextTokens() {
+        long messageTokens = com.paicli.memory.TokenBudget.estimateMessagesTokens(conversationHistory);
+        return Math.max(0L, messageTokens + estimateToolsSchemaTokens());
+    }
+
     private void logRequestContext(String scope, List<LlmClient.Tool> tools) {
         if (!log.isInfoEnabled()) {
             return;
@@ -569,6 +589,7 @@ public class Agent {
             renderer().updateStatus(StatusInfo.tokens(
                     model,
                     contextWindow,
+                    estimateCurrentContextTokens(),
                     budget == null ? 0L : budget.totalInputTokens(),
                     budget == null ? 0L : budget.totalOutputTokens(),
                     budget == null ? 0L : budget.totalCachedInputTokens(),
