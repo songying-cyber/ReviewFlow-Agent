@@ -91,6 +91,7 @@ mvn test -DskipTests=false
 - `web_search` 抽象成 `SearchProvider` 接口，内置三个实现：智谱 Web Search（默认，与 GLM 共用 Key，0.01–0.05 元/次）、SerpAPI（国际通用付费）、SearXNG（开源自托管免费）
 - `web_fetch` 新工具：URL → OkHttp 抓取 → Jsoup 解析 → 简易 readability → Markdown 正文
 - 当当前模型是 `step-3.7-flash*` 且自动/显式 `step_search` 远程 server 已就绪时，内置 `web_search` / `web_fetch` 会优先走 StepSearch MCP；未就绪或调用失败时自动回退到原 provider。
+- ReAct 对“最新/当前/今天/今年/2026/趋势/新闻/版本”等时效性问题会先做一次 `web_search` 预检并注入本轮上下文，避免模型在工具可用时误说无法实时搜索；用户明确不要联网时跳过。
 - 默认安全策略：屏蔽 `file://` / 内网 / loopback；30 秒超时；5MB 响应上限；每分钟 30 次限流
 - 边界明确：SPA / 防爬墙站点会返回空正文 + 已知边界提示，Agent 会 fallback 到浏览器 MCP 路线
 
@@ -160,7 +161,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 | 形态 | 启用方式 | 视觉风格 |
 |---|---|---|
-| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、JLine `Status` 托管的底部 dock（YOLO/HITL、MCP、Skill、model、ctx、token、cwd）、右侧输入提示、行内可折叠工具块（`Read 3 files (ctrl+o to expand)`）、行内 git diff、HITL 单字符 `[y/n/a/s/m]` 提示 |
+| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、JLine `Status` 托管的底部 dock（YOLO/HITL、MCP、Skill、model、ctx、token、cwd；ctx 是当前上下文估算，in/out/cache 是调用统计）、右侧输入提示、行内可折叠工具块（`Read 3 files (ctrl+o to expand)`）、行内 git diff、HITL 单字符 `[y/n/a/s/m]` 提示 |
 | **lanterna 全屏 TUI** | `PAICLI_RENDERER=lanterna`（或兼容旧 `PAICLI_TUI=true`） | v16 三栏全屏：文件树 + 对话流 + 状态栏 + 底部输入栏，HITL 模态弹窗 |
 | **plain 兜底** | `PAICLI_RENDERER=plain` | 纯 println，无折叠 / 状态栏，等价 v15 行为 |
 
@@ -641,7 +642,7 @@ I
 - `/index [路径]` - 索引代码库（默认当前目录）
 - `/search <查询>` - 语义检索代码（RAG 辅助路径）
 - `/graph <类名>` - 查看代码关系图谱
-- `/clear` - 清空对话历史
+- `/clear` - 清空当前对话历史、短期记忆、待注入 Skill 上下文和上一轮检索记忆注入；长期记忆保留
 - `/exit` / `/quit` - 退出程序
 
 ## 运行效果
