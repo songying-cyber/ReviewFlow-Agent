@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ppt",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "http-server", "ppt", "-p", "8742", "-c-1"],
+      "port": 8742
+    }
+  ]
+}

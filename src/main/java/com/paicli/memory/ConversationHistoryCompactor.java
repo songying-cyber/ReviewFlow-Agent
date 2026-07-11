@@ -75,9 +75,23 @@ public class ConversationHistoryCompactor {
      * @return 是否真的压缩了
      */
     public boolean compactIfNeeded(List<LlmClient.Message> history, int triggerTokens) {
+        return compact(history, triggerTokens, false, retainRecentRounds);
+    }
+
+    /**
+     * 手动压缩 history，跳过 token 阈值判断，但仍保留最近轮次和 user 边界切割保护。
+     *
+     * @param history Agent 主循环的 conversationHistory，调用结束后可能被替换为更短列表
+     * @return 是否真的压缩了
+     */
+    public boolean compactNow(List<LlmClient.Message> history) {
+        return compact(history, 0, true, 1);
+    }
+
+    private boolean compact(List<LlmClient.Message> history, int triggerTokens, boolean force, int retainRounds) {
         if (history == null || history.isEmpty()) return false;
         int currentTokens = TokenBudget.estimateMessagesTokens(history);
-        if (currentTokens < triggerTokens) return false;
+        if (!force && currentTokens < triggerTokens) return false;
 
         int systemEnd = "system".equals(history.get(0).role()) ? 1 : 0;
 
@@ -87,13 +101,14 @@ public class ConversationHistoryCompactor {
                 userIndices.add(i);
             }
         }
-        if (userIndices.size() <= retainRecentRounds) {
+        int effectiveRetainRounds = Math.max(1, retainRounds);
+        if (userIndices.size() <= effectiveRetainRounds) {
             log.info("compactIfNeeded skip: only {} user turns, < retain {}",
-                    userIndices.size(), retainRecentRounds);
+                    userIndices.size(), effectiveRetainRounds);
             return false;
         }
 
-        int splitIdx = userIndices.get(userIndices.size() - retainRecentRounds);
+        int splitIdx = userIndices.get(userIndices.size() - effectiveRetainRounds);
         if (splitIdx <= systemEnd) return false;
 
         List<LlmClient.Message> oldMsgs = new ArrayList<>(history.subList(systemEnd, splitIdx));

@@ -22,15 +22,22 @@ public class PromptAssembler {
         PromptContext ctx = context == null ? PromptContext.empty() : context;
 
         String base = repository.loadRequired("base.md");
+        if (!ctx.toolsEnabled()) {
+            base = stripToolSections(base);
+        }
         validateLanguageSection(base, "base.md");
 
         StringBuilder prompt = new StringBuilder();
         append(prompt, base);
+        if (!ctx.toolsEnabled()) {
+            append(prompt, noToolsSection());
+        }
         append(prompt, repository.loadRequired("personalities/calm.md"));
         append(prompt, applyVariables(repository.loadRequired(mode.resourcePath()), ctx));
         append(prompt, repository.loadRequired("approvals/" + approvalMode(ctx) + ".md"));
         append(prompt, runtimeContext());
-        append(prompt, dynamicSection("Project Context", ctx.memoryContext(), ctx.externalContext()));
+        append(prompt, dynamicSection("Project Context", ctx.projectMemoryContext(), ctx.memoryContext(),
+                ctx.externalContext()));
         append(prompt, dynamicSection("Skills", ctx.skillIndex()));
         append(prompt, repository.loadRequired("context/context-management.md"));
         append(prompt, repository.loadRequired("handoff.md"));
@@ -83,6 +90,21 @@ public class PromptAssembler {
             return "";
         }
         return "## " + title + "\n\n" + body;
+    }
+
+    private static String stripToolSections(String base) {
+        String withoutTools = base.replaceFirst("(?s)\\n## Tools\\n.*?(?=\\n## Browser Policy\\n)", "\n");
+        return withoutTools.replaceFirst("(?s)\\n## Tool Policy\\n.*?(?=\\n## Browser Policy\\n)", "\n");
+    }
+
+    private static String noToolsSection() {
+        return """
+                ## Tool Availability
+
+                当前模型不支持 PaiCLI 原生工具调用。本轮不要声称已经读取、搜索、执行或修改了任何本地文件、命令、浏览器、MCP resource 或外部工具结果。
+
+                绝对不要输出伪造的工具标签或 XML，例如 `<toolcall>`、`<read_file>`、`<list_dir>`。如果用户请求必须依赖本地文件、代码搜索、命令执行或联网工具，请直接说明当前 provider 不支持工具调用，并提示切换到支持 tools 的 provider 后重试。
+                """;
     }
 
     private static void append(StringBuilder sb, String section) {

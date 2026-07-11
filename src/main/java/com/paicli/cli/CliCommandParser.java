@@ -5,9 +5,11 @@ final class CliCommandParser {
     enum CommandType {
         NONE,
         UNKNOWN_COMMAND,
+        INIT_PROJECT_MEMORY,
         CANCEL,
         EXIT,
         CLEAR,
+        COMPACT,
         HISTORY_CLEAR,
         SWITCH_MODEL,
         SWITCH_PLAN,
@@ -41,7 +43,8 @@ final class CliCommandParser {
         SKILL_ON,
         SKILL_OFF,
         SKILL_RELOAD,
-        CONFIG
+        CONFIG,
+        EXPORT
     }
 
     record ParsedCommand(CommandType type, String payload) {
@@ -78,8 +81,20 @@ final class CliCommandParser {
             return new ParsedCommand(CommandType.CLEAR, null);
         }
 
+        if (trimmed.equalsIgnoreCase("/compact")) {
+            return new ParsedCommand(CommandType.COMPACT, null);
+        }
+
         if (trimmed.equalsIgnoreCase("/history clear")) {
             return new ParsedCommand(CommandType.HISTORY_CLEAR, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/init")) {
+            return new ParsedCommand(CommandType.INIT_PROJECT_MEMORY, null);
+        }
+
+        if (trimmed.regionMatches(true, 0, "/init ", 0, 6)) {
+            return new ParsedCommand(CommandType.INIT_PROJECT_MEMORY, trimmed.substring(6).trim());
         }
 
         if (trimmed.equalsIgnoreCase("/model")) {
@@ -252,6 +267,10 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/skill off ", 0, 11)) {
             return new ParsedCommand(CommandType.SKILL_OFF, trimmed.substring(11).trim());
+        }
+
+        if (trimmed.equalsIgnoreCase("/export")) {
+            return new ParsedCommand(CommandType.EXPORT, null);
         }
 
         if (trimmed.equalsIgnoreCase("/mcp")) {

@@ -1,9 +1,17 @@
 package com.paicli.llm;
 
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+
+import java.util.List;
+
 public class DeepSeekClient extends AbstractOpenAiCompatibleClient {
 
     private static final String API_URL = "https://api.deepseek.com/chat/completions";
     private static final String DEFAULT_MODEL = "deepseek-v4-flash";
+    private static final OkHttpClient HTTP_1_1_CLIENT = SHARED_HTTP_CLIENT.newBuilder()
+            .protocols(List.of(Protocol.HTTP_1_1))
+            .build();
     private final String apiKey;
     private final String model;
     private final String apiUrl;
@@ -40,6 +48,11 @@ public class DeepSeekClient extends AbstractOpenAiCompatibleClient {
     @Override
     protected boolean shouldSendReasoningContentInRequestHistory() {
         return true;
+    }
+
+    @Override
+    protected OkHttpClient httpClient() {
+        return HTTP_1_1_CLIENT;
     }
 
     @Override

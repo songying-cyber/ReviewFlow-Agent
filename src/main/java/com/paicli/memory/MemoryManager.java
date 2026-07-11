@@ -188,7 +188,7 @@ public class MemoryManager {
      * @return 是否执行了压缩
      */
     public boolean compressIfNeeded() {
-        // 压缩永远可触发，模式概念已删除。触发条件仅看占用率是否到达 ContextProfile 配置的阈值（默认 90%）。
+        // 压缩永远可触发，模式概念已删除。触发条件仅看占用率是否到达 ContextProfile 配置的自动压缩阈值。
         if (!tokenBudget.needsCompression(shortTermMemory, contextProfile.compressionTriggerRatio())) {
             return false;
         }

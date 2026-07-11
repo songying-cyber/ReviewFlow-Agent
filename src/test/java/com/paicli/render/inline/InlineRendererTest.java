@@ -195,6 +195,38 @@ class InlineRendererTest {
     }
 
     @Test
+    void activityPanelOmitsCancelHintForNonCancelableWork() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        Mockito.doAnswer(invocation -> {
+            writer.flush();
+            return null;
+        }).when(terminal).flush();
+
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.beginActivity("Compacting conversation", "正在整理早期对话并生成摘要");
+
+            String rendered = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(renderer.supportsActivityPanel());
+            assertTrue(rendered.contains("Compacting conversation"), rendered);
+            assertTrue(rendered.contains("▰"), rendered);
+            assertTrue(rendered.contains("▱"), rendered);
+            assertTrue(rendered.contains("%"), rendered);
+            assertFalse(rendered.contains("正在整理早期对话"), rendered);
+            assertFalse(rendered.contains("esc to cancel"), rendered);
+        } finally {
+            renderer.endActivity();
+            renderer.close();
+        }
+    }
+
+    @Test
     void toggleLastBlockRedrawsTranscriptAroundToolBlock() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");

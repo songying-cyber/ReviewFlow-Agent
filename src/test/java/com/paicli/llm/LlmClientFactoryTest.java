@@ -95,6 +95,27 @@ class LlmClientFactoryTest {
     }
 
     @Test
+    void createsXfyunMaaSClientFromAliasAndConfiguredProvider() {
+        PaiCliConfig config = new PaiCliConfig();
+        config.setProviders(new LinkedHashMap<>());
+        config.getProviders().put("xfyun",
+                new PaiCliConfig.ProviderConfig(
+                        "test-xfyun-key",
+                        "https://maas-api.cn-huabei-1.xf-yun.com/v2",
+                        "Qwen3.6-35B-A3B"));
+        config.getProviders().get("xfyun").setLoraId("0");
+
+        LlmClient client = LlmClientFactory.create("maas", config);
+
+        XfyunMaaSClient xfyunClient = assertInstanceOf(XfyunMaaSClient.class, client);
+        assertEquals("xfyun", xfyunClient.getProviderName());
+        assertEquals("Qwen3.6-35B-A3B", xfyunClient.getModelName());
+        assertEquals("https://maas-api.cn-huabei-1.xf-yun.com/v2/chat/completions", xfyunClient.getApiUrl());
+        assertEquals(128_000, xfyunClient.maxContextWindow());
+        assertEquals(false, xfyunClient.supportsTools());
+    }
+
+    @Test
     void returnsNullForUnknownProvider() {
         PaiCliConfig config = new PaiCliConfig();
         config.getProviders().put("unknown", new PaiCliConfig.ProviderConfig("test-key", null, "unknown-model"));

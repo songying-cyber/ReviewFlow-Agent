@@ -5,9 +5,11 @@ import java.util.Map;
 
 public record PromptContext(
         String approvalMode,
+        String projectMemoryContext,
         String memoryContext,
         String externalContext,
         String skillIndex,
+        boolean toolsEnabled,
         Map<String, String> variables
 ) {
     public static Builder builder() {
@@ -27,15 +29,22 @@ public record PromptContext(
 
     public static final class Builder {
         private String approvalMode = "suggest";
+        private String projectMemoryContext = "";
         private String memoryContext = "";
         private String externalContext = "";
         private String skillIndex = "";
+        private boolean toolsEnabled = true;
         private final Map<String, String> variables = new LinkedHashMap<>();
 
         public Builder approvalMode(String approvalMode) {
             if (approvalMode != null && !approvalMode.isBlank()) {
                 this.approvalMode = approvalMode.trim();
             }
+            return this;
+        }
+
+        public Builder projectMemoryContext(String projectMemoryContext) {
+            this.projectMemoryContext = normalize(projectMemoryContext);
             return this;
         }
 
@@ -54,6 +63,11 @@ public record PromptContext(
             return this;
         }
 
+        public Builder toolsEnabled(boolean toolsEnabled) {
+            this.toolsEnabled = toolsEnabled;
+            return this;
+        }
+
         public Builder variable(String key, Object value) {
             if (key != null && !key.isBlank() && value != null) {
                 this.variables.put(key.trim(), String.valueOf(value));
@@ -62,7 +76,8 @@ public record PromptContext(
         }
 
         public PromptContext build() {
-            return new PromptContext(approvalMode, memoryContext, externalContext, skillIndex, Map.copyOf(variables));
+            return new PromptContext(approvalMode, projectMemoryContext, memoryContext, externalContext,
+                    skillIndex, toolsEnabled, Map.copyOf(variables));
         }
 
         private static String normalize(String value) {

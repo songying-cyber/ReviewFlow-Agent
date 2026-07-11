@@ -72,6 +72,8 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -203,7 +205,7 @@ public class Main {
         LlmClient llmClient = LlmClientFactory.createFromConfig(config);
         if (llmClient == null) {
             System.err.println("❌ 错误: 未找到可用的 API Key");
-            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY、KIMI_API_KEY 或 FREELLMAPI_API_KEY");
+            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY、KIMI_API_KEY、FREELLMAPI_API_KEY 或 XFYUN_MAAS_API_KEY");
             System.exit(1);
         }
         AtomicReference<LlmClient> llmClientRef = new AtomicReference<>(llmClient);
@@ -405,9 +407,60 @@ public class Main {
                         ui.println("🗑️ 当前对话历史已清空，长期记忆保持不变\n");
                         continue;
                     }
+                    case COMPACT -> {
+                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "compacting"));
+                        boolean activityPanel = renderer.supportsActivityPanel();
+                        if (activityPanel) {
+                            renderer.beginActivity("Compacting conversation", "正在整理早期对话并生成摘要");
+                        } else {
+                            ui.println("⏳ 压缩中，等一下下哦...\n");
+                        }
+                        Agent.CompactionResult result;
+                        try {
+                            result = reactAgent.compactHistoryNow();
+                        } finally {
+                            if (activityPanel) {
+                                renderer.endActivity();
+                            }
+                            renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
+                        }
+                        if (result.error() != null && !result.error().isBlank()) {
+                            ui.println("❌ 手动压缩失败: " + result.error() + "\n");
+                        } else if (result.compacted()) {
+                            ui.printf("📦 已手动压缩历史上下文: %,d -> %,d tokens%n%n",
+                                    result.beforeTokens(), result.afterTokens());
+                        } else {
+                            ui.println("📭 当前没有需要压缩的历史上下文\n");
+                        }
+                        continue;
+                    }
                     case HISTORY_CLEAR -> {
                         clearLineReaderHistory(lineReader);
                         ui.println("🧹 输入历史已清空\n");
+                        continue;
+                    }
+                    case INIT_PROJECT_MEMORY -> {
+                        String payload = command.payload();
+                        boolean force = payload != null && payload.trim().equalsIgnoreCase("--force");
+                        if (payload != null && !payload.isBlank() && !force) {
+                            ui.println("❌ 未知 /init 参数: " + payload);
+                            ui.println("   用法: /init 或 /init --force\n");
+                            continue;
+                        }
+                        try {
+                            ProjectMemoryInitializer.InitResult result = ProjectMemoryInitializer.initialize(
+                                    Path.of(reactAgent.getToolRegistry().getProjectPath()), force);
+                            if (result.written()) {
+                                ui.println("✅ " + result.message());
+                                ui.println("   路径: " + result.path());
+                                ui.println("   这份 PAI.md 会在后续 system prompt 的 Project Context 中注入。\n");
+                            } else {
+                                ui.println("ℹ️ " + result.message());
+                                ui.println("   路径: " + result.path() + "\n");
+                            }
+                        } catch (IOException e) {
+                            ui.println("❌ 生成 PAI.md 失败: " + e.getMessage() + "\n");
+                        }
                         continue;
                     }
                     case CONTEXT_STATUS -> {
@@ -499,7 +552,8 @@ public class Main {
                             ui.println("   /model deepseek      - 切换到 DeepSeek（读取配置模型）");
                             ui.println("   /model step          - 切换到 StepFun（读取配置模型）");
                             ui.println("   /model kimi          - 切换到 Kimi（读取配置模型）");
-                            ui.println("   /model freellmapi    - 切换到本地 FreeLLMAPI（读取配置模型）\n");
+                            ui.println("   /model freellmapi    - 切换到本地 FreeLLMAPI（读取配置模型）");
+                            ui.println("   /model xfyun         - 切换到讯飞星辰 MaaS（读取配置模型）\n");
                         } else {
                             ModelSelection target = resolveModelSelection(selection);
                             if (target.explicitModel()) {
@@ -635,6 +689,10 @@ public class Main {
                         ui.println(SkillCommandHandler.startupSummary(skillRegistry));
                         ui.println("✅ 下一轮 LLM 调用生效");
                         renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
+                        continue;
+                    }
+                    case EXPORT -> {
+                        handleExportCommand(ui, reactAgent);
                         continue;
                     }
                     case INDEX_CODE -> {
@@ -1297,7 +1355,9 @@ public class Main {
                 new SlashCommandHint("/model step", "/model step", "切换到 StepFun（读取配置模型）"),
                 new SlashCommandHint("/model kimi", "/model kimi", "切换到 Kimi（读取配置模型）"),
                 new SlashCommandHint("/model freellmapi", "/model freellmapi", "切换到本地 FreeLLMAPI（读取配置模型）"),
+                new SlashCommandHint("/model xfyun", "/model xfyun", "切换到讯飞星辰 MaaS（读取配置模型）"),
                 new SlashCommandHint("/config provider freellmapi ", "/config provider freellmapi <选项>", "配置本地 FreeLLMAPI provider"),
+                new SlashCommandHint("/config provider xfyun ", "/config provider xfyun <选项>", "配置讯飞星辰 MaaS provider"),
                 new SlashCommandHint("/plan", "/plan", "下一条任务使用 Plan-and-Execute 模式"),
                 new SlashCommandHint("/plan ", "/plan <任务内容>", "直接用计划模式执行这条任务"),
                 new SlashCommandHint("/team", "/team", "下一条任务使用 Multi-Agent 协作模式"),
@@ -1335,6 +1395,9 @@ public class Main {
                 new SlashCommandHint("/search ", "/search <查询>", "语义检索代码（RAG 辅助）"),
                 new SlashCommandHint("/graph ", "/graph <类名>", "查看代码关系图谱"),
                 new SlashCommandHint("/clear", "/clear", "清空当前对话历史"),
+                new SlashCommandHint("/compact", "/compact", "手动压缩当前对话历史"),
+                new SlashCommandHint("/init", "/init", "生成项目级记忆 PAI.md"),
+                new SlashCommandHint("/init --force", "/init --force", "重写项目级记忆 PAI.md"),
                 new SlashCommandHint("/history clear", "/history clear", "清空本机输入历史"),
                 new SlashCommandHint("/context", "/context", "查看上下文和记忆状态"),
                 new SlashCommandHint("/memory", "/memory", "查看记忆状态"),
@@ -1349,6 +1412,7 @@ public class Main {
                 new SlashCommandHint("/skill on ", "/skill on <name>", "启用 skill"),
                 new SlashCommandHint("/skill off ", "/skill off <name>", "禁用 skill"),
                 new SlashCommandHint("/skill reload", "/skill reload", "重新扫描 skill 目录"),
+                new SlashCommandHint("/export", "/export", "导出当前会话对话记录为 Markdown"),
                 new SlashCommandHint("/exit", "/exit", "退出 PaiCLI"),
                 new SlashCommandHint("/quit", "/quit", "退出 PaiCLI")
         );
@@ -1461,7 +1525,7 @@ public class Main {
             return;
         }
         String hint = switch (selected) {
-            case 0, 1 -> "💡 GLM: /model glm-5.1 / /model glm-5v-turbo；其它: /model deepseek|step|kimi|freellmapi 读取配置模型";
+            case 0, 1 -> "💡 GLM: /model glm-5.1 / /model glm-5v-turbo；其它: /model deepseek|step|kimi|freellmapi|xfyun 读取配置模型";
             case 2 -> "💡 切换 HITL: /hitl on / /hitl off";
             case 3 -> "💡 管理 Skill: /skill list / /skill on <name> / /skill off <name>";
             case 4 -> "💡 切换渲染器（重启后生效）: PAICLI_RENDERER=inline|lanterna|plain";
@@ -1487,6 +1551,9 @@ public class Main {
         if (update.model() != null) {
             providerConfig.setModel(update.model());
         }
+        if (update.loraId() != null) {
+            providerConfig.setLoraId(update.loraId());
+        }
         if (update.setDefault()) {
             config.setDefaultProvider(update.provider());
         }
@@ -1499,6 +1566,10 @@ public class Main {
         out.append("   baseUrl: ").append(providerConfig.getBaseUrl() == null || providerConfig.getBaseUrl().isBlank()
                 ? "(默认)" : providerConfig.getBaseUrl()).append('\n');
         out.append("   apiKey: ").append(maskSecret(providerConfig.getApiKey())).append('\n');
+        if ("xfyun".equals(update.provider())) {
+            out.append("   loraId: ").append(providerConfig.getLoraId() == null || providerConfig.getLoraId().isBlank()
+                    ? "(未配置)" : providerConfig.getLoraId()).append('\n');
+        }
         if (update.setDefault()) {
             out.append("   默认 provider 已设为 ").append(update.provider()).append('\n');
         }
@@ -1520,6 +1591,7 @@ public class Main {
         String apiKey = null;
         String baseUrl = null;
         String model = null;
+        String loraId = null;
         boolean setDefault = false;
         for (int i = 2; i < args.size(); i++) {
             String token = args.get(i);
@@ -1546,16 +1618,21 @@ public class Main {
                 case "api-key" -> apiKey = value;
                 case "base-url" -> baseUrl = value;
                 case "model" -> model = value;
+                case "lora-id" -> loraId = value;
                 default -> {
                     return ProviderConfigUpdate.error("未知配置项: " + key);
                 }
             }
         }
 
-        if (apiKey == null && baseUrl == null && model == null && !setDefault) {
+        if (loraId != null && !"xfyun".equals(provider)) {
+            return ProviderConfigUpdate.error("--lora-id 仅支持 xfyun provider");
+        }
+
+        if (apiKey == null && baseUrl == null && model == null && loraId == null && !setDefault) {
             return ProviderConfigUpdate.error("至少提供一个配置项");
         }
-        return new ProviderConfigUpdate(provider, apiKey, baseUrl, model, setDefault, null);
+        return new ProviderConfigUpdate(provider, apiKey, baseUrl, model, loraId, setDefault, null);
     }
 
     private static String providerConfigUsage() {
@@ -1563,7 +1640,10 @@ public class Main {
                 用法:
                   /config provider freellmapi --base-url http://localhost:5173/v1 --api-key <key> --model auto
                   /config provider freellmapi --model qwen/qwen3-coder:free --default
+                  /config provider xfyun --base-url https://maas-api.cn-huabei-1.xf-yun.com/v2 --api-key <key> --model Qwen3.6-35B-A3B --default
+                  /config provider xfyun --lora-id <resourceId>
                   /model freellmapi
+                  /model xfyun
                 """.stripTrailing();
     }
 
@@ -1611,6 +1691,7 @@ public class Main {
         return switch (key) {
             case "apikey", "api_key", "key" -> "api-key";
             case "baseurl", "base_url", "url" -> "base-url";
+            case "loraid", "lora_id", "resourceid", "resource_id" -> "lora-id";
             default -> key;
         };
     }
@@ -1621,12 +1702,13 @@ public class Main {
             case "stepfun", "step-fun" -> "step";
             case "moonshot", "moonshotai", "moonshot-ai" -> "kimi";
             case "free-llm-api", "free_llm_api", "freellm", "free-llm" -> "freellmapi";
+            case "xfyun-maas", "xfyun_maas", "iflytek", "iflytek-maas", "iflytek_maas", "maas" -> "xfyun";
             default -> provider;
         };
     }
 
     private static boolean isSupportedProvider(String provider) {
-        return List.of("glm", "deepseek", "step", "kimi", "freellmapi").contains(provider);
+        return List.of("glm", "deepseek", "step", "kimi", "freellmapi", "xfyun").contains(provider);
     }
 
     private static String maskSecret(String value) {
@@ -1716,6 +1798,155 @@ public class Main {
             return;
         }
         lineReader.getBuffer().clear();
+    }
+
+    private static void handleExportCommand(PrintStream out, Agent reactAgent) {
+        List<LlmClient.Message> history = reactAgent.getConversationHistory();
+        if (!hasExportableMessages(history)) {
+            out.println("📭 当前没有对话记录可导出\n");
+            return;
+        }
+
+        Path exportsDir = Path.of(System.getProperty("user.home"), ".paicli", "exports");
+        try {
+            Files.createDirectories(exportsDir);
+        } catch (IOException e) {
+            out.println("❌ 创建导出目录失败: " + e.getMessage() + "\n");
+            return;
+        }
+
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"));
+        Path exportFile = exportsDir.resolve("session-" + timestamp + ".md");
+
+        String markdown = renderConversationExport(history, LocalDateTime.now());
+
+        try {
+            Files.writeString(exportFile, markdown);
+            out.println("✅ 对话记录已导出: " + exportFile.toAbsolutePath());
+            out.println("   共 " + countExportedMessages(history) + " 条消息\n");
+        } catch (IOException e) {
+            out.println("❌ 写入导出文件失败: " + e.getMessage() + "\n");
+        }
+    }
+
+    static boolean hasExportableMessages(List<LlmClient.Message> history) {
+        return history != null && history.stream()
+                .anyMatch(msg -> msg != null);
+    }
+
+    static long countExportedMessages(List<LlmClient.Message> history) {
+        if (history == null) {
+            return 0;
+        }
+        return history.stream()
+                .filter(msg -> msg != null)
+                .count();
+    }
+
+    static String renderConversationExport(List<LlmClient.Message> history, LocalDateTime exportedAt) {
+        StringBuilder md = new StringBuilder();
+        md.append("# PaiCLI 会话导出\n\n");
+        md.append("**导出时间**: ").append(exportedAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))).append("\n\n");
+        md.append("---\n\n");
+
+        for (int i = 0; i < history.size(); i++) {
+            LlmClient.Message msg = history.get(i);
+            if (msg == null) {
+                continue;
+            }
+            String role = msg.role();
+
+            md.append("## ").append(capitalizeRole(role)).append("\n\n");
+
+            // reasoning content
+            if (msg.reasoningContent() != null && !msg.reasoningContent().isBlank()) {
+                md.append("> **思考过程**:\n> \n");
+                for (String line : msg.reasoningContent().replace("\r\n", "\n").split("\n")) {
+                    md.append("> ").append(line).append("\n");
+                }
+                md.append("\n");
+            }
+
+            // tool calls
+            if (msg.toolCalls() != null && !msg.toolCalls().isEmpty()) {
+                md.append("**工具调用**:\n\n");
+                for (LlmClient.ToolCall tc : msg.toolCalls()) {
+                    String toolName = tc.function() != null ? tc.function().name() : "unknown";
+                    String toolArgs = tc.function() != null ? tc.function().arguments() : "{}";
+                    md.append("- **").append(toolName).append("**:\n");
+                    appendFencedBlock(md, formatJsonArg(toolArgs), "json", "  ");
+                    md.append("\n");
+                }
+            }
+
+            // content
+            if (msg.content() != null && !msg.content().isBlank()) {
+                if ("tool".equals(role)) {
+                    String content = msg.content();
+                    if (content.length() > 8000) {
+                        content = content.substring(0, 8000) + "\n... (已截断，原始长度 " + msg.content().length() + " 字符)";
+                    }
+                    appendFencedBlock(md, content, "", "");
+                    md.append("\n");
+                } else {
+                    md.append(msg.content()).append("\n\n");
+                }
+            }
+        }
+        return md.toString();
+    }
+
+    private static void appendFencedBlock(StringBuilder md, String content, String info, String indent) {
+        String fence = markdownFenceFor(content);
+        md.append(indent).append(fence);
+        if (info != null && !info.isBlank()) {
+            md.append(info);
+        }
+        md.append('\n');
+        String normalized = content == null ? "" : content.replace("\r\n", "\n").replace('\r', '\n');
+        for (String line : normalized.split("\n", -1)) {
+            md.append(indent).append(line).append('\n');
+        }
+        md.append(indent).append(fence).append("\n");
+    }
+
+    static String markdownFenceFor(String content) {
+        int longest = 0;
+        int current = 0;
+        String text = content == null ? "" : content;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == '`') {
+                current++;
+                longest = Math.max(longest, current);
+            } else {
+                current = 0;
+            }
+        }
+        return "`".repeat(Math.max(3, longest + 1));
+    }
+
+    private static String capitalizeRole(String role) {
+        return switch (role) {
+            case "user" -> "User";
+            case "assistant" -> "Assistant";
+            case "tool" -> "Tool Result";
+            case "system" -> "System";
+            default -> role.substring(0, 1).toUpperCase() + role.substring(1);
+        };
+    }
+
+    private static String formatJsonArg(String json) {
+        if (json == null || json.isBlank()) {
+            return "{}";
+        }
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(
+                            new com.fasterxml.jackson.databind.ObjectMapper().readTree(json));
+        } catch (Exception e) {
+            return json;
+        }
     }
 
     private static void printPolicyStatus(PrintStream out, Agent reactAgent) {
@@ -2344,6 +2575,8 @@ public class Main {
             case "kimi", "moonshot", "moonshotai", "moonshot-ai" -> new ModelSelection("kimi", null, false);
             case "freellmapi", "free-llm-api", "free_llm_api", "freellm", "free-llm" ->
                     new ModelSelection("freellmapi", null, false);
+            case "xfyun", "xfyun-maas", "xfyun_maas", "iflytek", "iflytek-maas", "iflytek_maas", "maas" ->
+                    new ModelSelection("xfyun", null, false);
             default -> {
                 if (normalized.startsWith("glm-")) {
                     yield new ModelSelection("glm", value, true);
@@ -2500,10 +2733,10 @@ public class Main {
     record ModelSelection(String provider, String model, boolean explicitModel) {
     }
 
-    record ProviderConfigUpdate(String provider, String apiKey, String baseUrl, String model,
+    record ProviderConfigUpdate(String provider, String apiKey, String baseUrl, String model, String loraId,
                                 boolean setDefault, String error) {
         static ProviderConfigUpdate error(String error) {
-            return new ProviderConfigUpdate(null, null, null, null, false, error);
+            return new ProviderConfigUpdate(null, null, null, null, null, false, error);
         }
     }
 

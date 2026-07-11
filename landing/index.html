@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PaiCLI — Java Agent CLI</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>π</text></svg>">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: "PingFang SC", -apple-system, "system-ui", "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei", sans-serif;
+  background: #fcfaf8;
+  color: #26251e;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+
+/* ═══════════════════════════════════════════
+   NAV
+   ═══════════════════════════════════════════ */
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 48px;
+  height: 64px;
+  background: rgba(252,250,248,0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  transition: box-shadow 0.3s;
+}
+
+.nav.scrolled { box-shadow: 0 1px 12px rgba(0,0,0,0.06); }
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.nav-pi {
+  font-family: "Georgia", "Times New Roman", serif;
+  font-size: 1.6rem;
+  font-style: italic;
+  color: #b8860b;
+  line-height: 1;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.nav-links a {
+  font-size: 0.9rem;
+  color: #666;
+  transition: color 0.2s;
+}
+
+.nav-links a:hover { color: #26251e; }
+
+.nav-cta {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 1px solid #26251e;
+  color: #26251e;
+  transition: all 0.2s;
+}
+
+.nav-cta:hover {
+  background: #26251e;
+  color: #fcfaf8;
+}
+
+/* ═══════════════════════════════════════════
+   HERO
+   ═══════════════════════════════════════════ */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 120px 24px 80px;
+  text-align: center;
+  position: relative;
+}
+
+.hero-title {
+  font-size: clamp(3rem, 7vw, 5.5rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  margin-bottom: 24px;
+}
+
+.hero-title .pi {
+  font-family: "Georgia", "Times New Roman", serif;
+  font-style: italic;
+  color: #b8860b;
+}
+
+.hero-subtitle {
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  color: #666;
+  max-width: 560px;
+  margin: 0 auto 40px;
+  font-weight: 400;
+  line-height: 1.8;
+}
+
+/* Install command */
+.install-cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 24px;
+  background: #f5f3f0;
+  border: 1px solid #e8e5e0;
+  border-radius: 10px;
+  font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  color: #26251e;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: all;
+}
+
+.install-cmd:hover {
+  border-color: #ccc;
+  background: #efece8;
+}
+
+.install-prefix {
+  color: #999;
+  user-select: none;
+}
+
+.install-copy {
+  font-size: 0.78rem;
+  color: #999;
+  border-left: 1px solid #ddd;
+  padding-left: 12px;
+  user-select: none;
+  transition: color 0.2s;
+}
+
+.install-copy.copied { color: #2d8a4e; }
+
+/* Links */
+.hero-links {
+  display: flex;
+  gap: 16px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.hero-link {
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: 1px solid #d9d5ce;
+  color: #26251e;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hero-link:hover {
+  border-color: #26251e;
+  background: #26251e;
+  color: #fcfaf8;
+}
+
+.hero-link svg { width: 16px; height: 16px; }
+
+/* ═══════════════════════════════════════════
+   SECTION COMMON
+   ═══════════════════════════════════════════ */
+.section {
+  padding: 100px 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.section-center { text-align: center; }
+
+.section-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #999;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin-bottom: 16px;
+}
+
+.section-desc {
+  font-size: 1.05rem;
+  color: #666;
+  max-width: 520px;
+  line-height: 1.8;
+}
+
+.section-center .section-desc { margin: 0 auto; }
+
+/* ═══════════════════════════════════════════
+   FEATURES
+   ═══════════════════════════════════════════ */
+.features {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  background: #ebe8e3;
+  border: 1px solid #ebe8e3;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-top: 48px;
+}
+
+.feature {
+  padding: 40px 36px;
+  background: #fcfaf8;
+  transition: background 0.2s;
+}
+
+.feature:hover { background: #f8f6f2; }
+
+.feature-icon {
+  font-size: 1.5rem;
+  margin-bottom: 16px;
+}
+
+.feature-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+
+.feature-desc {
+  font-size: 0.92rem;
+  color: #777;
+  line-height: 1.7;
+}
+
+/* ═══════════════════════════════════════════
+   MODES
+   ═══════════════════════════════════════════ */
+.modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  background: #ebe8e3;
+  border: 1px solid #ebe8e3;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-top: 48px;
+}
+
+.mode {
+  padding: 40px 32px;
+  background: #fcfaf8;
+  transition: background 0.2s;
+}
+
+.mode:hover { background: #f8f6f2; }
+
+.mode-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.mode-badge.default { background: #e8f5e9; color: #2d7a3a; }
+.mode-badge.advanced { background: #e8eaf6; color: #3f51b5; }
+.mode-badge.collab { background: #fce4ec; color: #c62828; }
+
+.mode-name {
+  font-size: 1.3rem;
+  font-weight: 800;
+  margin-bottom: 12px;
+  letter-spacing: -0.01em;
+}
+
+.mode-desc {
+  font-size: 0.92rem;
+  color: #777;
+  line-height: 1.7;
+  margin-bottom: 20px;
+}
+
+.mode-cmd {
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  padding: 8px 14px;
+  background: #f5f3f0;
+  border-radius: 6px;
+  color: #555;
+  display: inline-block;
+}
+
+/* ═══════════════════════════════════════════
+   MODELS
+   ═══════════════════════════════════════════ */
+.models {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 40px;
+}
+
+.model-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 10px;
+  border: 1px solid #e8e5e0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.2s;
+  background: #fff;
+}
+
+.model-chip:hover {
+  border-color: #ccc;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.model-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.model-dot.glm { background: #5c6bc0; }
+.model-dot.ds { background: #26a69a; }
+.model-dot.step { background: #ec407a; }
+.model-dot.kimi { background: #ffa726; }
+.model-dot.free { background: #66bb6a; }
+
+.model-cmd {
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: #999;
+  margin-left: 4px;
+}
+
+/* ═══════════════════════════════════════════
+   TERMINAL DEMO
+   ═══════════════════════════════════════════ */
+.terminal {
+  max-width: 900px;
+  width: 100%;
+  margin: 48px auto 0;
+  background: #1a1a1a;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.15);
+}
+
+.terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: #2a2a2a;
+}
+
+.terminal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.terminal-dot.r { background: #ff5f57; }
+.terminal-dot.y { background: #febc2e; }
+.terminal-dot.g { background: #28c840; }
+
+.terminal-body {
+  padding: 24px 32px;
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.8;
+  color: #e0e0e0;
+  min-height: 220px;
+}
+
+.t-pi { color: #d4a74a; font-weight: 700; }
+.t-dim { color: #777; }
+.t-green { color: #4caf50; }
+.t-blue { color: #64b5f6; }
+.t-prompt { color: #81c784; }
+.t-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  background: #81c784;
+  animation: blink 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ═══════════════════════════════════════════
+   SAFETY
+   ═══════════════════════════════════════════ */
+.safety-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  background: #ebe8e3;
+  border: 1px solid #ebe8e3;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-top: 48px;
+}
+
+.safety {
+  padding: 32px 24px;
+  background: #fcfaf8;
+  transition: background 0.2s;
+}
+
+.safety:hover { background: #f8f6f2; }
+
+.safety-icon { font-size: 1.5rem; margin-bottom: 12px; }
+
+.safety-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.safety-desc {
+  font-size: 0.85rem;
+  color: #777;
+  line-height: 1.6;
+}
+
+/* ═══════════════════════════════════════════
+   ARCHITECTURE
+   ═══════════════════════════════════════════ */
+.arch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 48px;
+  flex-wrap: wrap;
+}
+
+.arch-node {
+  padding: 20px 28px;
+  border-radius: 12px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border: 1px solid #e8e5e0;
+  background: #fff;
+  min-width: 150px;
+  transition: all 0.2s;
+}
+
+.arch-node:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
+}
+
+.arch-node.primary {
+  border-color: #b8860b;
+  background: #fdf8ed;
+  font-size: 1rem;
+}
+
+.arch-sub {
+  font-size: 0.75rem;
+  color: #999;
+  font-weight: 400;
+  margin-top: 4px;
+}
+
+.arch-arrow {
+  font-size: 1.2rem;
+  color: #ccc;
+}
+
+/* ═══════════════════════════════════════════
+   TIMELINE
+   ═══════════════════════════════════════════ */
+.timeline {
+  position: relative;
+  padding-left: 32px;
+  max-width: 600px;
+  margin: 48px auto 0;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: linear-gradient(180deg, #d4a74a, #26a69a, #ec407a);
+  border-radius: 1px;
+}
+
+.tl-item {
+  position: relative;
+  margin-bottom: 28px;
+  padding-left: 24px;
+}
+
+.tl-item::before {
+  content: '';
+  position: absolute;
+  left: -24px;
+  top: 8px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #d4a74a;
+  border: 2px solid #fcfaf8;
+}
+
+.tl-item:nth-child(even)::before { background: #26a69a; }
+.tl-item:nth-child(3n)::before { background: #ec407a; }
+
+.tl-phase {
+  font-size: 0.75rem;
+  color: #999;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.tl-title {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 2px;
+}
+
+.tl-desc {
+  font-size: 0.88rem;
+  color: #777;
+}
+
+/* ═══════════════════════════════════════════
+   FOOTER
+   ═══════════════════════════════════════════ */
+.footer {
+  border-top: 1px solid #ebe8e3;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.footer-brand {
+  font-family: "Georgia", "Times New Roman", serif;
+  font-size: 1.3rem;
+  font-style: italic;
+  font-weight: 700;
+  color: #b8860b;
+  margin-bottom: 16px;
+}
+
+.footer-links {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.footer-links a {
+  font-size: 0.88rem;
+  color: #888;
+  transition: color 0.2s;
+}
+
+.footer-links a:hover { color: #26251e; }
+
+.footer-copy {
+  font-size: 0.8rem;
+  color: #bbb;
+}
+
+/* ═══════════════════════════════════════════
+   SCROLL ANIMATIONS
+   ═══════════════════════════════════════════ */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ═══════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .features { grid-template-columns: 1fr; }
+  .modes { grid-template-columns: 1fr; }
+  .safety-grid { grid-template-columns: repeat(2, 1fr); }
+  .arch { flex-direction: column; }
+  .arch-arrow { transform: rotate(90deg); }
+  .nav { padding: 0 24px; }
+  .nav-links { gap: 20px; }
+  .section { padding: 64px 20px; }
+}
+
+@media (max-width: 600px) {
+  .safety-grid { grid-template-columns: 1fr; }
+  .hero-title { font-size: 2.5rem; }
+  .install-cmd { font-size: 0.78rem; padding: 12px 16px; }
+  .nav-links a:not(.nav-cta) { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav" id="nav">
+  <div class="nav-brand">
+    <span class="nav-pi">π</span>
+    PaiCLI
+  </div>
+  <div class="nav-links">
+    <a href="#features">功能</a>
+    <a href="#modes">模式</a>
+    <a href="#models">模型</a>
+    <a href="#safety">安全</a>
+    <a href="https://paicoding.com/ai-agent-projects-guide" class="nav-cta">获取源码</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <h1 class="hero-title">
+    <span class="pi">π</span> PaiCLI
+  </h1>
+  <p class="hero-subtitle">
+    面向开发者的 Java Agent CLI，从 ReAct 到 Multi-Agent，21 期迭代打造的编程助手。
+  </p>
+
+  <div class="install-cmd" id="installCmd" onclick="copyInstall()">
+    <span class="install-prefix">>_</span>
+    <span>java -jar target/paicli-1.0-SNAPSHOT.jar</span>
+    <span class="install-copy" id="copyText">复制</span>
+  </div>
+
+  <div class="hero-links">
+    <a href="https://paicoding.com/ai-agent-projects-guide" class="hero-link">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      获取源码
+    </a>
+    <a href="https://paicoding.com/column/paicli" class="hero-link">教程</a>
+    <a href="https://paicoding.com/paicli-learning-path" class="hero-link">学习路线</a>
+  </div>
+
+  <!-- Terminal -->
+  <div class="terminal" id="terminalWrap">
+    <div class="terminal-bar">
+      <span class="terminal-dot r"></span>
+      <span class="terminal-dot y"></span>
+      <span class="terminal-dot g"></span>
+    </div>
+    <div class="terminal-body" id="terminal"></div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section section-center" id="features">
+  <div class="section-label reveal">Core Features</div>
+  <h2 class="section-title reveal">为什么选择 PaiCLI</h2>
+  <p class="section-desc reveal">每一期迭代都在解决真实痛点，从智能对话到多 Agent 协作。</p>
+
+  <div class="features">
+    <div class="feature reveal">
+      <div class="feature-icon">🧠</div>
+      <div class="feature-name">ReAct Agent</div>
+      <div class="feature-desc">思考-行动-观察循环，流式 reasoning 预览，支持 tool_call 并行执行与超时兜底。</div>
+    </div>
+    <div class="feature reveal">
+      <div class="feature-icon">📋</div>
+      <div class="feature-name">Plan & Execute</div>
+      <div class="feature-desc">复杂任务自动拆解为 DAG，按依赖顺序执行，支持用户审阅、补充与重规划。</div>
+    </div>
+    <div class="feature reveal">
+      <div class="feature-icon">👥</div>
+      <div class="feature-name">Multi-Agent 协作</div>
+      <div class="feature-desc">规划者 + 执行者 + 检查者三角色协作，审查未通过自动重试，冲突自动解决。</div>
+    </div>
+    <div class="feature reveal">
+      <div class="feature-icon">🔌</div>
+      <div class="feature-name">MCP Protocol</div>
+      <div class="feature-desc">标准 Model Context Protocol，支持 stdio 与 Streamable HTTP，60+ 工具动态注册。</div>
+    </div>
+    <div class="feature reveal">
+      <div class="feature-icon">🔍</div>
+      <div class="feature-name">代码搜索 + RAG</div>
+      <div class="feature-desc">精确 grep/read 实时定位 + 语义向量检索双路径，代码关系图谱辅助理解。</div>
+    </div>
+    <div class="feature reveal">
+      <div class="feature-icon">🌐</div>
+      <div class="feature-name">浏览器自动化</div>
+      <div class="feature-desc">Chrome DevTools MCP 集成，支持 SPA 渲染、登录态复用、敏感页面审批。</div>
+    </div>
+    <div class="feature reveal">
+      <div class="feature-icon">💾</div>
+      <div class="feature-name">记忆系统</div>
+      <div class="feature-desc">短期记忆压缩 + 长期记忆持久化 + PAI.md 项目级共享规则，跨会话复用。</div>
+    </div>
+    <div class="feature reveal">
+      <div class="feature-icon">📸</div>
+      <div class="feature-name">图片输入</div>
+      <div class="feature-desc">Ctrl+V 粘贴截图、@image: 引用本地文件、MCP 图片回灌，多模态理解。</div>
+    </div>
+  </div>
+</section>
+
+<!-- MODES -->
+<section class="section section-center" id="modes">
+  <div class="section-label reveal">Execution Modes</div>
+  <h2 class="section-title reveal">三种模式，一套引擎</h2>
+  <p class="section-desc reveal">共享 ToolRegistry / MemoryManager / SnapshotService，不创建孤立空会话。</p>
+
+  <div class="modes">
+    <div class="mode reveal">
+      <span class="mode-badge default">默认</span>
+      <div class="mode-name">ReAct</div>
+      <div class="mode-desc">单轮对话驱动的思考-行动-观察循环。适合日常编码、文件操作、快速问答。</div>
+      <div class="mode-cmd">* 直接输入任务</div>
+    </div>
+    <div class="mode reveal">
+      <span class="mode-badge advanced">进阶</span>
+      <div class="mode-name">Plan & Execute</div>
+      <div class="mode-desc">先规划后执行。复杂任务拆解为 DAG，按依赖顺序推进，支持审阅与补充。</div>
+      <div class="mode-cmd">/plan 创建 demo 项目...</div>
+    </div>
+    <div class="mode reveal">
+      <span class="mode-badge collab">协作</span>
+      <div class="mode-name">Multi-Agent</div>
+      <div class="mode-desc">三人团队协作：规划者拆解、执行者实施、检查者审查。自动重试与冲突解决。</div>
+      <div class="mode-cmd">/team 重构 auth 模块</div>
+    </div>
+  </div>
+</section>
+
+<!-- MODELS -->
+<section class="section section-center" id="models">
+  <div class="section-label reveal">Multi-Model</div>
+  <h2 class="section-title reveal">一个 CLI，五个大脑</h2>
+  <p class="section-desc reveal">运行时无缝切换模型，每个模型都做了深度适配。</p>
+
+  <div class="models reveal">
+    <div class="model-chip">
+      <span class="model-dot glm"></span>
+      GLM-5.1
+      <span class="model-cmd">/model glm-5.1</span>
+    </div>
+    <div class="model-chip">
+      <span class="model-dot ds"></span>
+      DeepSeek V4
+      <span class="model-cmd">/model deepseek</span>
+    </div>
+    <div class="model-chip">
+      <span class="model-dot step"></span>
+      StepFun
+      <span class="model-cmd">/model step</span>
+    </div>
+    <div class="model-chip">
+      <span class="model-dot kimi"></span>
+      Kimi K2.6
+      <span class="model-cmd">/model kimi</span>
+    </div>
+    <div class="model-chip">
+      <span class="model-dot free"></span>
+      FreeLLMAPI
+      <span class="model-cmd">/model freellmapi</span>
+    </div>
+  </div>
+</section>
+
+<!-- SAFETY -->
+<section class="section section-center" id="safety">
+  <div class="section-label reveal">Safety First</div>
+  <h2 class="section-title reveal">Agent 不可缺少的护栏</h2>
+  <p class="section-desc reveal">四层防线保护你的项目，HITL + 路径围栏 + 命令拒绝 + 审计日志。</p>
+
+  <div class="safety-grid">
+    <div class="safety reveal">
+      <div class="safety-icon">🔒</div>
+      <div class="safety-name">Human-in-the-Loop</div>
+      <div class="safety-desc">高危/中危操作分级审批，支持批准、全部放行、拒绝、跳过。</div>
+    </div>
+    <div class="safety reveal">
+      <div class="safety-icon">🛡️</div>
+      <div class="safety-name">路径围栏</div>
+      <div class="safety-desc">文件类工具强制限定在项目根内，绝对路径外逃全部拦截。</div>
+    </div>
+    <div class="safety reveal">
+      <div class="safety-icon">🧯</div>
+      <div class="safety-name">命令快速拒绝</div>
+      <div class="safety-desc">sudo / rm -rf / mkfs 等破坏性命令在 HITL 之前直接拦截。</div>
+    </div>
+    <div class="safety reveal">
+      <div class="safety-icon">📋</div>
+      <div class="safety-name">审计日志</div>
+      <div class="safety-desc">危险工具调用按天写 JSONL 审计，Token/Key 自动脱敏。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section class="section section-center" id="arch">
+  <div class="section-label reveal">Architecture</div>
+  <h2 class="section-title reveal">清晰的分层，无限的扩展</h2>
+  <p class="section-desc reveal">Prompt 分层组装 · MCP 动态工具 · Skill 可插拔 · Snapshot 安全回滚</p>
+
+  <div class="arch reveal">
+    <div class="arch-node">
+      👤 User
+      <div class="arch-sub">输入 / @path / @image</div>
+    </div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node primary">
+      π PaiCLI Agent
+      <div class="arch-sub">ReAct · Plan · Multi-Agent</div>
+    </div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node">
+      🛠️ 11 内置 + 60 MCP
+      <div class="arch-sub">ToolRegistry · HITL · Audit</div>
+    </div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node">
+      🧠 LLM Provider
+      <div class="arch-sub">GLM · DeepSeek · Step · Kimi</div>
+    </div>
+  </div>
+</section>
+
+<!-- TIMELINE -->
+<section class="section section-center" id="timeline">
+  <div class="section-label reveal">Evolution</div>
+  <h2 class="section-title reveal">21 期迭代，持续进化</h2>
+  <p class="section-desc reveal">从第一行 ReAct 循环到完整的 Agent CLI 产品。</p>
+
+  <div class="timeline reveal">
+    <div class="tl-item">
+      <div class="tl-phase">Phase 1</div>
+      <div class="tl-title">ReAct Agent CLI</div>
+      <div class="tl-desc">单轮对话 · 思考-行动-观察 · 工具调用</div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-phase">Phase 2-3</div>
+      <div class="tl-title">Plan & Memory</div>
+      <div class="tl-desc">DAG 任务拆解 · 短期/长期记忆 · 上下文压缩</div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-phase">Phase 4-5</div>
+      <div class="tl-title">RAG & Multi-Agent</div>
+      <div class="tl-desc">代码向量化 · 语义检索 · 三角色协作</div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-phase">Phase 6-7</div>
+      <div class="tl-title">Safety & Parallel</div>
+      <div class="tl-desc">HITL 审批 · 路径围栏 · 并行工具调用</div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-phase">Phase 8-9</div>
+      <div class="tl-title">Multi-Model & Web</div>
+      <div class="tl-desc">五模型适配 · 联网搜索 · web_fetch</div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-phase">Phase 10-15</div>
+      <div class="tl-title">MCP · Browser · Skill</div>
+      <div class="tl-desc">MCP 协议 · Chrome DevTools · Skill 系统</div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-phase">Phase 16-21</div>
+      <div class="tl-title">TUI · LSP · Snapshot · Image</div>
+      <div class="tl-desc">产品化 TUI · 诊断注入 · 快照回滚 · 图片输入</div>
+    </div>
+  </div>
+</section>
+
+<!-- QUICK START -->
+<section class="section section-center" id="start">
+  <div class="section-label reveal">Quick Start</div>
+  <h2 class="section-title reveal">三步开始</h2>
+  <p class="section-desc reveal">Java 17+ / Maven，配置 API Key 即可运行。</p>
+
+  <div class="install-cmd reveal" style="margin-top: 40px;" onclick="copyInstall()">
+    <span class="install-prefix">>_</span>
+    <span>curl -fsSL https://raw.githubusercontent.com/itwanger/paicli/main/install.sh | bash</span>
+    <span class="install-copy">复制</span>
+  </div>
+
+  <div class="hero-links reveal" style="margin-top: 32px;">
+    <a href="https://paicoding.com/ai-agent-projects-guide" class="hero-link">
+      <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      获取源码
+    </a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="footer-brand">π PaiCLI</div>
+  <div class="footer-links">
+    <a href="https://paicoding.com/ai-agent-projects-guide">获取源码</a>
+    <a href="https://paicoding.com/column/paicli">教程</a>
+    <a href="https://paicoding.com/paicli-learning-path">学习路线</a>
+  </div>
+  <div class="footer-copy">Built with Java 17 · Powered by 沉默王二</div>
+</footer>
+
+<script>
+// Nav scroll effect
+const nav = document.getElementById('nav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('scrolled', window.scrollY > 20);
+});
+
+// Copy install command
+function copyInstall() {
+  const cmd = 'java -jar target/paicli-1.0-SNAPSHOT.jar';
+  navigator.clipboard.writeText(cmd).then(() => {
+    const el = document.getElementById('copyText');
+    if (el) { el.textContent = '已复制'; el.classList.add('copied'); }
+  });
+}
+
+// Scroll reveal
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Terminal animation
+const lines = [
+  { t: '', d: 0 },
+  { t: '   ╔══════════════════════════════════════════════╗', d: 0 },
+  { t: '   ║                                              ║', d: 0 },
+  { t: '   ║   <span class="t-pi">PaiCLI π</span>  v16.1.0                      ║', d: 80 },
+  { t: '   ║   Model step-3.5-flash (step)               ║', d: 160 },
+  { t: '   ║   MCP 4/4 · 61 tools · 2/2 skills          ║', d: 240 },
+  { t: '   ║   ReAct · Plan · MCP · Browser · Image      ║', d: 320 },
+  { t: '   ║                                              ║', d: 400 },
+  { t: '   ╚══════════════════════════════════════════════╝', d: 400 },
+  { t: '', d: 450 },
+  { t: '<span class="t-dim">Tips: Type / for commands · @path to attach files</span>', d: 500 },
+  { t: '', d: 600 },
+  { t: '<span class="t-prompt">*</span> 帮我创建一个 Spring Boot 认证模块', d: 800 },
+  { t: '', d: 1000 },
+  { t: '<span class="t-dim">🧠 Thinking...</span>', d: 1200 },
+  { t: '<span class="t-dim">  ├─ plan: 拆解为 4 个子任务</span>', d: 1600 },
+  { t: '<span class="t-dim">  ├─ create_project: spring-boot-auth</span>', d: 2000 },
+  { t: '<span class="t-dim">  ├─ write_file: SecurityConfig.java</span>', d: 2400 },
+  { t: '<span class="t-dim">  └─ execute_command: mvn compile</span>', d: 2800 },
+  { t: '', d: 3000 },
+  { t: '<span class="t-green">✓</span> <span class="t-dim">Spring Boot 3.2 + JWT 认证模块创建完成</span>', d: 3200 },
+];
+
+const term = document.getElementById('terminal');
+let idx = 0;
+
+function addLine() {
+  if (idx >= lines.length) {
+    const c = document.createElement('div');
+    c.innerHTML = '<span class="t-prompt">*</span> <span class="t-cursor"></span>';
+    c.style.marginTop = '8px';
+    term.appendChild(c);
+    return;
+  }
+  const l = lines[idx];
+  const d = document.createElement('div');
+  d.innerHTML = l.t || '&nbsp;';
+  d.style.opacity = '0';
+  d.style.transition = 'opacity 0.25s';
+  term.appendChild(d);
+  requestAnimationFrame(() => d.style.opacity = '1');
+  idx++;
+  setTimeout(addLine, l.d > 0 ? Math.min(l.d, 150) : 60);
+}
+
+const termObs = new IntersectionObserver(e => {
+  if (e[0].isIntersecting) { setTimeout(addLine, 400); termObs.disconnect(); }
+}, { threshold: 0.2 });
+termObs.observe(document.getElementById('terminalWrap'));
+</script>
+</body>
+</html>

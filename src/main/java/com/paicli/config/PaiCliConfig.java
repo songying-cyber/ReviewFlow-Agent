@@ -28,6 +28,7 @@ public class PaiCliConfig {
         private String apiKey;
         private String baseUrl;
         private String model;
+        private String loraId;
         private double temperature = 0.7;  // 默认温度
         private int maxTokens = 8192;      // 默认最大 token 数
 
@@ -45,6 +46,8 @@ public class PaiCliConfig {
         public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
         public String getModel() { return model; }
         public void setModel(String model) { this.model = model; }
+        public String getLoraId() { return loraId; }
+        public void setLoraId(String loraId) { this.loraId = loraId; }
         public double getTemperature() { return temperature; }
         public void setTemperature(double temperature) { this.temperature = temperature; }
         public int getMaxTokens() { return maxTokens; }
@@ -80,6 +83,14 @@ public class PaiCliConfig {
         return loadBaseUrlFromEnv(provider);
     }
 
+    public String getLoraId(String provider) {
+        ProviderConfig providerConfig = providers.get(provider);
+        if (providerConfig != null && providerConfig.getLoraId() != null && !providerConfig.getLoraId().isBlank()) {
+            return providerConfig.getLoraId();
+        }
+        return loadLoraIdFromEnv(provider);
+    }
+
     public static PaiCliConfig load() {
         if (Files.exists(CONFIG_FILE)) {
             try {
@@ -106,6 +117,7 @@ public class PaiCliConfig {
             case "deepseek" -> "DEEPSEEK_MODEL";
             case "kimi" -> "KIMI_MODEL";
             case "freellmapi" -> "FREELLMAPI_MODEL";
+            case "xfyun" -> "XFYUN_MAAS_MODEL";
             default -> provider.toUpperCase() + "_MODEL";
         };
 
@@ -130,6 +142,17 @@ public class PaiCliConfig {
             }
         }
 
+        if ("xfyun".equalsIgnoreCase(provider)) {
+            String xfyunValue = System.getenv("XFYUN_MODEL");
+            if (xfyunValue != null && !xfyunValue.isBlank()) {
+                return xfyunValue.trim();
+            }
+            String xfyunDotEnvValue = readFromDotEnv("XFYUN_MODEL");
+            if (xfyunDotEnvValue != null && !xfyunDotEnvValue.isBlank()) {
+                return xfyunDotEnvValue.trim();
+            }
+        }
+
         return null;
     }
 
@@ -140,6 +163,7 @@ public class PaiCliConfig {
             case "step" -> "STEP_API_KEY";
             case "kimi" -> "KIMI_API_KEY";
             case "freellmapi" -> "FREELLMAPI_API_KEY";
+            case "xfyun" -> "XFYUN_MAAS_API_KEY";
             default -> provider.toUpperCase() + "_API_KEY";
         };
 
@@ -164,6 +188,17 @@ public class PaiCliConfig {
             }
         }
 
+        if ("xfyun".equalsIgnoreCase(provider)) {
+            String xfyunValue = System.getenv("XFYUN_API_KEY");
+            if (xfyunValue != null && !xfyunValue.isBlank()) {
+                return xfyunValue.trim();
+            }
+            String xfyunDotEnvValue = readFromDotEnv("XFYUN_API_KEY");
+            if (xfyunDotEnvValue != null && !xfyunDotEnvValue.isBlank()) {
+                return xfyunDotEnvValue.trim();
+            }
+        }
+
         return null;
     }
 
@@ -172,6 +207,7 @@ public class PaiCliConfig {
             case "step" -> "STEP_BASE_URL";
             case "kimi" -> "KIMI_BASE_URL";
             case "freellmapi" -> "FREELLMAPI_BASE_URL";
+            case "xfyun" -> "XFYUN_MAAS_BASE_URL";
             default -> provider.toUpperCase() + "_BASE_URL";
         };
 
@@ -196,6 +232,44 @@ public class PaiCliConfig {
             }
         }
 
+        if ("xfyun".equalsIgnoreCase(provider)) {
+            String xfyunValue = System.getenv("XFYUN_BASE_URL");
+            if (xfyunValue != null && !xfyunValue.isBlank()) {
+                return xfyunValue.trim();
+            }
+            String xfyunDotEnvValue = readFromDotEnv("XFYUN_BASE_URL");
+            if (xfyunDotEnvValue != null && !xfyunDotEnvValue.isBlank()) {
+                return xfyunDotEnvValue.trim();
+            }
+        }
+
+        return null;
+    }
+
+    private static String loadLoraIdFromEnv(String provider) {
+        if (!"xfyun".equalsIgnoreCase(provider)) {
+            return null;
+        }
+
+        String envValue = System.getenv("XFYUN_MAAS_LORA_ID");
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue.trim();
+        }
+
+        String dotEnvValue = readFromDotEnv("XFYUN_MAAS_LORA_ID");
+        if (dotEnvValue != null && !dotEnvValue.isBlank()) {
+            return dotEnvValue.trim();
+        }
+
+        String xfyunValue = System.getenv("XFYUN_LORA_ID");
+        if (xfyunValue != null && !xfyunValue.isBlank()) {
+            return xfyunValue.trim();
+        }
+
+        String xfyunDotEnvValue = readFromDotEnv("XFYUN_LORA_ID");
+        if (xfyunDotEnvValue != null && !xfyunDotEnvValue.isBlank()) {
+            return xfyunDotEnvValue.trim();
+        }
         return null;
     }
 

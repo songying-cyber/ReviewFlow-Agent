@@ -71,6 +71,16 @@ class PaiCliCompleterTest {
     }
 
     @Test
+    void completesXfyunProviderCommand() {
+        PaiCliCompleter completer = new PaiCliCompleter(List::of);
+        List<Candidate> candidates = new ArrayList<>();
+
+        completer.complete(null, parsed("/config provider xf", "xf"), candidates);
+
+        assertTrue(candidates.stream().anyMatch(c -> c.value().equals("xfyun ")));
+    }
+
+    @Test
     void completesMcpServerNamesFromResources() {
         PaiCliCompleter completer = new PaiCliCompleter(() -> List.of(
                 new McpResourceDescriptor("chrome-devtools", "file:///a", "a", "", "", "text/plain", null),

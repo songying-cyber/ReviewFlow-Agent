@@ -38,6 +38,7 @@ final class InlineActivityDisplay implements AutoCloseable {
     private boolean active;
     private boolean closed;
     private String label = "Thinking";
+    private boolean showCancelHint = true;
     private long startedNanos;
     private int frame;
     private int renderedRows;
@@ -75,9 +76,29 @@ final class InlineActivityDisplay implements AutoCloseable {
         clearLocked();
         reasoning.setLength(0);
         this.label = (label == null || label.isBlank()) ? "Thinking" : label.trim();
+        this.showCancelHint = true;
         this.startedNanos = System.nanoTime();
         this.frame = 0;
         this.active = true;
+        renderLocked();
+        restartTickLocked();
+    }
+
+    synchronized void beginActivity(String label, String detail) {
+        if (closed) {
+            return;
+        }
+        clearLocked();
+        reasoning.setLength(0);
+        this.label = (label == null || label.isBlank()) ? "Working" : label.trim();
+        this.showCancelHint = false;
+        this.startedNanos = System.nanoTime();
+        this.frame = 0;
+        this.active = true;
+        if (detail != null && !detail.isBlank()) {
+            reasoning.append(detail);
+            trimReasoning();
+        }
         renderLocked();
         restartTickLocked();
     }
@@ -88,6 +109,7 @@ final class InlineActivityDisplay implements AutoCloseable {
         }
         if (!active) {
             this.label = "Thinking";
+            this.showCancelHint = true;
             this.startedNanos = System.nanoTime();
             this.frame = 0;
             this.active = true;
@@ -205,8 +227,15 @@ final class InlineActivityDisplay implements AutoCloseable {
     private List<AttributedString> buildLines() {
         int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns() - 1);
         List<AttributedString> lines = new ArrayList<>();
-        lines.add(fit("  " + spinner() + " " + label + "... (esc to cancel, " + elapsedSeconds() + "s)",
-                cols, STATUS_STYLE));
+        if (!showCancelHint) {
+            lines.add(fit("  ✢ " + label + "...", cols, STATUS_STYLE));
+            lines.add(fit("    " + progressBar(cols) + " " + progressPercent() + "%", cols, STATUS_STYLE));
+            return lines;
+        }
+        String suffix = showCancelHint
+                ? " (esc to cancel, " + elapsedSeconds() + "s)"
+                : " (" + elapsedSeconds() + "s)";
+        lines.add(fit("  " + spinner() + " " + label + "..." + suffix, cols, STATUS_STYLE));
 
         List<String> quoteLines = reasoningLines();
         int quoteWidth = Math.max(12, cols - 4);
@@ -256,6 +285,19 @@ final class InlineActivityDisplay implements AutoCloseable {
 
     private String spinner() {
         return SPINNER_FRAMES[Math.floorMod(frame, SPINNER_FRAMES.length)];
+    }
+
+    private String progressBar(int cols) {
+        int width = Math.max(10, Math.min(40, cols - 12));
+        int percent = progressPercent();
+        int filled = Math.max(1, Math.min(width - 1, (int) Math.round(width * percent / 100.0)));
+        return "▰".repeat(filled) + "▱".repeat(width - filled);
+    }
+
+    private int progressPercent() {
+        long elapsedMillis = Math.max(0L, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
+        double curve = 1.0 - Math.exp(-elapsedMillis / 15_000.0);
+        return Math.max(1, Math.min(95, (int) Math.round(curve * 95)));
     }
 
     private long elapsedSeconds() {

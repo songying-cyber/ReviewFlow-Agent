@@ -11,7 +11,7 @@ For the primary entry point, see `/AGENTS.md`.
 ### API Key
 
 1. `~/.paicli/config.json` 中对应 provider 的 `apiKey`
-2. 环境变量：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`（Kimi 兼容 `MOONSHOT_API_KEY`）
+2. 环境变量：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY` / `XFYUN_MAAS_API_KEY`（Kimi 兼容 `MOONSHOT_API_KEY`，讯飞 MaaS 兼容 `XFYUN_API_KEY`）
 3. 仓库当前目录下的 `.env`
 4. 用户主目录下的 `.env`
 
@@ -20,6 +20,7 @@ For the primary entry point, see `/AGENTS.md`.
 | 数据 | 默认路径 | 覆盖方式 |
 |------|----------|----------|
 | 长期记忆 | `~/.paicli/memory/long_term_memory.json` | `-Dpaicli.memory.dir` |
+| 项目级记忆 | `PAI.md` / `.paicli/PAI.md` / `PAI.local.md` | 用户级稳定偏好：`~/.paicli/PAI.md` |
 | RAG 索引 | `~/.paicli/rag/codebase.db` | `-Dpaicli.rag.dir` |
 | 审计日志 | `~/.paicli/audit/audit-YYYY-MM-DD.jsonl` | `PAICLI_AUDIT_DIR` / `-Dpaicli.audit.dir` |
 | Side-Git 快照 | `~/.paicli/snapshots/<project_hash>/<worktree_hash>/.git` | `PAICLI_SNAPSHOT_DIR` / `-Dpaicli.snapshot.dir` |
@@ -48,6 +49,7 @@ For the primary entry point, see `/AGENTS.md`.
 系统属性 > 默认值：`paicli.llm.connect.timeout.seconds`(60) / `paicli.llm.read.timeout.seconds`(300) / `paicli.llm.write.timeout.seconds`(60) / `paicli.llm.call.timeout.seconds`(600)
 
 SSE 流式下 readTimeout 是两次 read 间最大间隔，GLM-5.1 生成大段 reasoning 时可能长时间静默，所以放宽到 300 秒。
+DeepSeek 流式调用默认使用 HTTP/1.1，避免部分 HTTP/2 网关在长 SSE 响应中重置 stream，表现为 `stream was reset: INTERNAL_ERROR`。
 
 ### Web Search Provider Config
 
@@ -89,6 +91,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - GLM-5.1: 200k / DeepSeek V4: 1M / StepFun: 256k / Kimi K2.6: 256k / FreeLLMAPI: 128k
 - long 模式(>=100k)：跳过 Memory 自动摘要，search_code 语义辅助 topK=20，MCP resources 自动索引；精确代码定位仍优先实时 glob/grep/read
 - prompt caching：能力声明 + cached usage 解析
+- 自动压缩阈值按 Claude Code 风格预留空间：`maxContextWindow - min(20k, window/4) - min(13k, window/8)`；200k 窗口约 167k 触发，1M 窗口约 967k 触发，小窗口会按比例缩小预留。
 
 ### Memory System
 
@@ -97,9 +100,14 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
   2. `ConversationHistoryCompactor` 压缩 conversationHistory（真正发给 LLM 的消息）
 - 第二道压缩切割在 user message 边界，保留最近 3 个 user 起算的尾部
 - 三条路径(ReAct/Plan/SubAgent)都接入第二道压缩
+- `/compact` 可手动压缩当前 ReAct conversationHistory，不等待 token 阈值触发，保留最近 1 个 user 轮次；Plan/SubAgent 仍只走调 LLM 前的自动压缩
 - 长期记忆只通过 `/save` 或用户明确要求保存
 - 长期记忆只保存跨会话稳定事实，不保存临时指令；默认项目级作用域，跨项目通用偏好才用 global
 - 长期记忆管理命令：`/memory list`、`/memory search <关键词>`、`/memory delete <id>`、`/memory clear`
+- `PAI.md` 不是 `/save` 长期记忆：它是启动时注入 system prompt 的项目指令文件，适合团队共享、长期稳定、可进 git 的规则
+- 加载顺序：`~/.paicli/PAI.md` → `PAI.md` → `.paicli/PAI.md` → `PAI.local.md` → `.paicli/PAI.local.md`
+- `PAI.md` 中独占一行的 `@relative/path.md` 会被展开；导入路径必须留在用户配置目录或项目根内，总注入内容按预算截断
+- `/init` 生成精简 `PAI.md`，只写 commands / project positioning / architecture / pitfalls / don'ts；已有文件默认不覆盖，`/init --force` 重写
 
 ### Multi-Agent
 
@@ -133,7 +141,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 
 - `web_search`：SearchProvider 接口，返回 SearchResult 列表
 - `web_fetch`：NetworkPolicy → WebFetcher → HtmlExtractor，SPA/防爬墙返回空正文 + 边界提示
-- ReAct freshness preflight：用户输入命中最新/当前/今天/今年/2026/趋势/新闻/版本等时效性关键词且未显式禁止联网时，Agent 在第一轮 LLM 前执行一次内置 `web_search`，并把结果作为 `联网预检结果` 注入当前对话。
+- 联网决策由模型通过原生 tool call 自主发起；Prompt 不包含 Freshness Policy，不强制 `web_search`。本地“当前项目/当前 README/当前文件/当前代码”仍作为代码库任务交给模型在工具 schema 中选择本地工具。
 - StepSearch 优先级：当前模型 provider=`step` 且 model 以 `step-3.7-flash` 开头，并且自动/显式 `mcp__step_search__web_search` / `mcp__step_search__web_fetch` 已注册时，内置 `web_search` / `web_fetch` 会先代理到 StepSearch MCP；MCP 未就绪或返回不可用结果时回退原实现。
 - JS 渲染 fallback 到 Chrome DevTools MCP
 
@@ -175,6 +183,8 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - InlineRenderer 复用 JLine 4 的编辑能力，默认提示符是 `* `，右提示显示 `message / @path / @image`
 - BottomStatusBar 是 JLine `Status` 托管的底部 dock：由 JLine 负责滚动区域和状态行位置，不再手写 `\n`、`moveUp`、`CLEAR_TO_EOS` 或绝对光标行号；dock 上层展示 YOLO/HITL 与 MCP/Skill 摘要，下层展示 model、phase、ctx、token、cost、elapsed 与 cwd。`ctx` 只表示当前仍会带入下一轮请求的上下文估算，`in/out/cache` 表示最近任务调用统计。
 - `/clear` 清空当前 ReAct conversationHistory、shortTermMemory 和待注入 SkillContextBuffer，并重建不含上一轮检索记忆的 system prompt；长期记忆条目保留，后续只会按新查询重新检索注入。
+- `/compact` 手动压缩当前 ReAct conversationHistory，压缩期间显示动态 activity 面板，成功后刷新底部 ctx；不会清空 shortTermMemory、长期记忆或待注入 SkillContextBuffer。
+- `/export` 导出当前 ReAct conversationHistory 为 Markdown 到 `~/.paicli/exports/session-*.md`；包含完整 system prompt，便于检查 LLM 实际接收前的指令，命令不接受路径参数。
 - 普通任务和斜杠命令提交后都会以 `>` 暗色整行块回写原始输入，避免 JLine accept 后清掉编辑行导致结果区看不到刚执行的命令
 - InlineRenderer 不使用独立 JLine `Display.update()` 维护 thinking 临时区；真实终端验证发现独立 Display 会在 transcript/status 输出后从错误位置向上清屏。当前实现用固定高度 live 区重写自身行，content/tool 边界先清理 live 区再追加 transcript。
 - 交互期输出优先走 `Renderer.stream()`；`Main`、`PlanExecuteAgent`、`Planner`、`AgentOrchestrator` 都可接收同一个 renderer 输出流，避免绕过 inline renderer 直接写 stdout
@@ -195,7 +205,8 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 ### Prompt Layering (Phase 19)
 
 - 组装顺序：base → personality → mode → approval → runtime_context → project_context → skills → context_mgmt → handoff
-- runtime_context 每轮注入当前日期和系统时区，供最新信息、相对日期和联网决策使用
+- runtime_context 每轮注入当前日期和系统时区，供相对日期理解使用
+- project_context 顺序：`PAI.md` 项目记忆 → 相关长期记忆 → MCP resources 索引
 - 覆盖优先级：jar 内置 < 用户级 ~/.paicli/prompts/ < 项目级 .paicli/prompts/
 - 必要校验：base.md 和最终 prompt 必须包含 `## Language`
 
@@ -253,6 +264,7 @@ TuiBootstrap / LanternaWindow / TuiSessionController / pane/ / hitl/ / history/ 
 - StepClient：step-3.5-flash，可通过 STEP_BASE_URL 切通道
 - KimiClient：kimi-k2.6，thinking + tool calls 带回 reasoning_content
 - FreeLlmApiClient：auto，默认 http://localhost:5173/v1，OpenAI-compatible 本地网关；可用 `/config provider freellmapi ...` 写入配置后 `/model freellmapi` 切换
+- XfyunMaaSClient：Qwen3.6-35B-A3B，默认 https://maas-api.cn-huabei-1.xf-yun.com/v2，OpenAI-compatible 讯飞星辰 MaaS；可用 `/config provider xfyun ...` 写入配置后 `/model xfyun` 切换。`model` 必须使用 MaaS 服务管控页展示的 modelId；微调模型可配置 `--lora-id <resourceId>`，作为 HTTP header `lora_id` 发出；该 provider 不发送 PaiCLI 内置 tools。
 
 ---
 
@@ -274,6 +286,10 @@ GLM_API_KEY=your_api_key_here
 # FREELLMAPI_API_KEY=your_freellmapi_unified_key_here
 # FREELLMAPI_MODEL=auto
 # FREELLMAPI_BASE_URL=http://localhost:5173/v1
+# XFYUN_MAAS_API_KEY=your_xfyun_maas_api_key_here
+# XFYUN_MAAS_MODEL=Qwen3.6-35B-A3B
+# XFYUN_MAAS_BASE_URL=https://maas-api.cn-huabei-1.xf-yun.com/v2
+# XFYUN_MAAS_LORA_ID=0
 EMBEDDING_PROVIDER=ollama
 EMBEDDING_MODEL=nomic-embed-text:latest
 EMBEDDING_BASE_URL=http://localhost:11434

@@ -54,6 +54,24 @@ public interface Renderer extends AutoCloseable {
     default void endThinking() {
     }
 
+    /** 当前渲染器是否支持通用临时活动面板。 */
+    default boolean supportsActivityPanel() {
+        return supportsThinkingPanel();
+    }
+
+    /** 开始显示通用临时活动面板，用于非 Agent 思考的阻塞操作。 */
+    default void beginActivity(String label, String detail) {
+        beginThinking(label);
+        if (detail != null && !detail.isBlank()) {
+            appendThinking(detail);
+        }
+    }
+
+    /** 结束并清理通用临时活动面板。 */
+    default void endActivity() {
+        endThinking();
+    }
+
     /** 当前渲染器希望 LineReader 使用的左侧输入提示。 */
     default String inputPrompt() {
         return "> ";

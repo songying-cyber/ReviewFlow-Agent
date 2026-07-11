@@ -7,6 +7,7 @@ import com.paicli.llm.LlmTraceLogger;
 import com.paicli.prompt.PromptAssembler;
 import com.paicli.prompt.PromptContext;
 import com.paicli.prompt.PromptMode;
+import com.paicli.prompt.ProjectMemoryLoader;
 import com.paicli.util.AnsiStyle;
 import com.paicli.util.TerminalMarkdownRenderer;
 import org.slf4j.Logger;
@@ -14,7 +15,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.PrintStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * 规划器 - 使用LLM将复杂任务分解为执行计划
@@ -26,6 +29,8 @@ public class Planner {
     private final PrintStream out;
     private final ObjectMapper mapper = new ObjectMapper();
     private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
+    private Supplier<String> projectMemorySupplier = () ->
+            ProjectMemoryLoader.createDefault(Path.of(".").toAbsolutePath().normalize()).loadForPrompt();
 
     public Planner(LlmClient llmClient) {
         this(llmClient, System.out);
@@ -34,6 +39,10 @@ public class Planner {
     public Planner(LlmClient llmClient, PrintStream out) {
         this.llmClient = llmClient;
         this.out = out == null ? System.out : out;
+    }
+
+    public void setProjectMemorySupplier(Supplier<String> projectMemorySupplier) {
+        this.projectMemorySupplier = projectMemorySupplier == null ? () -> "" : projectMemorySupplier;
     }
 
     /**
@@ -48,7 +57,9 @@ public class Planner {
 
         // 构建规划请求
         List<LlmClient.Message> messages = Arrays.asList(
-                LlmClient.Message.system(promptAssembler.assemble(PromptMode.PLANNER, PromptContext.empty())),
+                LlmClient.Message.system(promptAssembler.assemble(PromptMode.PLANNER, PromptContext.builder()
+                        .projectMemoryContext(buildProjectMemoryContext())
+                        .build())),
                 LlmClient.Message.user("请为以下任务制定执行计划：\n" + goal)
         );
 
@@ -61,6 +72,16 @@ public class Planner {
 
         // 解析JSON计划
         return parsePlan(goal, planJson);
+    }
+
+    private String buildProjectMemoryContext() {
+        try {
+            String context = projectMemorySupplier.get();
+            return context == null ? "" : context.trim();
+        } catch (Exception e) {
+            log.warn("Failed to load PAI.md project memory for planner", e);
+            return "";
+        }
     }
 
     /**

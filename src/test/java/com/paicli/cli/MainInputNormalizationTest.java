@@ -1,5 +1,6 @@
 package com.paicli.cli;
 
+import com.paicli.llm.LlmClient;
 import org.jline.reader.History;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -13,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -185,6 +187,7 @@ class MainInputNormalizationTest {
         assertTrue(commands.contains("/index [路径]"));
         assertTrue(commands.contains("/search <查询>"));
         assertTrue(commands.contains("/graph <类名>"));
+        assertTrue(commands.contains("/compact"));
     }
 
     @Test
@@ -196,10 +199,54 @@ class MainInputNormalizationTest {
         assertTrue(choices.contains("/model step"), choices);
         assertTrue(choices.contains("/model kimi"), choices);
         assertTrue(choices.contains("/model freellmapi"), choices);
+        assertTrue(choices.contains("/model xfyun"), choices);
         assertTrue(choices.contains("/browser status"), choices);
         assertFalse(choices.contains("do you wish"), choices);
         assertTrue(choices.lines().count() < Main.slashCommandHints().size(),
                 "choices should be compact multi-column output");
+    }
+
+    @Test
+    void exportIncludesSystemOnlyHistoryForPromptInspection() {
+        List<LlmClient.Message> history = List.of(LlmClient.Message.system("system prompt"));
+
+        assertTrue(Main.hasExportableMessages(history));
+        assertEquals(1, Main.countExportedMessages(history));
+
+        String markdown = Main.renderConversationExport(history, LocalDateTime.of(2026, 6, 10, 14, 17));
+
+        assertTrue(markdown.contains("## System"), markdown);
+        assertTrue(markdown.contains("system prompt"), markdown);
+        assertFalse(markdown.contains("System prompt 已省略"), markdown);
+    }
+
+    @Test
+    void rendersConversationExportWithSafeCodeFences() {
+        List<LlmClient.Message> history = List.of(
+                LlmClient.Message.system("system prompt"),
+                LlmClient.Message.user("请读取代码"),
+                LlmClient.Message.assistant(
+                        "模型思考",
+                        "准备调用工具",
+                        List.of(new LlmClient.ToolCall("call_1",
+                                new LlmClient.ToolCall.Function("write_file",
+                                        "{\"path\":\"demo.md\",\"content\":\"```java\\nclass A {}\\n```\"}")))),
+                LlmClient.Message.tool("call_1", "工具结果里也有围栏:\n```java\nclass B {}\n```")
+        );
+
+        String markdown = Main.renderConversationExport(history, LocalDateTime.of(2026, 6, 10, 14, 30));
+
+        assertTrue(markdown.contains("**导出时间**: 2026-06-10 14:30"), markdown);
+        assertTrue(markdown.contains("## System\n\nsystem prompt"), markdown);
+        assertFalse(markdown.contains("System prompt 已省略"), markdown);
+        assertTrue(markdown.contains("请读取代码"), markdown);
+        assertTrue(markdown.contains("> **思考过程**"), markdown);
+        assertTrue(markdown.contains("````json"), markdown);
+        assertTrue(markdown.contains("\"content\" : \"```java\\nclass A {}\\n```\""), markdown);
+        assertTrue(markdown.contains("````\n工具结果里也有围栏:"), markdown);
+        assertTrue(markdown.contains("```java\nclass B {}\n```"), markdown);
+        assertTrue(markdown.contains("\n````\n"), markdown);
+        assertEquals(4, Main.countExportedMessages(history));
     }
 
     @Test

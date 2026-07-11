@@ -9,8 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * 验证 ContextProfile 的派生公式。
  *
- * 设计原则：没有"长 / 短模式"分档，所有参数都是 maxContextWindow 的简单函数；
- * 全模型走同一阈值（90% 触发压缩）。
+ * 设计原则：没有"长 / 短模式"分档，压缩阈值按模型窗口预留摘要输出和自动压缩缓冲。
  */
 class ContextProfileTest {
 
@@ -20,8 +19,8 @@ class ContextProfileTest {
 
         assertEquals(200_000, profile.maxContextWindow());
         assertEquals(160_000, profile.agentTokenBudget());                  // 200k × 0.8
-        assertEquals(0.90, profile.compressionTriggerRatio(), 0.001);
-        assertEquals(180_000, profile.compressionTriggerTokens());          // 200k × 0.9
+        assertEquals(0.835, profile.compressionTriggerRatio(), 0.001);
+        assertEquals(167_000, profile.compressionTriggerTokens());          // 200k - 20k - 13k
         assertEquals(90_000, profile.shortTermMemoryBudget());              // 200k × 0.45
         assertTrue(profile.mcpResourceIndexEnabled());                      // window ≥ 32k
         assertTrue(profile.promptCachingSupported());
@@ -33,7 +32,7 @@ class ContextProfileTest {
 
         assertEquals(1_000_000, profile.maxContextWindow());
         assertEquals(800_000, profile.agentTokenBudget());                  // 1M × 0.8
-        assertEquals(900_000, profile.compressionTriggerTokens());          // 1M × 0.9
+        assertEquals(967_000, profile.compressionTriggerTokens());          // 1M - 20k - 13k
         assertEquals(450_000, profile.shortTermMemoryBudget());             // 1M × 0.45
         assertEquals("automatic-prefix-cache", profile.promptCacheMode());
         assertTrue(profile.mcpResourceIndexEnabled());
@@ -63,15 +62,14 @@ class ContextProfileTest {
         ContextProfile profile = ContextProfile.custom(128_000, 40);
 
         assertEquals(40, profile.shortTermMemoryBudget());
-        // 即使是 custom 也走同一压缩阈值
-        assertEquals(0.90, profile.compressionTriggerRatio(), 0.001);
+        assertEquals(95_000, profile.compressionTriggerTokens());           // 128k - 20k - 13k
     }
 
     @Test
     void nullClientFallsBackToReasonableDefault() {
         ContextProfile profile = ContextProfile.from(null);
         assertEquals(128_000, profile.maxContextWindow());
-        assertEquals(0.90, profile.compressionTriggerRatio(), 0.001);
+        assertEquals(95_000, profile.compressionTriggerTokens());
         assertFalse(profile.promptCachingSupported());
     }
 }

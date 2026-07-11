@@ -24,6 +24,10 @@ public interface LlmClient {
         return false;
     }
 
+    default boolean supportsTools() {
+        return true;
+    }
+
     default String promptCacheMode() {
         return "none";
     }

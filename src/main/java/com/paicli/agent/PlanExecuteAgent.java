@@ -11,6 +11,7 @@ import com.paicli.plan.*;
 import com.paicli.prompt.PromptAssembler;
 import com.paicli.prompt.PromptContext;
 import com.paicli.prompt.PromptMode;
+import com.paicli.prompt.ProjectMemoryLoader;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.skill.SkillContextBuffer;
 import com.paicli.skill.SkillIndexFormatter;
@@ -148,6 +149,7 @@ public class PlanExecuteAgent {
         this.toolRegistry.setCurrentModel(llmClient.getProviderName(), llmClient.getModelName());
         this.memoryManager.setProjectPath(this.toolRegistry.getProjectPath());
         this.toolRegistry.setScopedMemorySaver(this.memoryManager::storeFact);
+        this.planner.setProjectMemorySupplier(this::buildProjectMemoryContext);
     }
 
     private static PrintStream deferredSystemOut() {
@@ -440,10 +442,12 @@ public class PlanExecuteAgent {
     private TaskRunResult executeTask(String goal, ExecutionPlan plan, Task task,
                                       StreamState streamState, PrintStream out) throws IOException {
         String prompt = promptAssembler.assemble(PromptMode.PLAN, PromptContext.builder()
+                .projectMemoryContext(buildProjectMemoryContext())
                 .variable("taskType", task.getType())
                 .variable("taskDescription", task.getDescription())
                 .externalContext(buildExternalContext())
                 .skillIndex(buildSkillIndex())
+                .toolsEnabled(llmClient == null || llmClient.supportsTools())
                 .build());
 
         // 注入长期记忆上下文
@@ -484,7 +488,7 @@ public class PlanExecuteAgent {
 
             LlmClient.ChatResponse response = llmClient.chat(
                     messages,
-                    toolRegistry.getToolDefinitions(),
+                    llmClient.supportsTools() ? toolRegistry.getToolDefinitions() : null,
                     streamRenderer
             );
             LlmTraceLogger.logReasoning(log,
@@ -562,6 +566,15 @@ public class PlanExecuteAgent {
             return context == null ? "" : context.trim();
         } catch (Exception e) {
             log.warn("Failed to build external context for plan task", e);
+            return "";
+        }
+    }
+
+    private String buildProjectMemoryContext() {
+        try {
+            return ProjectMemoryLoader.createDefault(Path.of(toolRegistry.getProjectPath())).loadForPrompt();
+        } catch (Exception e) {
+            log.warn("Failed to load PAI.md project memory", e);
             return "";
         }
     }

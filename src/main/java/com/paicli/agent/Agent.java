@@ -11,6 +11,7 @@ import com.paicli.memory.MemoryManager;
 import com.paicli.prompt.PromptAssembler;
 import com.paicli.prompt.PromptContext;
 import com.paicli.prompt.PromptMode;
+import com.paicli.prompt.ProjectMemoryLoader;
 import com.paicli.render.PlainRenderer;
 import com.paicli.render.Renderer;
 import com.paicli.render.StatusInfo;
@@ -36,7 +37,6 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.function.Supplier;
 
 /**
@@ -136,7 +136,6 @@ public class Agent {
         conversationHistory.add(ImageReferenceParser.userMessage(
                 userMessageContent,
                 Path.of(toolRegistry.getProjectPath())));
-        injectFreshnessWebSearchIfNeeded(userInput);
         StringBuilder reasoningTranscript = new StringBuilder();
         StreamRenderer streamRenderer = new StreamRenderer(renderer());
 
@@ -170,7 +169,9 @@ public class Agent {
             int iteration = budget.beginIteration();
 
             try {
-                List<LlmClient.Tool> toolDefinitions = toolRegistry.getToolDefinitions();
+                List<LlmClient.Tool> toolDefinitions = llmClient.supportsTools()
+                        ? toolRegistry.getToolDefinitions()
+                        : null;
                 logRequestContext("react iteration=" + iteration, toolDefinitions);
                 streamRenderer.beginThinking();
                 // 调用 LLM
@@ -267,6 +268,23 @@ public class Agent {
         }
     }
 
+    /**
+     * 手动压缩当前 ReAct 对话历史，不等待上下文窗口阈值触发。
+     */
+    public CompactionResult compactHistoryNow() {
+        long beforeTokens = estimateCurrentContextTokens();
+        try {
+            boolean compacted = historyCompactor.compactNow(conversationHistory);
+            return new CompactionResult(compacted, beforeTokens, estimateCurrentContextTokens(), null);
+        } catch (Exception e) {
+            log.warn("manual conversationHistory compaction failed", e);
+            return new CompactionResult(false, beforeTokens, estimateCurrentContextTokens(), e.getMessage());
+        }
+    }
+
+    public record CompactionResult(boolean compacted, long beforeTokens, long afterTokens, String error) {
+    }
+
     /** 当前状态栏快照：ctx 表示下一轮请求仍会携带的上下文估算，不含累计 in/out 用量。 */
     public StatusInfo currentStatus(String phase) {
         String normalizedPhase = phase == null || phase.isBlank() ? "idle" : phase;
@@ -289,9 +307,11 @@ public class Agent {
 
     private String buildSystemPrompt(String memoryContext) {
         return promptAssembler.assemble(PromptMode.AGENT, PromptContext.builder()
+                .projectMemoryContext(buildProjectMemoryContext())
                 .memoryContext(memoryContext)
                 .externalContext(buildExternalContext())
                 .skillIndex(buildSkillIndex())
+                .toolsEnabled(llmClient == null || llmClient.supportsTools())
                 .build());
     }
 
@@ -356,81 +376,6 @@ public class Agent {
         return drained + "\n用户输入：\n" + userInput;
     }
 
-    private void injectFreshnessWebSearchIfNeeded(String userInput) {
-        if (!shouldRunFreshnessWebSearch(userInput)) {
-            return;
-        }
-        String query = buildFreshnessSearchQuery(userInput);
-        if (query.isBlank()) {
-            return;
-        }
-        try {
-            String args = new ObjectMapper().createObjectNode()
-                    .put("query", query)
-                    .put("top_k", 5)
-                    .toString();
-            log.info("Auto freshness web_search preflight: query={}", query);
-            renderer().stream().println(AnsiStyle.subtle("  → 检测到时效性问题，已先联网搜索 \"" + query + "\""));
-            String result = toolRegistry.executeTool("web_search", args);
-            conversationHistory.add(LlmClient.Message.user("""
-                    ## 联网预检结果
-
-                    用户问题包含最新/当前/2026/趋势等时效性需求。以下是本轮进入模型回答前自动执行 `web_search` 得到的结果；回答必须优先基于这些联网结果和用户提供的图片，不要声称无法实时搜索。
-
-                    查询：%s
-
-                    %s
-                    """.formatted(query, result == null ? "" : result.trim())));
-        } catch (Exception e) {
-            log.warn("Auto freshness web_search preflight failed", e);
-            conversationHistory.add(LlmClient.Message.user("""
-                    ## 联网预检结果
-
-                    本轮问题需要最新信息，系统已尝试自动联网搜索，但搜索执行失败：%s
-                    回答时必须说明这是联网失败后的降级结果，不要声称工具不可用。
-                    """.formatted(e.getMessage())));
-        }
-    }
-
-    private boolean shouldRunFreshnessWebSearch(String userInput) {
-        if (userInput == null || userInput.isBlank() || !toolRegistry.hasTool("web_search")) {
-            return false;
-        }
-        String normalized = userInput.toLowerCase(Locale.ROOT);
-        if (normalized.contains("不要联网") || normalized.contains("不用联网")
-                || normalized.contains("不要搜索") || normalized.contains("不用搜索")
-                || normalized.contains("别搜索") || normalized.contains("offline")) {
-            return false;
-        }
-        return normalized.contains("最新")
-                || normalized.contains("当前")
-                || normalized.contains("今天")
-                || normalized.contains("今年")
-                || normalized.contains("现在")
-                || normalized.contains("新闻")
-                || normalized.contains("趋势")
-                || normalized.contains("版本")
-                || normalized.contains("2026")
-                || normalized.contains("latest")
-                || normalized.contains("current")
-                || normalized.contains("recent");
-    }
-
-    private String buildFreshnessSearchQuery(String userInput) {
-        String cleaned = userInput == null ? "" : userInput
-                .replaceAll("@image:(<[^>]+>|\\S+)", " ")
-                .replaceAll("\\s+", " ")
-                .trim();
-        String lower = cleaned.toLowerCase(Locale.ROOT);
-        if (lower.contains("ai agent") && (cleaned.contains("2026") || cleaned.contains("技术栈") || cleaned.contains("趋势"))) {
-            return "2026 AI Agent 技术栈 趋势 MCP A2A Agents SDK LangGraph CrewAI AutoGen";
-        }
-        if (cleaned.length() > 160) {
-            return cleaned.substring(0, 160);
-        }
-        return cleaned;
-    }
-
     private String buildExternalContext() {
         if (!memoryManager.getContextProfile().mcpResourceIndexEnabled()) {
             return "";
@@ -440,6 +385,15 @@ public class Agent {
             return context == null ? "" : context.trim();
         } catch (Exception e) {
             log.warn("Failed to build external context", e);
+            return "";
+        }
+    }
+
+    private String buildProjectMemoryContext() {
+        try {
+            return ProjectMemoryLoader.createDefault(Path.of(toolRegistry.getProjectPath())).loadForPrompt();
+        } catch (Exception e) {
+            log.warn("Failed to load PAI.md project memory", e);
             return "";
         }
     }

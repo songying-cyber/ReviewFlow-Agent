@@ -94,7 +94,8 @@ final class PaiCliCompleter implements Completer {
                 option("deepseek", "DeepSeek，读取配置模型"),
                 option("step", "StepFun，读取配置模型"),
                 option("kimi", "Kimi/Moonshot，读取配置模型"),
-                option("freellmapi", "本地 FreeLLMAPI，读取配置模型"));
+                option("freellmapi", "本地 FreeLLMAPI，读取配置模型"),
+                option("xfyun", "讯飞星辰 MaaS，读取配置模型"));
         return true;
     }
 
@@ -117,13 +118,15 @@ final class PaiCliCompleter implements Completer {
                         option("glm ", "GLM"),
                         option("deepseek ", "DeepSeek"),
                         option("step ", "StepFun"),
-                        option("kimi ", "Kimi/Moonshot"));
+                        option("kimi ", "Kimi/Moonshot"),
+                        option("xfyun ", "讯飞星辰 MaaS"));
                 return true;
             }
             addMatching(candidates, "配置项", prefix,
                     option("--base-url ", "OpenAI-compatible base URL"),
                     option("--api-key ", "API Key"),
                     option("--model ", "模型名"),
+                    option("--lora-id ", "讯飞 MaaS resourceId"),
                     option("--default", "设为默认 provider"));
             return true;
         }

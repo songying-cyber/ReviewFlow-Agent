@@ -63,14 +63,15 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
                 MediaType.parse("application/json")
         );
 
-        Request request = new Request.Builder()
+        Request.Builder request = new Request.Builder()
                 .url(getApiUrl())
                 .header("Authorization", "Bearer " + getApiKey())
                 .header("Content-Type", "application/json")
-                .post(body)
-                .build();
+                .post(body);
+        customizeRequest(request);
+        Request builtRequest = request.build();
 
-        try (Response response = SHARED_HTTP_CLIENT.newCall(request).execute()) {
+        try (Response response = httpClient().newCall(builtRequest).execute()) {
             ResponseBody responseBodyObj = response.body();
             if (!response.isSuccessful()) {
                 String errorBody = responseBodyObj != null ? responseBodyObj.string() : "无响应体";
@@ -109,6 +110,10 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
                 }
 
                 JsonNode root = mapper.readTree(payload);
+                JsonNode error = root.path("error");
+                if (!error.isMissingNode() && !error.isNull()) {
+                    throw new IOException("API请求失败: " + formatStreamingError(error));
+                }
                 JsonNode usage = root.path("usage");
                 if (!usage.isMissingNode()) {
                     inputTokens = usage.path("prompt_tokens").asInt(inputTokens);
@@ -150,16 +155,33 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
                 mergeToolCallDeltas(toolAccumulators, delta.path("tool_calls"));
             }
 
+            List<ToolCall> toolCalls = buildToolCalls(toolAccumulators);
+            if (content.isEmpty() && reasoning.isEmpty() && (toolCalls == null || toolCalls.isEmpty())) {
+                throw new IOException("API返回空内容，请检查 provider/model 配置或该模型是否支持当前请求参数");
+            }
+
             return new ChatResponse(
                     role,
                     content.toString(),
                     reasoning.toString(),
-                    buildToolCalls(toolAccumulators),
+                    toolCalls,
                     inputTokens,
                     outputTokens,
                     cachedInputTokens
             );
         }
+    }
+
+    private String formatStreamingError(JsonNode error) {
+        String message = error.path("message").asText("");
+        String code = error.path("code").asText("");
+        if (!code.isEmpty() && !message.isEmpty()) {
+            return code + " - " + message;
+        }
+        if (!message.isEmpty()) {
+            return message;
+        }
+        return error.toString();
     }
 
     private String extractReasoningDelta(JsonNode delta) {
@@ -253,6 +275,13 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
     }
 
     protected void customizeRequestBody(ObjectNode requestBody) {
+    }
+
+    protected void customizeRequest(Request.Builder request) {
+    }
+
+    protected OkHttpClient httpClient() {
+        return SHARED_HTTP_CLIENT;
     }
 
     private void appendMessageContent(ObjectNode msgNode, Message msg) {

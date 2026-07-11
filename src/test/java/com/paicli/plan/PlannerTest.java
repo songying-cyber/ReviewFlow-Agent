@@ -27,7 +27,7 @@ class PlannerTest {
 
     @Test
     void delegatesComplexGoalToLlmPlannerPath() throws Exception {
-        Planner planner = new Planner(new StubGLMClient("""
+        StubGLMClient client = new StubGLMClient("""
                 {
                   "summary": "复杂任务",
                   "tasks": [
@@ -45,13 +45,16 @@ class PlannerTest {
                     }
                   ]
                 }
-                """));
+                """);
+        Planner planner = new Planner(client);
+        planner.setProjectMemorySupplier(() -> "## PAI.md 项目记忆\n- 计划前必须读取项目规则");
 
         ExecutionPlan plan = planner.createPlan("先读取 pom.xml 然后验证项目结构");
 
         assertEquals("复杂任务", plan.getSummary());
         assertEquals(2, plan.getAllTasks().size());
         assertTrue(plan.getTask("task_2").getDependencies().contains("task_1"));
+        assertTrue(client.lastSystemPrompt.contains("计划前必须读取项目规则"));
     }
 
     private static final class FailingGLMClient extends GLMClient {
@@ -67,6 +70,7 @@ class PlannerTest {
 
     private static final class StubGLMClient extends GLMClient {
         private final String content;
+        private String lastSystemPrompt = "";
 
         private StubGLMClient(String content) {
             super("test-key");
@@ -75,6 +79,7 @@ class PlannerTest {
 
         @Override
         public ChatResponse chat(List<Message> messages, List<Tool> tools, StreamListener listener) {
+            this.lastSystemPrompt = messages.get(0).content();
             return new ChatResponse("assistant", content, null, 100, 20);
         }
     }

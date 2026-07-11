@@ -176,6 +176,25 @@ public final class InlineRenderer implements Renderer {
         }
     }
 
+    @Override
+    public boolean supportsActivityPanel() {
+        return activityDisplay != null;
+    }
+
+    @Override
+    public void beginActivity(String label, String detail) {
+        if (activityDisplay != null && !closed) {
+            activityDisplay.beginActivity(label, detail);
+        }
+    }
+
+    @Override
+    public void endActivity() {
+        if (activityDisplay != null) {
+            activityDisplay.end();
+        }
+    }
+
     /**
      * 绑定当前交互循环使用的 JLine LineReader。
      *

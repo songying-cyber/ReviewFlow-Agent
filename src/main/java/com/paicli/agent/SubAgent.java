@@ -10,6 +10,7 @@ import com.paicli.context.ContextProfile;
 import com.paicli.prompt.PromptAssembler;
 import com.paicli.prompt.PromptContext;
 import com.paicli.prompt.PromptMode;
+import com.paicli.prompt.ProjectMemoryLoader;
 import com.paicli.skill.SkillContextBuffer;
 import com.paicli.skill.SkillIndexFormatter;
 import com.paicli.skill.SkillRegistry;
@@ -82,8 +83,10 @@ public class SubAgent {
      */
     private String getSystemPrompt() {
         return promptAssembler.assemble(promptMode(), PromptContext.builder()
+                .projectMemoryContext(buildProjectMemoryContext())
                 .externalContext(buildExternalContext())
                 .skillIndex(buildSkillIndex())
+                .toolsEnabled(llmClient == null || llmClient.supportsTools())
                 .build());
     }
 
@@ -147,6 +150,15 @@ public class SubAgent {
         }
     }
 
+    private String buildProjectMemoryContext() {
+        try {
+            return ProjectMemoryLoader.createDefault(Path.of(toolRegistry.getProjectPath())).loadForPrompt();
+        } catch (Exception e) {
+            log.warn("[{}] failed to load PAI.md project memory", name, e);
+            return "";
+        }
+    }
+
     /**
      * 执行任务，返回结果消息（默认输出到 System.out）
      */
@@ -194,7 +206,7 @@ public class SubAgent {
             try {
                 LlmClient.ChatResponse response = llmClient.chat(
                         conversationHistory,
-                        shouldUseTools() ? toolRegistry.getToolDefinitions() : null,
+                        shouldUseTools() && llmClient.supportsTools() ? toolRegistry.getToolDefinitions() : null,
                         streamRenderer
                 );
                 LlmTraceLogger.logReasoning(log,

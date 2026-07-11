@@ -9,7 +9,7 @@ import com.paicli.llm.LlmClient;
  * 全模型走同一套行为，只是 window 大小不同导致触发时机和容量不同。
  *
  * 全局常量：
- * - 压缩触发阈值：占用率 ≥ 90% 时触发
+ * - 压缩触发阈值：预留摘要输出空间后，再保留 13k token 自动压缩缓冲
  *
  * 按 window 派生：
  * - 短期记忆预算 = window × 0.45
@@ -26,7 +26,9 @@ public record ContextProfile(
         boolean promptCachingSupported,
         String promptCacheMode
 ) {
-    public static final double DEFAULT_COMPRESSION_TRIGGER_RATIO = 0.90;
+    public static final int MAX_SUMMARY_OUTPUT_RESERVE_TOKENS = 20_000;
+    public static final int AUTOCOMPACT_BUFFER_TOKENS = 13_000;
+    public static final double MIN_COMPRESSION_TRIGGER_RATIO = 0.50;
     private static final int MIN_WINDOW = 8_000;
     private static final int MCP_RESOURCE_INDEX_MIN_WINDOW = 32_000;
 
@@ -35,7 +37,7 @@ public record ContextProfile(
         return new ContextProfile(
                 window,
                 agentBudget(window),
-                DEFAULT_COMPRESSION_TRIGGER_RATIO,
+                compressionTriggerRatio(window),
                 shortTermBudget(window),
                 memoryContextTokens(window),
                 window >= MCP_RESOURCE_INDEX_MIN_WINDOW,
@@ -50,7 +52,7 @@ public record ContextProfile(
         return new ContextProfile(
                 window,
                 agentBudget(window),
-                DEFAULT_COMPRESSION_TRIGGER_RATIO,
+                compressionTriggerRatio(window),
                 shortTerm,
                 memoryContextTokens(window),
                 window >= MCP_RESOURCE_INDEX_MIN_WINDOW,
@@ -61,7 +63,7 @@ public record ContextProfile(
 
     /** 触发压缩的绝对 token 阈值（占用 ≥ 此值即压缩） */
     public int compressionTriggerTokens() {
-        return (int) Math.floor(maxContextWindow * compressionTriggerRatio);
+        return autoCompactTriggerTokens(maxContextWindow);
     }
 
     public String summary() {
@@ -83,5 +85,18 @@ public record ContextProfile(
 
     private static int memoryContextTokens(int window) {
         return Math.max(500, Math.min(5_000, window / 200));
+    }
+
+    private static double compressionTriggerRatio(int window) {
+        return Math.max(MIN_COMPRESSION_TRIGGER_RATIO,
+                Math.min(0.99, autoCompactTriggerTokens(window) / (double) window));
+    }
+
+    private static int autoCompactTriggerTokens(int window) {
+        int safeWindow = Math.max(MIN_WINDOW, window);
+        int summaryReserve = Math.min(MAX_SUMMARY_OUTPUT_RESERVE_TOKENS, Math.max(1_000, safeWindow / 4));
+        int buffer = Math.min(AUTOCOMPACT_BUFFER_TOKENS, Math.max(1_000, safeWindow / 8));
+        int trigger = safeWindow - summaryReserve - buffer;
+        return Math.max(1_000, Math.min(safeWindow - 1, trigger));
     }
 }

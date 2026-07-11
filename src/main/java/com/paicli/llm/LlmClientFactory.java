@@ -23,6 +23,8 @@ public class LlmClientFactory {
                 configuredProvider.equals(normalized) ? null : config.getModel(configuredProvider));
         String baseUrl = firstConfigured(config.getBaseUrl(normalized),
                 configuredProvider.equals(normalized) ? null : config.getBaseUrl(configuredProvider));
+        String loraId = firstConfigured(config.getLoraId(normalized),
+                configuredProvider.equals(normalized) ? null : config.getLoraId(configuredProvider));
 
         return switch (normalized) {
             case "glm" -> new GLMClient(apiKey, model);
@@ -30,6 +32,7 @@ public class LlmClientFactory {
             case "step" -> new StepClient(apiKey, model, baseUrl);
             case "kimi" -> new KimiClient(apiKey, model, baseUrl);
             case "freellmapi" -> new FreeLlmApiClient(apiKey, model, baseUrl);
+            case "xfyun" -> new XfyunMaaSClient(apiKey, model, baseUrl, loraId);
             default -> null;
         };
     }
@@ -40,7 +43,7 @@ public class LlmClientFactory {
             return client;
         }
 
-        for (String provider : new String[]{"glm", "deepseek", "step", "kimi", "freellmapi"}) {
+        for (String provider : new String[]{"glm", "deepseek", "step", "kimi", "freellmapi", "xfyun"}) {
             client = create(provider, config);
             if (client != null) {
                 return client;
@@ -56,6 +59,7 @@ public class LlmClientFactory {
             case "stepfun", "step-fun" -> "step";
             case "moonshot", "moonshotai", "moonshot-ai" -> "kimi";
             case "free-llm-api", "free_llm_api", "freellm", "free-llm" -> "freellmapi";
+            case "xfyun-maas", "xfyun_maas", "iflytek", "iflytek-maas", "iflytek_maas", "maas" -> "xfyun";
             default -> normalized;
         };
     }

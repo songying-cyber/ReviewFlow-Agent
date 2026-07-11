@@ -5,11 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import okhttp3.Protocol;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.util.List;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
@@ -18,6 +20,7 @@ import com.paicli.image.ImageReferenceParser;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AbstractOpenAiCompatibleClientImageInputTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -169,6 +172,14 @@ class AbstractOpenAiCompatibleClientImageInputTest {
     }
 
     @Test
+    void deepseekClientUsesHttp11ForStreamingCalls() {
+        DeepSeekClient client = new DeepSeekClient("test-key", "deepseek-v4-pro",
+                "https://api.deepseek.com/chat/completions");
+
+        assertEquals(List.of(Protocol.HTTP_1_1), client.httpClient().protocols());
+    }
+
+    @Test
     void parsesReasoningFieldAliasesFromStreamingDeltas() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.enqueue(new MockResponse()
@@ -245,6 +256,37 @@ class AbstractOpenAiCompatibleClientImageInputTest {
     }
 
     @Test
+    void xfyunMaaSClientSendsHttpDocHeadersAndStreamOptions() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse()
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody("""
+                            data: {"choices":[{"delta":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":12,"completion_tokens":1}}
+
+                            data: [DONE]
+
+                            """));
+            XfyunMaaSClient client = new XfyunMaaSClient(
+                    "test-key",
+                    "model-id-from-card",
+                    server.url("/v2").toString(),
+                    "resource-id-from-card");
+
+            client.chat(List.of(LlmClient.Message.user("你好")), null);
+
+            RecordedRequest request = server.takeRequest();
+            assertEquals("Bearer test-key", request.getHeader("Authorization"));
+            assertEquals("resource-id-from-card", request.getHeader("lora_id"));
+
+            JsonNode root = MAPPER.readTree(request.getBody().readUtf8());
+            assertEquals("model-id-from-card", root.path("model").asText());
+            assertEquals(true, root.path("stream").asBoolean());
+            assertEquals(true, root.path("stream_options").path("include_usage").asBoolean());
+            assertFalse(root.has("tools"));
+        }
+    }
+
+    @Test
     void glm5vTurboSerializesBase64ImageAsRawBase64() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.enqueue(new MockResponse()
@@ -296,6 +338,43 @@ class AbstractOpenAiCompatibleClientImageInputTest {
             assertEquals("image_url", content.get(1).path("type").asText());
             assertEquals("data:image/png;base64,aGVsbG8=",
                     content.get(1).path("image_url").path("url").asText());
+        }
+    }
+
+    @Test
+    void throwsVisibleErrorWhenStreamingResponseHasNoContent() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse()
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody("""
+                            data: [DONE]
+
+                            """));
+            TestClient client = new TestClient(server.url("/chat/completions").toString());
+
+            IOException error = assertThrows(IOException.class,
+                    () -> client.chat(List.of(LlmClient.Message.user("你好")), null));
+
+            assertEquals("API返回空内容，请检查 provider/model 配置或该模型是否支持当前请求参数",
+                    error.getMessage());
+        }
+    }
+
+    @Test
+    void throwsVisibleErrorForStreamingErrorChunk() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse()
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody("""
+                            data: {"error":{"code":10040,"message":"image rejected by provider"}}
+
+                            """));
+            TestClient client = new TestClient(server.url("/chat/completions").toString());
+
+            IOException error = assertThrows(IOException.class,
+                    () -> client.chat(List.of(LlmClient.Message.user("你好")), null));
+
+            assertEquals("API请求失败: 10040 - image rejected by provider", error.getMessage());
         }
     }
 

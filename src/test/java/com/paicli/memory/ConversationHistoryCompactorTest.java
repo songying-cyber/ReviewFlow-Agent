@@ -27,6 +27,25 @@ class ConversationHistoryCompactorTest {
     }
 
     @Test
+    void compactNowIgnoresTriggerAndKeepsRecentTurns() {
+        StubCompactor c = new StubCompactor("MANUAL SUMMARY", 2);
+        List<LlmClient.Message> history = new ArrayList<>();
+        history.add(LlmClient.Message.system("SYSTEM_PROMPT"));
+        for (int i = 0; i < 3; i++) {
+            history.add(LlmClient.Message.user("Q" + i));
+            history.add(LlmClient.Message.assistant("A" + i));
+        }
+
+        boolean compacted = c.compactNow(history);
+
+        assertTrue(compacted);
+        assertEquals(1, c.summarizeCalls.get());
+        assertTrue(history.get(1).content().contains("MANUAL SUMMARY"));
+        assertEquals(5, history.size());
+        assertTrue(history.get(3).content().startsWith("Q2"));
+    }
+
+    @Test
     void doesNothingWhenUserTurnsTooFew() {
         // 只有 2 个 user message，retainRecent=3，不应该压缩（即使 token 超阈值）
         StubCompactor c = new StubCompactor("MOCK SUMMARY", 3);

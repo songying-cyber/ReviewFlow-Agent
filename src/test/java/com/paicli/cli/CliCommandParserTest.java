@@ -24,6 +24,22 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesInitProjectMemoryCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/init");
+
+        assertEquals(CliCommandParser.CommandType.INIT_PROJECT_MEMORY, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesInitProjectMemoryForceCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/init --force");
+
+        assertEquals(CliCommandParser.CommandType.INIT_PROJECT_MEMORY, command.type());
+        assertEquals("--force", command.payload());
+    }
+
+    @Test
     void parsesConcreteModelNameAsSwitchModelPayload() {
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("/model step-custom-model");
 
@@ -71,6 +87,11 @@ class CliCommandParserTest {
         assertEquals("freellmapi", freeLlmApi.provider());
         assertNull(freeLlmApi.model());
         assertEquals(false, freeLlmApi.explicitModel());
+
+        Main.ModelSelection xfyun = Main.resolveModelSelection("maas");
+        assertEquals("xfyun", xfyun.provider());
+        assertNull(xfyun.model());
+        assertEquals(false, xfyun.explicitModel());
     }
 
     @Test
@@ -96,6 +117,20 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesXfyunProviderConfigUpdate() {
+        Main.ProviderConfigUpdate update = Main.parseProviderConfigUpdate(
+                "provider xfyun --base-url https://maas-api.cn-huabei-1.xf-yun.com/v2 --api-key sk-test --model Qwen3.6-35B-A3B --lora-id 0 --default");
+
+        assertNull(update.error());
+        assertEquals("xfyun", update.provider());
+        assertEquals("https://maas-api.cn-huabei-1.xf-yun.com/v2", update.baseUrl());
+        assertEquals("sk-test", update.apiKey());
+        assertEquals("Qwen3.6-35B-A3B", update.model());
+        assertEquals("0", update.loraId());
+        assertEquals(true, update.setDefault());
+    }
+
+    @Test
     void redactsApiKeyInSubmittedInput() {
         String redacted = Main.redactSensitiveInput(
                 "/config provider freellmapi --api-key sk-secret --model auto");
@@ -109,6 +144,30 @@ class CliCommandParserTest {
 
         assertEquals(CliCommandParser.CommandType.CLEAR, command.type());
         assertNull(command.payload());
+    }
+
+    @Test
+    void parsesCompactSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/compact");
+
+        assertEquals(CliCommandParser.CommandType.COMPACT, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void parsesExportSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/export");
+
+        assertEquals(CliCommandParser.CommandType.EXPORT, command.type());
+        assertNull(command.payload());
+    }
+
+    @Test
+    void exportSlashCommandDoesNotAcceptIgnoredArguments() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/export ./session.md");
+
+        assertEquals(CliCommandParser.CommandType.UNKNOWN_COMMAND, command.type());
+        assertEquals("/export ./session.md", command.payload());
     }
 
     @Test
