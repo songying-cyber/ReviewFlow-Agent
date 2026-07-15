@@ -42,6 +42,11 @@ public interface Renderer extends AutoCloseable {
         return false;
     }
 
+    /** 当前渲染器是否应该把 reasoning/thinking 内容展示给用户。 */
+    default boolean rendersReasoning() {
+        return true;
+    }
+
     /** 开始显示模型思考面板。plain renderer 保持 no-op，继续用正文流式输出。 */
     default void beginThinking(String label) {
     }
@@ -52,6 +57,14 @@ public interface Renderer extends AutoCloseable {
 
     /** 结束并清理模型思考面板。 */
     default void endThinking() {
+    }
+
+    /** 追加 assistant 正文 delta。普通终端渲染器忽略；远程通道可用它做正文分片推送。 */
+    default void appendAssistantContentDelta(String delta) {
+    }
+
+    /** assistant 正文流结束。普通终端渲染器忽略；远程通道可用它 flush 剩余正文。 */
+    default void finishAssistantContent() {
     }
 
     /** 当前渲染器是否支持通用临时活动面板。 */

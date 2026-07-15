@@ -163,6 +163,22 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesWechatSlashCommand() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/wechat");
+
+        assertEquals(CliCommandParser.CommandType.WECHAT, command.type());
+        assertEquals("start", command.payload());
+    }
+
+    @Test
+    void parsesWechatSlashCommandWithPayload() {
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/wechat status");
+
+        assertEquals(CliCommandParser.CommandType.WECHAT, command.type());
+        assertEquals("status", command.payload());
+    }
+
+    @Test
     void exportSlashCommandDoesNotAcceptIgnoredArguments() {
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("/export ./session.md");
 

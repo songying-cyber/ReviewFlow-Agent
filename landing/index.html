@@ -387,7 +387,7 @@ a { color: inherit; text-decoration: none; }
   max-width: 900px;
   width: 100%;
   margin: 48px auto 0;
-  background: #1a1a1a;
+  background: #050505;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 8px 40px rgba(0,0,0,0.15);
@@ -398,7 +398,7 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: 6px;
   padding: 12px 16px;
-  background: #2a2a2a;
+  background: #171717;
 }
 
 .terminal-dot {
@@ -411,19 +411,25 @@ a { color: inherit; text-decoration: none; }
 .terminal-dot.g { background: #28c840; }
 
 .terminal-body {
-  padding: 24px 32px;
+  padding: 30px 36px 28px;
   font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
-  font-size: 0.85rem;
-  line-height: 1.8;
-  color: #e0e0e0;
-  min-height: 220px;
+  font-size: clamp(0.76rem, 1.35vw, 1rem);
+  line-height: 1.32;
+  color: #f4f4f4;
+  text-align: left;
+  min-height: 360px;
+  overflow-x: auto;
 }
 
-.t-pi { color: #d4a74a; font-weight: 700; }
-.t-dim { color: #777; }
-.t-green { color: #4caf50; }
+.terminal-body > div { white-space: pre; }
+
+.t-logo { color: #aaff63; font-weight: 800; }
+.t-pi { color: #aaff63; font-weight: 800; }
+.t-strong { color: #fff; font-weight: 800; }
+.t-dim { color: #7c7c80; }
+.t-green { color: #aaff63; }
 .t-blue { color: #64b5f6; }
-.t-prompt { color: #81c784; }
+.t-prompt { color: #aaff63; }
 .t-cursor {
   display: inline-block;
   width: 7px;
@@ -649,6 +655,7 @@ a { color: inherit; text-decoration: none; }
   .hero-title { font-size: 2.5rem; }
   .install-cmd { font-size: 0.78rem; padding: 12px 16px; }
   .nav-links a:not(.nav-cta) { display: none; }
+  .terminal-body { padding: 22px 18px; min-height: 330px; }
 }
 </style>
 </head>
@@ -975,18 +982,18 @@ const observer = new IntersectionObserver((entries) => {
 document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
 
 // Terminal animation
-const lines = [
+const desktopLines = [
   { t: '', d: 0 },
-  { t: '   ╔══════════════════════════════════════════════╗', d: 0 },
-  { t: '   ║                                              ║', d: 0 },
-  { t: '   ║   <span class="t-pi">PaiCLI π</span>  v16.1.0                      ║', d: 80 },
-  { t: '   ║   Model step-3.5-flash (step)               ║', d: 160 },
-  { t: '   ║   MCP 4/4 · 61 tools · 2/2 skills          ║', d: 240 },
-  { t: '   ║   ReAct · Plan · MCP · Browser · Image      ║', d: 320 },
-  { t: '   ║                                              ║', d: 400 },
-  { t: '   ╚══════════════════════════════════════════════╝', d: 400 },
+  { t: '   <span class="t-logo">██████████</span>    <span class="t-strong">PaiCLI</span> <span class="t-pi">π</span>  <span class="t-dim">v16.1.0</span>', d: 0 },
+  { t: '   <span class="t-logo">  ██  ██</span>    <span class="t-dim">Model deepseek-v4-pro (deepseek)</span>', d: 80 },
+  { t: '   <span class="t-logo">  ██  ██</span>    <span class="t-dim">MCP 5/5 · 63 tools · 5/5 skills · ReAct</span>', d: 160 },
+  { t: '   <span class="t-logo">  ██  ██</span>    <span class="t-dim">ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG</span>', d: 240 },
+  { t: '   <span class="t-logo">  ██  ██</span>', d: 320 },
   { t: '', d: 450 },
-  { t: '<span class="t-dim">Tips: Type / for commands · @path to attach files</span>', d: 500 },
+  { t: 'Tips for getting started:', d: 500 },
+  { t: '1. Type <span class="t-strong">/</span> for commands and Tab completion', d: 560 },
+  { t: '2. Ask coding questions, edit code or run commands', d: 620 },
+  { t: '3. Attach context with <span class="t-strong">@path</span> or <span class="t-strong">@image:</span>', d: 680 },
   { t: '', d: 600 },
   { t: '<span class="t-prompt">*</span> 帮我创建一个 Spring Boot 认证模块', d: 800 },
   { t: '', d: 1000 },
@@ -999,6 +1006,31 @@ const lines = [
   { t: '<span class="t-green">✓</span> <span class="t-dim">Spring Boot 3.2 + JWT 认证模块创建完成</span>', d: 3200 },
 ];
 
+const mobileLines = [
+  { t: '', d: 0 },
+  { t: ' <span class="t-logo">██████████</span>  <span class="t-strong">PaiCLI</span> <span class="t-pi">π</span> <span class="t-dim">v16.1.0</span>', d: 0 },
+  { t: ' <span class="t-logo">  ██  ██</span>  <span class="t-dim">deepseek-v4-pro</span>', d: 80 },
+  { t: ' <span class="t-logo">  ██  ██</span>  <span class="t-dim">MCP 5/5 · 63 tools</span>', d: 160 },
+  { t: ' <span class="t-logo">  ██  ██</span>  <span class="t-dim">5/5 skills · ReAct</span>', d: 240 },
+  { t: ' <span class="t-logo">  ██  ██</span>  <span class="t-dim">Plan · MCP · Browser · RAG</span>', d: 320 },
+  { t: '', d: 450 },
+  { t: 'Tips for getting started:', d: 500 },
+  { t: '1. Type <span class="t-strong">/</span> for commands', d: 560 },
+  { t: '2. Ask questions or run commands', d: 620 },
+  { t: '3. Attach <span class="t-strong">@path</span> or <span class="t-strong">@image:</span>', d: 680 },
+  { t: '', d: 600 },
+  { t: '<span class="t-prompt">*</span> 创建 Spring Boot 认证模块', d: 800 },
+  { t: '', d: 1000 },
+  { t: '<span class="t-dim">🧠 Thinking...</span>', d: 1200 },
+  { t: '<span class="t-dim">  ├─ plan: 4 个子任务</span>', d: 1600 },
+  { t: '<span class="t-dim">  ├─ create_project</span>', d: 2000 },
+  { t: '<span class="t-dim">  ├─ write_file</span>', d: 2400 },
+  { t: '<span class="t-dim">  └─ mvn compile</span>', d: 2800 },
+  { t: '', d: 3000 },
+  { t: '<span class="t-green">✓</span> <span class="t-dim">JWT 认证模块创建完成</span>', d: 3200 },
+];
+
+const lines = window.matchMedia('(max-width: 600px)').matches ? mobileLines : desktopLines;
 const term = document.getElementById('terminal');
 let idx = 0;
 

@@ -2,7 +2,7 @@
 
 一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十六期的 `TUI 产品化`。
 
-当前进度：已完成第 16.1 期 inline 流式 TUI 形态修正、第 17 期 `LSP 诊断注入` MVP、第 18 期 `Git Side-History 快照与回滚` MVP、第 19 期 `Prompt 分层架构` MVP、第 20 期 `异步后台任务 + Runtime API` MVP、第 21 期 `图片复制粘贴输入` MVP。
+当前进度：已完成第 16.1 期 inline 流式 TUI 形态修正、第 17 期 `LSP 诊断注入` MVP、第 18 期 `Git Side-History 快照与回滚` MVP、第 19 期 `Prompt 分层架构` MVP、第 20 期 `异步后台任务 + Runtime API` MVP、第 21 期 `图片复制粘贴输入` MVP、第 23 期 `微信 iLink 通道` 文本 MVP。
 
 ## 测试策略
 
@@ -225,6 +225,18 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - 新一轮 ReAct / SubAgent 任务开始前会省略历史 image payload，仅保留文本元信息，避免旧截图反复进入上下文；模型 `reasoning_content` 默认只写日志 / 展示，DeepSeek V4 / Kimi thinking tool-call 续轮会按 provider 协议带回上一轮 assistant reasoning
 - DeepSeek 流式调用默认使用 HTTP/1.1，规避部分 HTTP/2 网关长 SSE 响应被重置导致的 `stream was reset: INTERNAL_ERROR`
 - 当前边界：不做视频 / 音频、图像生成、TUI sixel 图片预览
+
+### 第二十三期：微信 iLink 通道（文本 MVP）
+
+- 新增进程级入口：`paicli wechat setup`、`paicli wechat start`、`paicli wechat status`、`paicli wechat daemon start|stop|restart|status|logs`
+- 新增交互式入口：在 PaiCLI 主界面输入 `/wechat` 可扫码绑定并在当前进程后台启动微信通道；`/wechat setup` 重新扫码绑定，`/wechat status` 查看状态，`/wechat stop` 停止通道
+- 默认不开启微信通道；用户必须主动执行 `setup` 并扫码确认完成绑定
+- 支持在 Warp / iTerm2 / WezTerm 等兼容终端内直接显示 260px PNG 二维码；不支持终端图片协议时回退为字符二维码和链接
+- 微信侧使用 iLink `getupdates` 长轮询收消息、`sendmessage` 分片回消息，不依赖 SSE；这是独立通道，不是 Skill，也不是 Runtime API
+- 运行时只接受绑定用户私聊；普通消息单并发排队，`/help`、`/status`、`/pause`、`/resume`、`/stop` 走队列外控制路径
+- 微信侧用户消息会回显到 PaiCLI 终端 transcript；PaiCLI 终端继续显示 thinking / 工具调用过程，微信侧只接收 assistant 正文。正文会按增量分片推送来模拟流式体验，iLink 不提供真正 SSE 或改单条消息能力。
+- 微信通道使用非交互式默认拒绝策略：只读工具默认允许，`write_file` / `create_project` 继续受 workspace PathGuard 限制，`execute_command` 必须精确命中命令白名单，`mcp__*` 必须命中 MCP 白名单，`revert_turn` 和浏览器会话切换默认拒绝
+- 当前文本 MVP 会保留图片 / 文件消息的媒体元数据提示，但 CDN 下载解密、图片块输入和 `/send` 文件推送仍待后续媒体链路补齐
 
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
@@ -623,6 +635,19 @@ I
 
 ## 命令
 
+进程级入口：
+
+- `paicli wechat setup` - 绑定微信 iLink 通道，选择 workspace 并完成扫码确认
+- `paicli wechat start` - 前台启动微信通道
+- `paicli wechat status` - 查看绑定状态和 daemon pid
+- `paicli wechat daemon start|stop|restart|status|logs` - 管理本机微信通道后台进程
+
+交互式斜杠命令：
+
+- `/wechat` - 扫码绑定并启动微信 iLink 通道；已绑定时直接启动
+- `/wechat setup` - 重新扫码绑定并启动微信通道
+- `/wechat status` - 查看当前 PaiCLI 进程内微信通道状态
+- `/wechat stop` - 停止当前 PaiCLI 进程内微信通道
 - `/plan` - 下一条任务使用 Plan-and-Execute 模式
 - `/plan <任务>` - 直接用 Plan-and-Execute 模式执行这条任务
 - `/team` - 下一条任务使用 Multi-Agent 协作模式

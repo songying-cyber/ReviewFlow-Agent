@@ -58,6 +58,13 @@
             <classifier>jdk11</classifier>
         </dependency>
 
+        <!-- QR code rendering for terminal-based WeChat iLink login -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
         <!-- 中文分词 -->
         <dependency>
             <groupId>com.huaban</groupId>

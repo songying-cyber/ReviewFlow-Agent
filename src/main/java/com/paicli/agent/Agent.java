@@ -54,6 +54,7 @@ public class Agent {
     private SkillContextBuffer skillContextBuffer;
     private Renderer renderer;
     private Supplier<Boolean> hitlEnabledSupplier = () -> false;
+    private boolean returnFinalResponseWhenStreamed;
     private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
 
     public Agent(LlmClient llmClient) {
@@ -95,6 +96,10 @@ public class Agent {
 
     public void setRenderer(Renderer renderer) {
         this.renderer = renderer;
+    }
+
+    public void setReturnFinalResponseWhenStreamed(boolean returnFinalResponseWhenStreamed) {
+        this.returnFinalResponseWhenStreamed = returnFinalResponseWhenStreamed;
     }
 
     /**
@@ -241,7 +246,7 @@ public class Agent {
 
                 if (streamRenderer.hasStreamedOutput()) {
                     streamRenderer.finish();
-                    return "";
+                    return returnFinalResponseWhenStreamed ? (response.content() == null ? "" : response.content().trim()) : "";
                 }
                 streamRenderer.clearThinkingPanel();
                 return formatUserFacingResponse(reasoningTranscript.toString(), response.content());
@@ -774,7 +779,7 @@ public class Agent {
         String normalizedReasoning = reasoningContent == null ? "" : reasoningContent.trim();
         String normalizedAnswer = answer == null ? "" : answer.trim();
 
-        if (normalizedReasoning.isEmpty()) {
+        if (!renderer().rendersReasoning() || normalizedReasoning.isEmpty()) {
             return normalizedAnswer;
         }
         if (normalizedAnswer.isEmpty()) {
@@ -844,6 +849,10 @@ public class Agent {
             return renderer != null && renderer.supportsThinkingPanel();
         }
 
+        private boolean rendersReasoning() {
+            return renderer == null || renderer.rendersReasoning();
+        }
+
         private void beginThinking() {
             if (hasThinkingPanel()) {
                 renderer.beginThinking("Thinking");
@@ -860,6 +869,9 @@ public class Agent {
         @Override
         public void onReasoningDelta(String delta) {
             if (delta == null || delta.isEmpty()) {
+                return;
+            }
+            if (!rendersReasoning()) {
                 return;
             }
             if (contentStarted) {
@@ -928,6 +940,9 @@ public class Agent {
                 streamedOutput = true;
             }
             contentRenderer.append(delta);
+            if (renderer != null) {
+                renderer.appendAssistantContentDelta(delta);
+            }
             out().flush();
         }
 
@@ -949,8 +964,11 @@ public class Agent {
                 contentRenderer.finish();
                 contentRenderer = null;
             }
+            if (renderer != null) {
+                renderer.finishAssistantContent();
+            }
             String late = lateReasoning.toString().trim();
-            if (!late.isEmpty()) {
+            if (rendersReasoning() && !late.isEmpty()) {
                 out().println();
                 out().println(AnsiStyle.heading("🧠 补充思考"));
                 TerminalMarkdownRenderer r = newMarkdownRenderer();
@@ -981,8 +999,11 @@ public class Agent {
             if (contentRenderer != null) {
                 contentRenderer.finish();
             }
+            if (renderer != null) {
+                renderer.finishAssistantContent();
+            }
             String late = lateReasoning.toString().trim();
-            if (!late.isEmpty()) {
+            if (rendersReasoning() && !late.isEmpty()) {
                 out().println();
                 out().println(AnsiStyle.heading("🧠 补充思考"));
                 TerminalMarkdownRenderer r = newMarkdownRenderer();
@@ -1043,6 +1064,9 @@ public class Agent {
             if (thinkingQuotePrinted) {
                 return;
             }
+            if (!rendersReasoning()) {
+                return;
+            }
             String reasoning = visibleReasoning.toString()
                     .replace("\r\n", "\n")
                     .replace('\r', '\n')
@@ -1064,6 +1088,9 @@ public class Agent {
 
         private void printReasoningHeadingIfNeeded() {
             if (!reasoningHeadingPrinted) {
+                if (!rendersReasoning()) {
+                    return;
+                }
                 out().println(AnsiStyle.heading("🧠 思考过程"));
                 reasoningHeadingPrinted = true;
             }

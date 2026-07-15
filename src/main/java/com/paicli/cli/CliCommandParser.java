@@ -37,6 +37,7 @@ final class CliCommandParser {
         MCP_RESOURCES,
         MCP_PROMPTS,
         BROWSER,
+        WECHAT,
         TASK,
         SKILL_LIST,
         SKILL_SHOW,
@@ -239,6 +240,14 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/browser ", 0, 9)) {
             return new ParsedCommand(CommandType.BROWSER, trimmed.substring(9).trim());
+        }
+
+        if (trimmed.equalsIgnoreCase("/wechat")) {
+            return new ParsedCommand(CommandType.WECHAT, "start");
+        }
+
+        if (trimmed.regionMatches(true, 0, "/wechat ", 0, 8)) {
+            return new ParsedCommand(CommandType.WECHAT, trimmed.substring(8).trim());
         }
 
         if (trimmed.equalsIgnoreCase("/task")) {
