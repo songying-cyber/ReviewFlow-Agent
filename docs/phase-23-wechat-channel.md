@@ -6,6 +6,7 @@
 
 - 新增 PaiCLI 内置 WeChat Channel，默认关闭；只有显式执行 `paicli wechat ...` 才启动 iLink。
 - 不做 Skill、不走 Runtime API；微信接收用 iLink `getupdates` long-poll，回复流式体验靠 `sendmessage` 分块。
+- iLink 协议层出站回复仍是 `text_item.text` 文本消息，没有显式 Markdown parse mode；PaiCLI 保留 ClawBot 稳定支持的 Markdown 子集，并对标题、表格和非代码 fenced block 做移动端友好的归一化。
 - 微信通道**不是关闭 HITL，而是用「非交互式默认拒绝策略」替代交互式审批**：远程入口不能弹窗等人，所以危险操作默认拒绝而非默认放行；PathGuard / CommandGuard / 绑定用户校验 / 审计日志 / 工作区边界全部保留并强化。
 - v1 支持私聊、单绑定用户、单并发 turn、文字/图片/文件输入、文本回复和显式文件推送。
 
@@ -82,7 +83,9 @@ getupdates → [鉴权: boundUserId?] → [分类]
   - `WechatAgentSession`：无 JLine 初始化，复用 PaiCLI config、LLM、MCP、Skill、Memory、ToolRegistry；注入 `WechatPolicyDecider` 替代交互式 HITL handler。
 - 新增微信专用交互层：
   - `WechatCommandParser` 只支持 `/help /clear /compact /model /cwd /status /send /pause /resume /stop`；控制命令子集（`/stop /pause /resume /status`）标记为旁路队列。
-  - `WechatRenderer` 分块发送正文，过滤/降级 Markdown；reasoning、完整工具参数和 diff 细节默认只写日志。
+  - `WechatRenderer` 分块发送正文，保留 ClawBot 稳定支持的 Markdown 子集（列表、引用、粗体、行内代码、真实代码块），把标题转成粗体标题、表格转成键值/列表，并清理 ANSI / 终端专用标记、图片 Markdown、H5-H6、中文斜体等兼容性差的标记；reasoning、完整工具参数和 diff 细节默认只写日志。
+  - `WechatTextFormatter` 对非代码类 fenced block（流程说明、长中文箭头链）解包并换行，避免微信侧出现横向滚动代码块和“复制”按钮。
+  - `WechatTerminalRenderer` 对微信侧分片做 Markdown 结构感知：未闭合代码块、表格中间不提前 flush，避免客户端收到半个块后渲染失败。
   - turn 取消复用 ReAct `/cancel` 的 cancellation token；普通消息运行中排队。
 - 媒体规则：
   - 图片下载解密后保存本地，再用现有 `@image:<path>` 链路进入 `ImageReferenceParser`。
@@ -102,7 +105,8 @@ getupdates → [鉴权: boundUserId?] → [分类]
   - **成本围栏**：每日 turn 上限、单 turn token 预算超限拒绝。
   - 媒体下载/解密/上传、图片转 `@image`、文件路径注入。
   - **文件推送**：仅 `/send` 与工具产物登记表触发；回复中出现的任意本地路径**不**自动上传。
-  - `WechatRenderer`：正文分块、Markdown 过滤、reasoning 不外发、长任务 typing/安抚。
+  - `WechatRenderer`：正文分块、Markdown 保真、reasoning 不外发、长任务 typing/安抚。
+  - `WechatTerminalRenderer`：表格 / 代码块未结束时不提前推送；完整段落可提前发送。
 - 回归：
   - `mvn test -Dtest=Wechat*Test,CliCommandParserTest,ImageReferenceParserTest`
   - `mvn test -Pquick`

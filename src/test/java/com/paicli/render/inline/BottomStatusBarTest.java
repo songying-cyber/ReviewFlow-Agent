@@ -1,8 +1,10 @@
 package com.paicli.render.inline;
 
 import com.paicli.render.StatusInfo;
+import com.paicli.util.AnsiStyle;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.utils.AttributedStyle;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -12,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BottomStatusBarTest {
@@ -100,7 +103,30 @@ class BottomStatusBarTest {
         var lines = BottomStatusBar.formatStatusLines(info, 80);
         assertEquals(2, lines.size());
         assertTrue(lines.get(0).toString().contains("YOLO"), "status row should show current mode");
-        assertTrue(lines.get(1).toAnsi().contains("[2m"), "footer row should use subtle style");
+        if (AnsiStyle.isEnabled()) {
+            assertTrue(lines.get(1).toAnsi().contains("[2m"), "footer row should use subtle style");
+        } else {
+            assertFalse(lines.get(1).toAnsi().contains("\u001B["), "NO_COLOR should keep footer plain");
+        }
+    }
+
+    @Test
+    void statusLinesHighlightKeySegments() {
+        StatusInfo info = StatusInfo.tokens("deepseek-v4-pro", 1_000_000L, 5200L, 16_100L,
+                        437L, 14_300L, null, false, 0L, "idle")
+                .withEnvironment("MCP 5/5", "Skill 5/5");
+        var lines = BottomStatusBar.formatStatusLines(info, 140);
+        String top = lines.get(0).toString();
+        String footer = lines.get(1).toString();
+
+        assertStyledWhenColorEnabled(lines.get(0), top, "YOLO");
+        assertStyledWhenColorEnabled(lines.get(0), top, "5 MCP servers");
+        assertStyledWhenColorEnabled(lines.get(0), top, "5 skills");
+        assertStyledWhenColorEnabled(lines.get(1), footer, "deepseek-v4-pro");
+        assertStyledWhenColorEnabled(lines.get(1), footer, "idle");
+        assertStyledWhenColorEnabled(lines.get(1), footer, "ctx");
+        assertStyledWhenColorEnabled(lines.get(1), footer, "in");
+        assertStyledWhenColorEnabled(lines.get(1), footer, "cache");
     }
 
     @Test
@@ -191,5 +217,15 @@ class BottomStatusBarTest {
 
     private static String visible(String line) {
         return line;
+    }
+
+    private static void assertStyledWhenColorEnabled(org.jline.utils.AttributedString line, String plain, String segment) {
+        int index = plain.indexOf(segment);
+        assertTrue(index >= 0, "missing segment: " + segment + " in " + plain);
+        if (AnsiStyle.isEnabled()) {
+            assertNotEquals(AttributedStyle.DEFAULT, line.styleAt(index), segment + " should be styled");
+        } else {
+            assertEquals(AttributedStyle.DEFAULT, line.styleAt(index), segment + " should stay plain under NO_COLOR");
+        }
     }
 }

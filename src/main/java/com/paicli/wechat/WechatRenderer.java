@@ -79,16 +79,19 @@ public class WechatRenderer implements Renderer {
         if (text == null || text.isEmpty()) {
             return;
         }
-        String filtered = filterMarkdown(text);
-        buffer.append(filtered);
+        buffer.append(text);
     }
 
     public synchronized int pendingChars() {
         return buffer.length();
     }
 
+    public synchronized String pendingText() {
+        return buffer.toString();
+    }
+
     public synchronized void flushBuffer() {
-        String captured = buffer.toString().trim();
+        String captured = filterMarkdown(buffer.toString()).trim();
         buffer.setLength(0);
         if (captured.isBlank()) {
             return;
@@ -106,15 +109,7 @@ public class WechatRenderer implements Renderer {
         if (text == null || text.isBlank()) {
             return "";
         }
-        return stripAnsi(text)
-                .replace("\r\n", "\n")
-                .replace('\r', '\n')
-                .replace("▪ ", "")
-                .replace("■ ", "")
-                .replaceAll("(?m)^```[a-zA-Z0-9_-]*\\s*$", "```")
-                .replaceAll("(?m)^#{1,6}\\s+", "")
-                .replaceAll("\\*\\*([^*]+)\\*\\*", "$1")
-                .replaceAll("(?m)^\\s+", "");
+        return WechatTextFormatter.format(text);
     }
 
     static String stripAnsi(String text) {

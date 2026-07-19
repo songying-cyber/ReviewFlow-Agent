@@ -12,7 +12,84 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WechatRendererTest {
     @Test
     void filtersMarkdownHeadingsAndBold() {
-        assertEquals("标题\n加粗", WechatRenderer.filterMarkdown("# 标题\n**加粗**"));
+        assertEquals("**标题**\n**加粗**", WechatRenderer.filterMarkdown("#标题\n** 加粗 **"));
+    }
+
+    @Test
+    void formatsMarkdownTableForMobileWechat() {
+        String markdown = """
+                | API | 用途 |
+                | --- | --- |
+                | getupdates | 长轮询 |
+                | sendmessage | 发送回复 |
+                """;
+
+        String expected = """
+                - **getupdates**：长轮询
+                - **sendmessage**：发送回复
+                """.trim();
+
+        assertEquals(expected, WechatRenderer.filterMarkdown(markdown));
+    }
+
+    @Test
+    void unwrapsProseFlowCodeFence() {
+        String markdown = """
+                ```
+                用户发消息 → 微信服务器 → POST XML到你的服务器 URL → 你的服务器处理并返回 XML
+                ```
+                """;
+
+        String expected = """
+                用户发消息
+                → 微信服务器
+                → POST XML到你的服务器 URL
+                → 你的服务器处理并返回 XML
+                """.trim();
+        assertEquals(expected, WechatRenderer.filterMarkdown(markdown));
+    }
+
+    @Test
+    void preservesRealCodeFenceMarkers() {
+        String markdown = """
+                ```java
+                System.out.println("hi");
+                ```
+                """;
+
+        assertEquals(markdown.trim(), WechatRenderer.filterMarkdown(markdown));
+    }
+
+    @Test
+    void removesUnsupportedImageMarkdown() {
+        assertEquals("前后", WechatRenderer.filterMarkdown("前![alt](https://example.com/a.png)后"));
+    }
+
+    @Test
+    void downgradesUnsupportedDeepHeadings() {
+        assertEquals("小标题\n**一级**", WechatRenderer.filterMarkdown("##### 小标题\n#一级"));
+    }
+
+    @Test
+    void stripsCjkItalicButKeepsBoldAndInlineCode() {
+        assertEquals("中文强调 **加粗** `code` *ascii*",
+                WechatRenderer.filterMarkdown("*中文强调* **加粗** `code` *ascii*"));
+    }
+
+    @Test
+    void normalizesMalformedHeadingAndBoldFromWechatScreenshots() {
+        assertEquals("**2.微信小程序接入核心流程：**",
+                WechatRenderer.filterMarkdown("##2.微信小程序接入**核心流程： **"));
+    }
+
+    @Test
+    void convertsCollapsedMarkdownTableIntoKeyValueList() {
+        String raw = "|---|---|| AppID / AppSecret |每个微信应用的身份凭证 || Access Token |调用服务端 API 的短期凭证 |";
+        String expected = """
+                - **AppID / AppSecret**：每个微信应用的身份凭证
+                - **Access Token**：调用服务端 API 的短期凭证
+                """.trim();
+        assertEquals(expected, WechatRenderer.filterMarkdown(raw));
     }
 
     @Test
