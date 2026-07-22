@@ -220,7 +220,7 @@ public class Main {
         LlmClient llmClient = LlmClientFactory.createFromConfig(config);
         if (llmClient == null) {
             System.err.println("❌ 错误: 未找到可用的 API Key");
-            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY、KIMI_API_KEY、FREELLMAPI_API_KEY 或 XFYUN_MAAS_API_KEY");
+            System.err.println("请在 .env 文件中添加 GLM_API_KEY、DEEPSEEK_API_KEY、STEP_API_KEY、KIMI_API_KEY、FREELLMAPI_API_KEY、XFYUN_MAAS_API_KEY 或 AGNES_API_KEY");
             System.exit(1);
         }
         AtomicReference<LlmClient> llmClientRef = new AtomicReference<>(llmClient);
@@ -571,7 +571,8 @@ public class Main {
                             ui.println("   /model step          - 切换到 StepFun（读取配置模型）");
                             ui.println("   /model kimi          - 切换到 Kimi（读取配置模型）");
                             ui.println("   /model freellmapi    - 切换到本地 FreeLLMAPI（读取配置模型）");
-                            ui.println("   /model xfyun         - 切换到讯飞星辰 MaaS（读取配置模型）\n");
+                            ui.println("   /model xfyun         - 切换到讯飞星辰 MaaS（读取配置模型）");
+                            ui.println("   /model agnes         - 切换到 Agnes 2.0 Flash（读取配置模型）\n");
                         } else {
                             ModelSelection target = resolveModelSelection(selection);
                             if (target.explicitModel()) {
@@ -1533,8 +1534,10 @@ public class Main {
                 new SlashCommandHint("/model kimi", "/model kimi", "切换到 Kimi（读取配置模型）"),
                 new SlashCommandHint("/model freellmapi", "/model freellmapi", "切换到本地 FreeLLMAPI（读取配置模型）"),
                 new SlashCommandHint("/model xfyun", "/model xfyun", "切换到讯飞星辰 MaaS（读取配置模型）"),
+                new SlashCommandHint("/model agnes", "/model agnes", "切换到 Agnes 2.0 Flash（读取配置模型）"),
                 new SlashCommandHint("/config provider freellmapi ", "/config provider freellmapi <选项>", "配置本地 FreeLLMAPI provider"),
                 new SlashCommandHint("/config provider xfyun ", "/config provider xfyun <选项>", "配置讯飞星辰 MaaS provider"),
+                new SlashCommandHint("/config provider agnes ", "/config provider agnes <选项>", "配置 Agnes provider"),
                 new SlashCommandHint("/plan", "/plan", "下一条任务使用 Plan-and-Execute 模式"),
                 new SlashCommandHint("/plan ", "/plan <任务内容>", "直接用计划模式执行这条任务"),
                 new SlashCommandHint("/team", "/team", "下一条任务使用 Multi-Agent 协作模式"),
@@ -1706,7 +1709,7 @@ public class Main {
             return;
         }
         String hint = switch (selected) {
-            case 0, 1 -> "💡 GLM: /model glm-5.1 / /model glm-5v-turbo；其它: /model deepseek|step|kimi|freellmapi|xfyun 读取配置模型";
+            case 0, 1 -> "💡 GLM: /model glm-5.1 / /model glm-5v-turbo；其它: /model deepseek|step|kimi|freellmapi|xfyun|agnes 读取配置模型";
             case 2 -> "💡 切换 HITL: /hitl on / /hitl off";
             case 3 -> "💡 管理 Skill: /skill list / /skill on <name> / /skill off <name>";
             case 4 -> "💡 切换渲染器（重启后生效）: PAICLI_RENDERER=inline|lanterna|plain";
@@ -1823,8 +1826,10 @@ public class Main {
                   /config provider freellmapi --model qwen/qwen3-coder:free --default
                   /config provider xfyun --base-url https://maas-api.cn-huabei-1.xf-yun.com/v2 --api-key <key> --model Qwen3.6-35B-A3B --default
                   /config provider xfyun --lora-id <resourceId>
+                  /config provider agnes --api-key <key> --model agnes-2.0-flash --default
                   /model freellmapi
                   /model xfyun
+                  /model agnes
                 """.stripTrailing();
     }
 
@@ -1884,12 +1889,13 @@ public class Main {
             case "moonshot", "moonshotai", "moonshot-ai" -> "kimi";
             case "free-llm-api", "free_llm_api", "freellm", "free-llm" -> "freellmapi";
             case "xfyun-maas", "xfyun_maas", "iflytek", "iflytek-maas", "iflytek_maas", "maas" -> "xfyun";
+            case "agnes-ai", "agnes_ai", "sapiens", "sapiens-ai", "sapiens_ai" -> "agnes";
             default -> provider;
         };
     }
 
     private static boolean isSupportedProvider(String provider) {
-        return List.of("glm", "deepseek", "step", "kimi", "freellmapi", "xfyun").contains(provider);
+        return List.of("glm", "deepseek", "step", "kimi", "freellmapi", "xfyun", "agnes").contains(provider);
     }
 
     private static String maskSecret(String value) {
@@ -2758,6 +2764,8 @@ public class Main {
                     new ModelSelection("freellmapi", null, false);
             case "xfyun", "xfyun-maas", "xfyun_maas", "iflytek", "iflytek-maas", "iflytek_maas", "maas" ->
                     new ModelSelection("xfyun", null, false);
+            case "agnes", "agnes-ai", "agnes_ai", "sapiens", "sapiens-ai", "sapiens_ai" ->
+                    new ModelSelection("agnes", null, false);
             default -> {
                 if (normalized.startsWith("glm-")) {
                     yield new ModelSelection("glm", value, true);
@@ -2770,6 +2778,9 @@ public class Main {
                 }
                 if (normalized.startsWith("kimi-") || normalized.startsWith("moonshot-")) {
                     yield new ModelSelection("kimi", value, true);
+                }
+                if (normalized.startsWith("agnes-")) {
+                    yield new ModelSelection("agnes", value, true);
                 }
                 yield new ModelSelection(normalized, null, false);
             }

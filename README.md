@@ -83,8 +83,8 @@ mvn test -DskipTests=false
 ### 第八期：多模型适配 + 运行时切换
 
 - `LlmClient` 接口抽象 + `AbstractOpenAiCompatibleClient` 模板基类
-- 内置 `GLMClient`、`DeepSeekClient`、`StepClient`、`KimiClient`、`FreeLlmApiClient` 五个瘦实现
-- `/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型；`/model deepseek` / `/model step` / `/model kimi` / `/model freellmapi` 切 provider 并读取配置里的具体模型
+- 内置 `GLMClient`、`DeepSeekClient`、`StepClient`、`KimiClient`、`FreeLlmApiClient`、`AgnesClient` 六个瘦实现
+- `/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型；`/model deepseek` / `/model step` / `/model kimi` / `/model freellmapi` / `/model agnes` 切 provider 并读取配置里的具体模型
 - 配置持久化到 `~/.paicli/config.json`，API Key 可从配置、环境变量或 `.env` 读取
 
 ### 第九期：联网能力 + Web 工具
@@ -113,7 +113,7 @@ mvn test -DskipTests=false
 ### 第十二期：长上下文工程
 
 - `LlmClient` 声明模型能力：`maxContextWindow()`、`supportsPromptCaching()`、`promptCacheMode()`
-- GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window，StepFun 默认 256k window，Kimi K2.6 默认 256k window，FreeLLMAPI 默认按 128k 保守预算
+- GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window，Agnes 2.0 Flash 默认 1M window，StepFun 默认 256k window，Kimi K2.6 默认 256k window，FreeLLMAPI 默认按 128k 保守预算
 - `AgentBudget` 按当前模型动态计算预算，默认 `80% * maxContextWindow`，仍可用系统属性覆盖
 - short / balanced / long 三种上下文模式：长上下文模式跳过摘要压缩，语义检索 topK 可提升到 20
 - `search_code` 未显式传 `top_k` 时按上下文模式自适应；默认代码定位仍优先实时 grep/read
@@ -127,7 +127,7 @@ mvn test -DskipTests=false
 - `~/.paicli/mcp.json` 不存在时启动自动创建模板，默认使用 `--isolated=true` 临时浏览器 profile
 - 用于处理 SPA / JS 渲染 / 防爬墙 / 表单交互页面；微信公众号文章、知乎专栏、推特、小红书等 `web_fetch` 失败站点会引导走浏览器 MCP
 - HITL 的“全部放行”支持 MCP server 维度，连续浏览器操作可对 `chrome-devtools` 一次确认
-- `image` 类型结果会作为图片输入附加到下一轮；文本 fallback 仍保留，用于日志、人类可读摘要和 API 不接受图片时的上下文
+- `image` 类型结果会作为图片输入附加到下一轮；文本 fallback 仍保留，用于日志、人类可读摘要，以及 DeepSeek 等不接受图片块的 provider 自动降级上下文
 - MCP initialize 默认超时为 60 秒；CLI 首屏默认最多等待 8 秒，超时后先进入交互，未完成的 server 保持 `starting` 并在后台继续启动，可用 `/mcp` 和 `/mcp logs <name>` 追踪
 
 ### 第十四期：CDP 会话复用 + 登录态访问
@@ -215,10 +215,10 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 ### 第二十一期：图片复制粘贴输入（MVP）
 
 - `LlmClient.Message` 支持 `ContentPart`，包括 `text`、`image_base64`、`image_url`
-- 请求体在含图片时输出带图片块的 content array，纯文本仍保持 string content
-- `LlmClient` 公共接口不做图片能力声明；输入层只负责读取、压缩、附加图片，provider API 负责最终接收或返回错误
+- 请求体在含图片且 provider 支持图片输入时输出带图片块的 content array，纯文本仍保持 string content
+- `LlmClient` 公共接口用 `supportsImageInput()` 声明图片能力；DeepSeek 等文本 provider 会把图片块替换成文本提示，避免 `image_url` 进入不支持多模态的 API 请求体
 - GLM 套餐用户可通过 `/model glm-5v-turbo` 切换到 GLM-5V-Turbo 多模态模型，再用 Ctrl+V 或 `@image:` 输入图片；本地 base64 图片会按智谱格式写入 `image_url.url`
-- MCP `image` content 会保留 base64 与 `mimeType`，在 ReAct / Plan / SubAgent 工具结果后作为图片 user message 回灌
+- MCP `image` content 会保留 base64 与 `mimeType`，在 ReAct / Plan / SubAgent 工具结果后作为图片 user message 回灌；当前 provider 不支持图片输入时，请求序列化层会自动省略图片 payload 并保留文本提示
 - 用户可通过 `@image:file:///abs/path.png`、`@image:/abs/path.png` 或 `@image:relative/path.png` 引用本地图片
 - 本地图片和 MCP 图片都会按 Claude Code 同类策略预处理：不是 OCR 成文本，而是压缩 / 缩放后作为图片块发送；带 alpha 的 PNG 会铺白底重编码；额外注入来源、尺寸和坐标映射元信息
 - 本地 `@image:` 消息会要求模型优先分析本轮图片；除非用户明确要求结合历史，历史对话和历史工具结果不能替代当前图片内容
@@ -325,7 +325,7 @@ Tips for getting started:
 
 ### 第八期
 
-- 🔄 GLM-5.1、GLM-5V-Turbo、DeepSeek V4、阶跃星辰 StepFun、Kimi K2.6 与 FreeLLMAPI 多模型，`/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型，`/model deepseek` / `/model step` / `/model kimi` / `/model freellmapi` 读取配置模型
+- 🔄 GLM-5.1、GLM-5V-Turbo、DeepSeek V4、阶跃星辰 StepFun、Kimi K2.6、FreeLLMAPI 与 Agnes 2.0 Flash 多模型，`/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型，`/model deepseek` / `/model step` / `/model kimi` / `/model freellmapi` / `/model agnes` 读取配置模型
 - 🧱 `LlmClient` 接口 + 模板方法基类，新增 provider 只需 ~20 行
 - 💾 默认模型持久化到 `~/.paicli/config.json`
 
@@ -348,7 +348,7 @@ Tips for getting started:
 
 ### 1. 配置 API Key
 
-复制 `.env.example` 为 `.env`，并填入你的 GLM、DeepSeek、StepFun、Kimi 或 FreeLLMAPI API Key：
+复制 `.env.example` 为 `.env`，并填入你的 GLM、DeepSeek、StepFun、Kimi、FreeLLMAPI 或 Agnes API Key：
 
 ```bash
 cp .env.example .env
@@ -369,6 +369,10 @@ export KIMI_MODEL=kimi-k2.6
 export FREELLMAPI_API_KEY=your_freellmapi_unified_key_here
 export FREELLMAPI_BASE_URL=http://localhost:5173/v1
 export FREELLMAPI_MODEL=auto
+# 或
+export AGNES_API_KEY=your_agnes_api_key_here
+export AGNES_MODEL=agnes-2.0-flash
+export AGNES_BASE_URL=https://apihub.agnes-ai.com/v1
 ```
 
 也可以在 PaiCLI 内用命令写入 `~/.paicli/config.json`，不会覆盖 Kimi 配置：
@@ -376,6 +380,8 @@ export FREELLMAPI_MODEL=auto
 ```text
 /config provider freellmapi --base-url http://localhost:5173/v1 --api-key <key> --model auto
 /model freellmapi
+/config provider agnes --api-key <key> --model agnes-2.0-flash --default
+/model agnes
 ```
 
 长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
@@ -763,7 +769,8 @@ src/main/java/com/paicli
 │   ├── DeepSeekClient.java     # DeepSeek API 客户端
 │   ├── StepClient.java         # 阶跃星辰 StepFun API 客户端
 │   ├── KimiClient.java         # Kimi / Moonshot API 客户端
-│   └── FreeLlmApiClient.java   # 本地 FreeLLMAPI OpenAI-compatible 网关客户端
+│   ├── FreeLlmApiClient.java   # 本地 FreeLLMAPI OpenAI-compatible 网关客户端
+│   └── AgnesClient.java        # Agnes AI OpenAI-compatible 客户端
 ├── context/
 │   ├── ContextMode.java        # short / balanced / long 模式
 │   ├── ContextProfile.java     # 模型窗口与上下文策略

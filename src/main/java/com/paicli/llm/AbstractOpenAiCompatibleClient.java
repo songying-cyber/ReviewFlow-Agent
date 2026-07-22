@@ -285,6 +285,12 @@ public abstract class AbstractOpenAiCompatibleClient implements LlmClient {
     }
 
     private void appendMessageContent(ObjectNode msgNode, Message msg) {
+        if (msg.hasImageContent() && !supportsImageInput()) {
+            appendMessageContent(msgNode, msg.withoutImageContent(
+                    "当前 provider/model 不支持图片附件，已省略 {count} 张；请基于文字工具结果继续，必要时改用支持视觉输入的模型。"));
+            return;
+        }
+
         if (!msg.hasContentParts()) {
             msgNode.put("content", msg.content());
             return;

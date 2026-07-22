@@ -313,7 +313,7 @@ class AbstractOpenAiCompatibleClientImageInputTest {
     }
 
     @Test
-    void serializesImageMessagesWithoutModelCapabilityGate() throws Exception {
+    void deepseekClientOmitsUnsupportedImageBlocks() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.enqueue(new MockResponse()
                     .setHeader("Content-Type", "text/event-stream")
@@ -323,7 +323,8 @@ class AbstractOpenAiCompatibleClientImageInputTest {
                             data: [DONE]
 
                             """));
-            TextOnlyClient client = new TextOnlyClient(server.url("/chat/completions").toString());
+            DeepSeekClient client = new DeepSeekClient("test-key", "deepseek-v4-flash",
+                    server.url("/chat/completions").toString());
 
             client.chat(List.of(LlmClient.Message.user(List.of(
                     LlmClient.ContentPart.text("看图"),
@@ -335,9 +336,11 @@ class AbstractOpenAiCompatibleClientImageInputTest {
                     .path("messages").get(0).path("content");
 
             assertEquals("text", content.get(0).path("type").asText());
-            assertEquals("image_url", content.get(1).path("type").asText());
-            assertEquals("data:image/png;base64,aGVsbG8=",
-                    content.get(1).path("image_url").path("url").asText());
+            assertEquals("看图", content.get(0).path("text").asText());
+            assertEquals("text", content.get(1).path("type").asText());
+            assertEquals("[当前 provider/model 不支持图片附件，已省略 1 张；请基于文字工具结果继续，必要时改用支持视觉输入的模型。]",
+                    content.get(1).path("text").asText());
+            assertFalse(content.toString().contains("image_url"));
         }
     }
 
@@ -481,36 +484,4 @@ class AbstractOpenAiCompatibleClientImageInputTest {
 
     }
 
-    private static final class TextOnlyClient extends AbstractOpenAiCompatibleClient {
-        private final String apiUrl;
-
-        private TextOnlyClient(String apiUrl) {
-            this.apiUrl = apiUrl;
-        }
-
-        @Override
-        protected String getApiUrl() {
-            return apiUrl;
-        }
-
-        @Override
-        protected String getModel() {
-            return "text-only-test";
-        }
-
-        @Override
-        public String getModelName() {
-            return getModel();
-        }
-
-        @Override
-        public String getProviderName() {
-            return "test";
-        }
-
-        @Override
-        protected String getApiKey() {
-            return "test-key";
-        }
-    }
 }

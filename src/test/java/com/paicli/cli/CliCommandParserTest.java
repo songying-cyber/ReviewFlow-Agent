@@ -92,6 +92,11 @@ class CliCommandParserTest {
         assertEquals("xfyun", xfyun.provider());
         assertNull(xfyun.model());
         assertEquals(false, xfyun.explicitModel());
+
+        Main.ModelSelection agnes = Main.resolveModelSelection("agnes-2.0-flash");
+        assertEquals("agnes", agnes.provider());
+        assertEquals("agnes-2.0-flash", agnes.model());
+        assertEquals(true, agnes.explicitModel());
     }
 
     @Test
@@ -127,6 +132,19 @@ class CliCommandParserTest {
         assertEquals("sk-test", update.apiKey());
         assertEquals("Qwen3.6-35B-A3B", update.model());
         assertEquals("0", update.loraId());
+        assertEquals(true, update.setDefault());
+    }
+
+    @Test
+    void parsesAgnesProviderConfigUpdate() {
+        Main.ProviderConfigUpdate update = Main.parseProviderConfigUpdate(
+                "provider agnes-ai --base-url https://apihub.agnes-ai.com/v1 --api-key sk-test --model agnes-2.0-flash --default");
+
+        assertNull(update.error());
+        assertEquals("agnes", update.provider());
+        assertEquals("https://apihub.agnes-ai.com/v1", update.baseUrl());
+        assertEquals("sk-test", update.apiKey());
+        assertEquals("agnes-2.0-flash", update.model());
         assertEquals(true, update.setDefault());
     }
 

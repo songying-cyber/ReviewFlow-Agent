@@ -116,6 +116,25 @@ class LlmClientFactoryTest {
     }
 
     @Test
+    void createsAgnesClientFromAliasAndConfiguredProvider() {
+        PaiCliConfig config = new PaiCliConfig();
+        config.setProviders(new LinkedHashMap<>());
+        config.getProviders().put("agnes",
+                new PaiCliConfig.ProviderConfig(
+                        "test-agnes-key",
+                        "https://apihub.agnes-ai.com/v1",
+                        "agnes-2.0-flash"));
+
+        LlmClient client = LlmClientFactory.create("agnes-ai", config);
+
+        AgnesClient agnesClient = assertInstanceOf(AgnesClient.class, client);
+        assertEquals("agnes", agnesClient.getProviderName());
+        assertEquals("agnes-2.0-flash", agnesClient.getModelName());
+        assertEquals("https://apihub.agnes-ai.com/v1/chat/completions", agnesClient.getApiUrl());
+        assertEquals(1_000_000, agnesClient.maxContextWindow());
+    }
+
+    @Test
     void returnsNullForUnknownProvider() {
         PaiCliConfig config = new PaiCliConfig();
         config.getProviders().put("unknown", new PaiCliConfig.ProviderConfig("test-key", null, "unknown-model"));

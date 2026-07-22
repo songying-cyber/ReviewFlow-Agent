@@ -28,6 +28,10 @@ public interface LlmClient {
         return true;
     }
 
+    default boolean supportsImageInput() {
+        return true;
+    }
+
     default String promptCacheMode() {
         return "none";
     }
@@ -121,6 +125,10 @@ public interface LlmClient {
         }
 
         public Message withoutImageContent() {
+            return withoutImageContent("历史图片附件已省略 {count} 张；如需重新查看，请使用上文 Image source 或相关工具结果。");
+        }
+
+        public Message withoutImageContent(String noticeTemplate) {
             if (!hasImageContent()) {
                 return this;
             }
@@ -136,8 +144,10 @@ public interface LlmClient {
                     stripped.add(part);
                 }
             }
-            stripped.add(ContentPart.text("[历史图片附件已省略 " + omitted
-                    + " 张；如需重新查看，请使用上文 Image source 或相关工具结果。]"));
+            String notice = noticeTemplate == null || noticeTemplate.isBlank()
+                    ? "图片附件已省略 {count} 张。"
+                    : noticeTemplate;
+            stripped.add(ContentPart.text("[" + notice.replace("{count}", String.valueOf(omitted)) + "]"));
             return new Message(role, plainText(stripped), reasoningContent, toolCalls, toolCallId, List.copyOf(stripped));
         }
 

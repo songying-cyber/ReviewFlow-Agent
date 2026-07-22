@@ -51,6 +51,11 @@ public class DeepSeekClient extends AbstractOpenAiCompatibleClient {
     }
 
     @Override
+    public boolean supportsImageInput() {
+        return false;
+    }
+
+    @Override
     protected OkHttpClient httpClient() {
         return HTTP_1_1_CLIENT;
     }

@@ -11,7 +11,7 @@ For the primary entry point, see `/AGENTS.md`.
 ### API Key
 
 1. `~/.paicli/config.json` 中对应 provider 的 `apiKey`
-2. 环境变量：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY` / `XFYUN_MAAS_API_KEY`（Kimi 兼容 `MOONSHOT_API_KEY`，讯飞 MaaS 兼容 `XFYUN_API_KEY`）
+2. 环境变量：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY` / `XFYUN_MAAS_API_KEY` / `AGNES_API_KEY`（Kimi 兼容 `MOONSHOT_API_KEY`，讯飞 MaaS 兼容 `XFYUN_API_KEY`）
 3. 仓库当前目录下的 `.env`
 4. 用户主目录下的 `.env`
 
@@ -50,6 +50,7 @@ For the primary entry point, see `/AGENTS.md`.
 
 SSE 流式下 readTimeout 是两次 read 间最大间隔，GLM-5.1 生成大段 reasoning 时可能长时间静默，所以放宽到 300 秒。
 DeepSeek 流式调用默认使用 HTTP/1.1，避免部分 HTTP/2 网关在长 SSE 响应中重置 stream，表现为 `stream was reset: INTERNAL_ERROR`。
+DeepSeek 当前不发送图片输入：`supportsImageInput()` 返回 false，含图片的 `ContentPart` 会在 OpenAI-compatible 请求序列化时替换成文本提示，避免不支持多模态的 DeepSeek API 收到 `image_url` block。
 
 ### Web Search Provider Config
 
@@ -88,7 +89,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 ### Long Context Engineering
 
 - `ContextProfile` 计算 short/balanced/long 模式
-- GLM-5.1: 200k / DeepSeek V4: 1M / StepFun: 256k / Kimi K2.6: 256k / FreeLLMAPI: 128k
+- GLM-5.1: 200k / DeepSeek V4: 1M / Agnes: 1M / StepFun: 256k / Kimi K2.6: 256k / FreeLLMAPI: 128k
 - long 模式(>=100k)：跳过 Memory 自动摘要，search_code 语义辅助 topK=20，MCP resources 自动索引；精确代码定位仍优先实时 glob/grep/read
 - prompt caching：能力声明 + cached usage 解析
 - 自动压缩阈值按 Claude Code 风格预留空间：`maxContextWindow - min(20k, window/4) - min(13k, window/8)`；200k 窗口约 167k 触发，1M 窗口约 967k 触发，小窗口会按比例缩小预留。
@@ -222,6 +223,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - ImageProcessor：铺白底/缩放 2000x2000/压缩 5MB
 - 输入：`@image:file:///path.png` / `@image:/path.png` / `@image:relative.png`
 - GLM-5V-Turbo 通过 `/model glm-5v-turbo` 切换
+- Provider 通过 `supportsImageInput()` 声明是否接收图片；不支持时保留文字上下文并省略图片 payload
 - 历史 image payload 替换为文本占位，避免旧截图消耗上下文
 
 ---
@@ -265,6 +267,7 @@ TuiBootstrap / LanternaWindow / TuiSessionController / pane/ / hitl/ / history/ 
 - KimiClient：kimi-k2.6，thinking + tool calls 带回 reasoning_content
 - FreeLlmApiClient：auto，默认 http://localhost:5173/v1，OpenAI-compatible 本地网关；可用 `/config provider freellmapi ...` 写入配置后 `/model freellmapi` 切换
 - XfyunMaaSClient：Qwen3.6-35B-A3B，默认 https://maas-api.cn-huabei-1.xf-yun.com/v2，OpenAI-compatible 讯飞星辰 MaaS；可用 `/config provider xfyun ...` 写入配置后 `/model xfyun` 切换。`model` 必须使用 MaaS 服务管控页展示的 modelId；微调模型可配置 `--lora-id <resourceId>`，作为 HTTP header `lora_id` 发出；该 provider 不发送 PaiCLI 内置 tools。
+- AgnesClient：agnes-2.0-flash，默认 https://apihub.agnes-ai.com/v1，OpenAI-compatible Agnes AI，默认 1M context window；可用 `/config provider agnes ...` 写入配置后 `/model agnes` 切换，支持流式输出和 tools。
 
 ---
 
@@ -286,6 +289,9 @@ GLM_API_KEY=your_api_key_here
 # FREELLMAPI_API_KEY=your_freellmapi_unified_key_here
 # FREELLMAPI_MODEL=auto
 # FREELLMAPI_BASE_URL=http://localhost:5173/v1
+# AGNES_API_KEY=your_agnes_api_key_here
+# AGNES_MODEL=agnes-2.0-flash
+# AGNES_BASE_URL=https://apihub.agnes-ai.com/v1
 # XFYUN_MAAS_API_KEY=your_xfyun_maas_api_key_here
 # XFYUN_MAAS_MODEL=Qwen3.6-35B-A3B
 # XFYUN_MAAS_BASE_URL=https://maas-api.cn-huabei-1.xf-yun.com/v2

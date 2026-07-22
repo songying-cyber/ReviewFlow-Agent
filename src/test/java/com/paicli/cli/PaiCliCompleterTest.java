@@ -71,6 +71,16 @@ class PaiCliCompleterTest {
     }
 
     @Test
+    void completesAgnesProviderCommand() {
+        PaiCliCompleter completer = new PaiCliCompleter(List::of);
+        List<Candidate> candidates = new ArrayList<>();
+
+        completer.complete(null, parsed("/config provider ag", "ag"), candidates);
+
+        assertTrue(candidates.stream().anyMatch(c -> c.value().equals("agnes ")));
+    }
+
+    @Test
     void completesXfyunProviderCommand() {
         PaiCliCompleter completer = new PaiCliCompleter(List::of);
         List<Candidate> candidates = new ArrayList<>();

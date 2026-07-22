@@ -95,7 +95,8 @@ final class PaiCliCompleter implements Completer {
                 option("step", "StepFun，读取配置模型"),
                 option("kimi", "Kimi/Moonshot，读取配置模型"),
                 option("freellmapi", "本地 FreeLLMAPI，读取配置模型"),
-                option("xfyun", "讯飞星辰 MaaS，读取配置模型"));
+                option("xfyun", "讯飞星辰 MaaS，读取配置模型"),
+                option("agnes", "Agnes 2.0 Flash，读取配置模型"));
         return true;
     }
 
@@ -119,7 +120,8 @@ final class PaiCliCompleter implements Completer {
                         option("deepseek ", "DeepSeek"),
                         option("step ", "StepFun"),
                         option("kimi ", "Kimi/Moonshot"),
-                        option("xfyun ", "讯飞星辰 MaaS"));
+                        option("xfyun ", "讯飞星辰 MaaS"),
+                        option("agnes ", "Agnes 2.0 Flash"));
                 return true;
             }
             addMatching(candidates, "配置项", prefix,

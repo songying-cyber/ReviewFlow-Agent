@@ -1,0 +1,1896 @@
+<!DOCTYPE html>
+<html lang="zh-CN" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="学习使用 Claude Code 内置的斜杠命令进行上下文管理、会话控制和配置。">
+<title>斜杠命令 — PaiCLI 学习中心</title>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<style>
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('https://claude.nagdy.me/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-display: swap;
+}
+
+/* ===== CSS Variables (Light) ===== */
+:root {
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
+
+  --color-brand: #b45309;
+  --color-brand-hover: #92400e;
+  --color-brand-light: #fbbf24;
+  --color-brand-light-hover: #fcd34d;
+  --color-brand-subtle: #fef3c7;
+  --color-brand-subtle-dark: #451a03;
+
+  --color-surface: #fafaf9;
+  --color-surface-dark: #1c1917;
+  --color-surface-elevated: #f5f5f0;
+  --color-surface-elevated-dark: #292524;
+  --color-surface-muted: #e7e5e4;
+  --color-surface-muted-dark: #44403c;
+
+  --color-terminal-bg: #1c1917;
+  --color-terminal-text: #e7e5e4;
+  --color-terminal-cursor: #fbbf24;
+  --color-terminal-selection: #44403c;
+
+  --color-success: #22c55e;
+  --color-warning: #eab308;
+  --color-error: #ef4444;
+
+  --color-text-primary: #1c1917;
+  --color-text-primary-dark: #fafaf9;
+  --color-text-secondary: #57534e;
+  --color-text-secondary-dark: #d6d3d1;
+  --color-text-muted: #78716c;
+  --color-text-muted-dark: #a8a29e;
+
+  --color-border: #d6d3d1;
+  --color-border-dark: #44403c;
+
+  --color-green-100: #dcfce7;
+  --color-green-800: #166534;
+  --color-green-900: #14532d;
+  --color-stone-100: #f5f5f4;
+  --color-stone-200: #e7e5e4;
+  --color-stone-300: #d6d3d1;
+  --color-stone-400: #a8a29e;
+  --color-stone-500: #78716c;
+  --color-stone-600: #57534e;
+  --color-stone-700: #44403c;
+  --color-stone-800: #292524;
+  --color-stone-900: #1c1917;
+  --color-stone-950: #0c0a09;
+  --color-white: #ffffff;
+  --color-black: #000000;
+
+  --spacing: 0.25rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+}
+
+/* ===== Dark Mode ===== */
+html.dark {
+  --color-surface: #1c1917;
+  --color-surface-elevated: #292524;
+  --color-surface-muted: #44403c;
+  --color-text-primary: #fafaf9;
+  --color-text-secondary: #d6d3d1;
+  --color-text-muted: #a8a29e;
+  --color-border: #44403c;
+  --color-brand-subtle: #451a03;
+  --color-white: #292524;
+  --color-stone-100: #292524;
+  --color-stone-200: #44403c;
+  --color-stone-800: #1c1917;
+  --color-stone-900: #0c0a09;
+  --color-green-100: #14532d;
+  --color-green-800: #4ade80;
+}
+
+/* ===== Base ===== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  line-height: 1.5;
+  font-family: var(--font-sans);
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+a { color: inherit; text-decoration: inherit; }
+img, svg { vertical-align: middle; display: block; }
+
+/* ===== Skip Link ===== */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  z-index: 999;
+  padding: 8px 16px;
+  background: var(--color-brand);
+  color: white;
+  font-size: 14px;
+  border-radius: 0 0 var(--radius-md) 0;
+}
+.skip-link:focus { left: 0; }
+
+/* ===== Header ===== */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  backdrop-filter: blur(8px);
+}
+html.dark .header {
+  border-color: var(--color-border-dark);
+  background: var(--color-surface-dark);
+}
+.header-inner {
+  max-width: 90rem;
+  margin: 0 auto;
+  height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1rem;
+}
+@media (min-width: 64rem) {
+  .header-inner { padding: 0 1.5rem; }
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--color-text-primary);
+}
+.logo-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--color-brand);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+}
+.logo-brand { color: var(--color-brand); }
+html.dark .logo-brand { color: var(--color-brand-light); }
+.logo-muted { color: var(--color-text-muted); }
+
+/* Desktop nav */
+.desktop-nav { display: none; }
+@media (min-width: 64rem) {
+  .desktop-nav { display: flex; align-items: center; gap: 0.25rem; }
+}
+.nav-link {
+  border-radius: var(--radius-md);
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: color 0.15s, background 0.15s;
+  color: var(--color-text-secondary);
+}
+.nav-link:hover { color: var(--color-text-primary); }
+.nav-link.active {
+  background: var(--color-brand-subtle);
+  color: var(--color-brand-hover);
+}
+html.dark .nav-link.active {
+  background: var(--color-brand-subtle-dark);
+  color: var(--color-brand-light);
+}
+
+/* Header right */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.search-pill {
+  display: none;
+  height: 2.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+  padding: 0 0.625rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.search-pill:hover {
+  border-color: rgba(180, 83, 9, 0.4);
+  color: var(--color-text-secondary);
+}
+@media (min-width: 64rem) {
+  .search-pill { display: inline-flex; }
+}
+.search-pill svg { width: 16px; height: 16px; }
+.search-shortcut {
+  display: inline-block;
+  min-width: 2.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  padding: 0.125rem 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+html.dark .search-shortcut {
+  border-color: var(--color-border-dark);
+  background: var(--color-surface-dark);
+}
+
+/* Icon button */
+.icon-btn {
+  display: flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  transition: background 0.15s, color 0.15s;
+}
+.icon-btn:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text-primary);
+}
+html.dark .icon-btn:hover {
+  background: var(--color-surface-muted-dark);
+}
+
+/* Language switcher */
+.lang-switcher {
+  display: flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(214, 211, 209, 0.6);
+  padding: 0.125rem;
+}
+html.dark .lang-switcher {
+  border-color: rgba(68, 64, 60, 0.6);
+}
+.lang-link {
+  border-radius: 999px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s;
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+.lang-link:hover { color: var(--color-text-primary); }
+.lang-link.active {
+  background: var(--color-brand-subtle);
+  color: var(--color-brand-hover);
+}
+html.dark .lang-link.active {
+  background: var(--color-brand-subtle-dark);
+  color: var(--color-brand-light);
+}
+
+/* ===== Layout Grid ===== */
+.layout-grid {
+  flex: 1;
+}
+@media (min-width: 64rem) {
+  .layout-grid {
+    display: grid;
+    grid-template-columns: 16rem 1fr;
+  }
+  .layout-grid.has-sidebar-right {
+    grid-template-columns: 16rem 1fr;
+  }
+  .layout-grid .main-with-aside {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+  }
+}
+
+/* ===== Sidebar ===== */
+.desktop-sidebar {
+  display: none;
+}
+@media (min-width: 64rem) {
+  .desktop-sidebar {
+    display: block;
+    position: sticky;
+    top: 3.5rem;
+    height: calc(100vh - 3.5rem);
+    overflow-y: auto;
+    border-right: 1px solid var(--color-border);
+  }
+  html.dark .desktop-sidebar {
+    border-color: var(--color-border-dark);
+  }
+}
+.sidebar-inner {
+  padding: 0.75rem;
+}
+
+/* Sidebar nav */
+.sidebar-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: var(--radius-lg);
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  transition: background 0.15s, color 0.15s;
+  margin-bottom: 0.5rem;
+}
+.sidebar-toggle:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text-primary);
+}
+html.dark .sidebar-toggle:hover {
+  background: var(--color-surface-muted-dark);
+}
+.sidebar-chevron {
+  width: 1rem;
+  height: 1rem;
+  transition: transform 0.15s;
+}
+
+.sidebar-nav-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.sidebar-nav-link {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: var(--radius-lg);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+.sidebar-nav-link:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text-primary);
+}
+html.dark .sidebar-nav-link:hover {
+  background: var(--color-surface-muted-dark);
+}
+.sidebar-nav-link.active {
+  background: var(--color-brand-subtle);
+  color: var(--color-brand-hover);
+  font-weight: 500;
+}
+html.dark .sidebar-nav-link.active {
+  background: var(--color-brand-subtle-dark);
+  color: var(--color-brand-light);
+}
+.sidebar-number {
+  display: flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: 0.75rem;
+}
+.sidebar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== Main Content ===== */
+.main-content {
+  min-width: 0;
+}
+.main-inner {
+  display: grid;
+}
+@media (min-width: 64rem) {
+  .main-inner {
+    grid-template-columns: 3fr 2fr;
+  }
+}
+
+/* Prose column */
+.prose-column {
+  min-width: 0;
+  padding: 1.5rem 1rem;
+}
+@media (min-width: 64rem) {
+  .prose-column {
+    padding: 2rem 2.5rem;
+  }
+}
+
+/* Module header */
+.module-header {
+  margin-bottom: 2.5rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 2rem;
+}
+html.dark .module-header {
+  border-color: var(--color-border-dark);
+}
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+.breadcrumb a { transition: color 0.15s; }
+.breadcrumb a:hover { color: var(--color-brand-hover); }
+html.dark .breadcrumb a:hover { color: var(--color-brand-light); }
+.breadcrumb-current { color: var(--color-text-secondary); }
+
+.module-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+.module-number {
+  margin-top: 0.25rem;
+  display: flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-brand-subtle);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-brand);
+}
+html.dark .module-number {
+  background: var(--color-brand-subtle-dark);
+  color: var(--color-brand-light);
+}
+.module-title {
+  font-family: var(--font-serif);
+  font-size: 1.875rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  color: var(--color-text-primary);
+}
+@media (min-width: 64rem) {
+  .module-title { font-size: 2.25rem; }
+}
+.module-desc {
+  margin-top: 0.5rem;
+  max-width: 32rem;
+  color: var(--color-text-secondary);
+}
+.module-meta {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.125rem 0.625rem;
+  font-weight: 500;
+  background: var(--color-green-100);
+  color: var(--color-green-800);
+}
+.module-time {
+  color: var(--color-text-muted);
+}
+
+/* ===== Prose ===== */
+.prose {
+  max-width: none;
+  font-size: 1rem;
+  line-height: 1.625;
+  color: var(--color-text-primary);
+}
+.prose h2 {
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  color: var(--color-text-primary);
+}
+.prose p {
+  margin-bottom: 1rem;
+}
+.prose code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--color-stone-100);
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  border: 1px solid var(--color-stone-200);
+  color: var(--color-text-primary);
+}
+html.dark .prose code {
+  background: var(--color-stone-800);
+  border-color: var(--color-stone-700);
+}
+.prose strong {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.prose ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+.prose li {
+  margin-bottom: 0.375rem;
+}
+.prose a {
+  color: var(--color-brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+.prose a:hover {
+  color: var(--color-brand-hover);
+}
+html.dark .prose a {
+  color: var(--color-brand-light);
+}
+html.dark .prose a:hover {
+  color: var(--color-brand-light-hover);
+}
+
+/* Code block */
+.code-block {
+  overflow-x: auto;
+  border-radius: var(--radius-lg);
+  background: #24292e;
+  color: #e1e4e8;
+  margin-bottom: 1rem;
+}
+.code-block pre {
+  padding: 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+.code-block code {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  font-size: inherit !important;
+  color: inherit !important;
+}
+
+/* ===== Right Panel (Sticky) ===== */
+.right-panel {
+  display: none;
+}
+@media (min-width: 64rem) {
+  .right-panel {
+    display: block;
+    position: sticky;
+    top: 3.5rem;
+    height: calc(100vh - 3.5rem);
+    overflow-y: auto;
+    border-left: 1px solid var(--color-border);
+    background: var(--color-surface-elevated);
+  }
+  html.dark .right-panel {
+    border-color: var(--color-border-dark);
+    background: var(--color-surface-elevated-dark);
+  }
+}
+.right-panel-inner {
+  padding: 1.25rem;
+}
+.right-panel-section {
+  margin-bottom: 2rem;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.section-icon {
+  display: flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.section-icon.brand {
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+}
+html.dark .section-icon.brand {
+  background: var(--color-brand-subtle-dark);
+  color: var(--color-brand-light);
+}
+.section-icon.muted {
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+html.dark .section-icon.muted {
+  background: var(--color-surface-muted-dark);
+}
+
+/* ===== Terminal Simulator ===== */
+.terminal {
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  border: 1px solid #44403c;
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+}
+.terminal-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #1c1917;
+  padding: 0.625rem 1rem;
+}
+.terminal-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+}
+.terminal-dot.red { background: #ef4444; }
+.terminal-dot.yellow { background: #eab308; }
+.terminal-dot.green { background: #22c55e; }
+.terminal-label {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  color: rgba(231, 229, 228, 0.6);
+  font-family: var(--font-sans);
+}
+.terminal-body {
+  background: #1c1917;
+  padding: 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  min-height: 280px;
+  max-height: 480px;
+  overflow-y: auto;
+  color: #e7e5e4;
+  line-height: 1.5;
+}
+.terminal-body .welcome {
+  color: #a8a29e;
+  font-style: italic;
+  margin-bottom: 0.5rem;
+}
+.terminal-body .prompt-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.terminal-body .prompt {
+  color: var(--color-brand-light);
+  flex-shrink: 0;
+  user-select: none;
+}
+.terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  color: #e7e5e4;
+  caret-color: #fbbf24;
+}
+@media (min-width: 64rem) {
+  .terminal-input { font-size: 0.875rem; }
+}
+.terminal-input::placeholder {
+  color: rgba(231, 229, 228, 0.3);
+}
+.terminal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #44403c;
+  background: #171412;
+  padding: 0.75rem 1rem;
+}
+.terminal-desc {
+  flex: 1;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  color: rgba(231, 229, 228, 0.7);
+  line-height: 1.4;
+}
+.terminal-btn {
+  min-height: 44px;
+  border-radius: var(--radius-lg);
+  background: var(--color-brand);
+  padding: 0.5rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: white;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.terminal-btn:hover {
+  background: var(--color-brand-hover);
+}
+
+/* Guided step output */
+.terminal-output {
+  margin-bottom: 0.5rem;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  color: #e7e5e4;
+  line-height: 1.5;
+}
+
+/* ===== Quiz ===== */
+.quiz-card {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-stone-200);
+  background: var(--color-white);
+  padding: 1.5rem;
+}
+html.dark .quiz-card {
+  border-color: var(--color-stone-700);
+  background: rgba(41, 37, 36, 0.5);
+}
+.quiz-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  font-size: 0.75rem;
+  color: var(--color-stone-500);
+}
+html.dark .quiz-header { color: var(--color-stone-400); }
+.quiz-progress {
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--color-stone-100);
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+html.dark .quiz-progress { background: var(--color-stone-700); }
+.quiz-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-brand);
+  transition: width 0.3s;
+}
+.quiz-question {
+  margin-bottom: 1rem;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--color-stone-900);
+  line-height: 1.5;
+}
+html.dark .quiz-question { color: var(--color-stone-100); }
+.quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.quiz-option {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-stone-200);
+  padding: 0.75rem;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  color: var(--color-stone-800);
+  background: transparent;
+}
+html.dark .quiz-option {
+  border-color: var(--color-stone-600);
+  color: var(--color-stone-200);
+}
+.quiz-option:hover {
+  border-color: var(--color-brand-light-hover);
+}
+html.dark .quiz-option:hover {
+  border-color: var(--color-brand-hover);
+}
+.quiz-radio {
+  margin-top: 0.125rem;
+  display: flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid var(--color-stone-300);
+}
+html.dark .quiz-radio {
+  border-color: var(--color-stone-600);
+}
+
+/* ===== Templates ===== */
+.template-card {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border);
+  background: var(--color-white);
+  padding: 1rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  margin-bottom: 1.5rem;
+}
+html.dark .template-card {
+  border-color: var(--color-border-dark);
+  background: var(--color-stone-800);
+}
+.template-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+@media (min-width: 40rem) {
+  .template-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+}
+.template-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.template-desc {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+.template-lang {
+  display: inline-block;
+  border-radius: 4px;
+  background: var(--color-stone-100);
+  padding: 0.125rem 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-stone-600);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+html.dark .template-lang {
+  background: var(--color-stone-800);
+  color: var(--color-stone-300);
+}
+.template-code-wrap {
+  position: relative;
+  overflow-x: auto;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-stone-700);
+  background: var(--color-stone-900);
+}
+.template-code {
+  padding: 1rem 2.5rem 1rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  color: var(--color-stone-100);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.copy-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+  padding: 0.375rem;
+  opacity: 0.6;
+  cursor: pointer;
+  color: var(--color-stone-400);
+  background: transparent;
+  border: none;
+  transition: opacity 0.15s, color 0.15s;
+}
+.copy-btn:hover {
+  opacity: 1;
+  color: var(--color-stone-100);
+}
+.copy-btn svg { width: 1rem; height: 1rem; }
+.share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  transition: color 0.15s;
+}
+.share-btn:hover { color: var(--color-brand); }
+.share-btn svg { width: 0.875rem; height: 0.875rem; }
+html.dark .share-btn:hover { color: var(--color-brand-light); }
+
+/* ===== Report Link ===== */
+.report-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 3rem;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.report-link:hover { color: var(--color-brand); }
+.report-link svg { width: 1rem; height: 1rem; }
+html.dark .report-link:hover { color: var(--color-brand-light); }
+
+/* ===== Prev/Next Nav ===== */
+.module-nav {
+  margin-top: 4rem;
+  display: grid;
+  gap: 1rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 2rem;
+  grid-template-columns: 1fr 1fr;
+}
+html.dark .module-nav {
+  border-color: var(--color-border-dark);
+}
+.module-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  padding: 1rem;
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.module-nav-link:hover {
+  border-color: var(--color-brand);
+  background: rgba(254, 243, 199, 0.3);
+}
+html.dark .module-nav-link {
+  border-color: var(--color-border-dark);
+}
+html.dark .module-nav-link:hover {
+  border-color: var(--color-brand-light);
+  background: rgba(69, 26, 3, 0.3);
+}
+.module-nav-link.next {
+  justify-content: flex-end;
+  text-align: right;
+}
+.module-nav-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+.module-nav-text {
+  font-weight: 500;
+  color: var(--color-text-primary);
+  transition: color 0.15s;
+}
+.module-nav-link:hover .module-nav-text {
+  color: var(--color-brand-hover);
+}
+html.dark .module-nav-link:hover .module-nav-text {
+  color: var(--color-brand-light);
+}
+.module-nav-arrow {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform 0.15s;
+}
+.module-nav-link:hover .module-nav-arrow.prev {
+  transform: translateX(-0.125rem);
+}
+.module-nav-link:hover .module-nav-arrow.next {
+  transform: translateX(0.125rem);
+}
+
+/* ===== Footer ===== */
+.footer {
+  border-top: 1px solid var(--color-border);
+}
+html.dark .footer {
+  border-color: var(--color-border-dark);
+}
+.footer-inner {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 2.5rem 1rem;
+}
+@media (min-width: 64rem) {
+  .footer-inner { padding: 2.5rem 1.5rem; }
+}
+.footer-top {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+@media (min-width: 64rem) {
+  .footer-top {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+}
+.footer-brand {
+  max-width: 20rem;
+}
+.footer-brand-text {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.625;
+  color: var(--color-text-muted);
+}
+.footer-nav {
+  display: grid;
+  gap: 2rem;
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (min-width: 64rem) {
+  .footer-nav {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+.footer-nav-section-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.footer-nav-list {
+  list-style: none;
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+.footer-nav-list a {
+  transition: color 0.15s;
+  text-decoration: none;
+}
+.footer-nav-list a:hover { color: var(--color-brand); }
+html.dark .footer-nav-list a:hover { color: var(--color-brand-light); }
+.footer-bottom {
+  margin-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 1.25rem;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+@media (min-width: 64rem) {
+  .footer-bottom {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+html.dark .footer-bottom {
+  border-color: var(--color-border-dark);
+}
+.footer-bottom a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+.footer-bottom a:hover { color: var(--color-brand); }
+html.dark .footer-bottom a:hover { color: var(--color-brand-light); }
+
+/* ===== Mobile ===== */
+.mobile-only { display: block; }
+@media (min-width: 64rem) {
+  .mobile-only { display: none !important; }
+}
+.desktop-only { display: none; }
+@media (min-width: 64rem) {
+  .desktop-only { display: block; }
+}
+
+/* ===== Dark mode toggle icons ===== */
+.sun-icon { display: none; }
+.dark .sun-icon { display: block; }
+.dark .moon-icon { display: none; }
+.moon-icon { display: block; }
+
+/* ===== Responsive tweaks ===== */
+@media (max-width: 63.999rem) {
+  .main-inner { display: block; }
+  .prose-column { padding: 1.5rem 1rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- Skip link -->
+<a href="#main-content" class="skip-link">跳到主要内容</a>
+
+<!-- ===== Header ===== -->
+<header class="header" aria-label="网站页眉">
+  <div class="header-inner">
+    <a href="/" class="logo">
+      <span class="logo-icon">P</span>
+      <span><span class="logo-brand">Pai</span><span class="logo-muted">CLI</span></span>
+    </a>
+
+    <nav class="desktop-nav" aria-label="主导航">
+      <a href="/learn" class="nav-link active">学习</a>
+      <a href="/playground" class="nav-link">演练场</a>
+      <a href="/build" class="nav-link">配置构建</a>
+      <a href="/reference" class="nav-link">速查表</a>
+    </nav>
+
+    <div class="header-right">
+      <button class="search-pill" aria-label="搜索 (⌘K)">
+        <svg fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z"/>
+        </svg>
+        <span class="search-shortcut">⌘K</span>
+      </button>
+
+      <nav class="lang-switcher" aria-label="语言">
+        <span class="lang-link active">中文</span>
+        <a href="#" class="lang-link">EN</a>
+      </nav>
+
+      <button id="darkModeToggle" class="icon-btn" aria-label="切换深色模式">
+        <svg class="sun-icon" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/>
+        </svg>
+        <svg class="moon-icon" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/>
+        </svg>
+      </button>
+
+      <button id="mobileMenuToggle" class="icon-btn mobile-only" aria-label="打开导航菜单" aria-expanded="false">
+        <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20" height="20">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ===== Layout ===== -->
+<div class="layout-grid" id="layoutGrid">
+  <!-- Desktop Sidebar -->
+  <aside class="desktop-sidebar" id="desktopSidebar">
+    <nav class="sidebar-inner" aria-label="模块导航">
+      <div>
+        <button class="sidebar-toggle" id="sidebarCollapseToggle" aria-label="切换侧边栏">
+          <span>模块</span>
+          <svg class="sidebar-chevron" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/>
+          </svg>
+        </button>
+        <ul class="sidebar-nav-list">
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">0</span><span class="sidebar-title">入门指南</span></a></li>
+          <li><a href="#" class="sidebar-nav-link active"><span class="sidebar-number">1</span><span class="sidebar-title">斜杠命令</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">2</span><span class="sidebar-title">记忆与 CLAUDE.md</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">3</span><span class="sidebar-title">项目设置</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">4</span><span class="sidebar-title">命令深入</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">5</span><span class="sidebar-title">技能</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">6</span><span class="sidebar-title">钩子</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">7</span><span class="sidebar-title">MCP 服务器</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">8</span><span class="sidebar-title">子代理</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">9</span><span class="sidebar-title">高级功能</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">10</span><span class="sidebar-title">工作流</span></a></li>
+          <li><a href="#" class="sidebar-nav-link"><span class="sidebar-number">11</span><span class="sidebar-title">插件</span></a></li>
+        </ul>
+      </div>
+    </nav>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content" id="main-content" tabindex="-1">
+    <div class="main-inner">
+      <!-- Prose Column -->
+      <div class="prose-column">
+        <!-- Module header -->
+        <div class="module-header">
+          <nav class="breadcrumb" aria-label="面包屑导航">
+            <a href="/">首页</a>
+            <span aria-hidden="true">/</span>
+            <a href="/learn">学习</a>
+            <span aria-hidden="true">/</span>
+            <span class="breadcrumb-current" aria-current="page">斜杠命令</span>
+          </nav>
+          <div class="module-title-row">
+            <span class="module-number">1</span>
+            <div>
+              <h1 class="module-title">斜杠命令</h1>
+              <p class="module-desc">学习使用 Claude Code 内置的斜杠命令进行上下文管理、会话控制和配置。</p>
+              <div class="module-meta">
+                <span class="badge">入门</span>
+                <span class="module-time">15 分钟</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prose content -->
+        <article class="prose">
+          <p>斜杠命令是在交互式会话中控制 Claude Code 行为最快的方式。在任意提示符下输入 <code>/</code> 即可查看完整列表，或输入几个字母进行筛选。本模块涵盖了你每天都会使用的内置命令。</p>
+
+          <h2 id="discovering-commands">发现命令</h2>
+          <p>在提示符下输入 <code>/</code>，菜单就会显示所有可用命令。开始输入以筛选 — <code>/co</code> 缩小到 <code>/compact</code>、<code>/color</code>、<code>/config</code>、<code>/context</code>、<code>/cost</code>、<code>/copy</code>。方向键导航，回车选择。当前设置下不可用的命令会自动隐藏，所以你只会看到能用的。</p>
+          <p>刚接触 Claude Code？试试 <code>/powerup</code> — 它会运行带有动画演示的交互式课程，直接在 CLI 中带你了解关键功能。</p>
+          <p>有些命令直接接受参数：<code>/compact focus on the API layer</code>、<code>/model opus</code>、<code>/effort high</code>、<code>/rename auth-refactor</code>。其他如 <code>/context</code>、<code>/cost</code> 和 <code>/status</code> 则无需参数立即运行。</p>
+
+          <div class="code-block">
+            <pre><code><span>/compact focus on the payment service</span></code></pre>
+          </div>
+
+          <h2 id="command-categories">命令分类</h2>
+          <p>内置命令分为几个类别。了解类别有助于你找到合适的命令，而无需记住所有命令。</p>
+
+          <p><strong>上下文管理</strong> 控制 Claude 可以看到多少对话内容。</p>
+          <ul>
+            <li><code>/context</code> — 显示上下文使用情况的可视化网格</li>
+            <li><code>/compact</code> — 压缩对话。传入指令控制保留什么：<code>/compact keep the migration plan, drop the debugging</code></li>
+            <li><code>/clear</code> — 完全重新开始</li>
+          </ul>
+
+          <p><strong>会话工具</strong> 让你管理和回顾工作。</p>
+          <ul>
+            <li><code>/rename my-feature</code> — 给会话起一个可读的名称</li>
+            <li><code>/resume</code> — 恢复之前的会话</li>
+            <li><code>/branch</code> — 创建并行对话，探索替代方案而不丢失当前状态</li>
+            <li><code>/rewind</code> — 回滚到更早的时间点。<code>/undo</code> 是 <code>/rewind</code> 的别名。</li>
+            <li><code>/export</code> — 将会话保存到文件或剪贴板</li>
+            <li><code>/recap</code> — 生成会话中发生内容的一行摘要。当你离开后返回终端时也会自动运行。</li>
+          </ul>
+
+          <p><strong>配置</strong> 命令在会话中调整 Claude 的行为。</p>
+          <ul>
+            <li><code>/model</code> — 切换可用模型，如 Sonnet、Opus、Haiku 以及其他别名如 <code>best</code> 或 <code>opusplan</code></li>
+            <li><code>/effort</code> — 设置推理深度：<code>low</code>、<code>medium</code>、<code>high</code>、<code>xhigh</code>、<code>max</code>（仅会话）或 <code>auto</code></li>
+            <li><code>/permissions</code> — 管理 Claude 无需询问即可执行的操作</li>
+            <li><code>/config</code> — 打开设置菜单</li>
+            <li><code>/theme</code>（v2.1.118 新增）— 创建和切换命名自定义主题。主题以 JSON 文件存储在 <code>~/.claude/themes/</code> 中，也可以直接手动编辑。</li>
+            <li><code>/tui</code> — 在对话中切换经典和无闪烁全屏渲染。也可作为 <code>tui</code> 设置使用。</li>
+            <li><code>/focus</code> — 切换专注模式以实现无干扰输入。</li>
+            <li><code>/less-permission-prompts</code> — 扫描最近的对话记录，查找常见的只读 Bash 和 MCP 工具调用，然后建议将允许列表添加到 <code>.claude/settings.json</code> 中，以减少未来的权限提示。</li>
+          </ul>
+
+          <p><strong>诊断</strong> 在出问题时提供帮助。</p>
+          <ul>
+            <li><code>/cost</code> — 显示会话费用、时长、代码更改和 token 使用量</li>
+            <li><code>/usage-credits</code>（v2.1.144 新增）— 查看和管理账户上的使用额度。从 <code>/extra-usage</code> 重命名而来；旧名称仍然有效。</li>
+            <li><code>/status</code> — 显示版本、模型和账户信息</li>
+            <li><code>/doctor</code> — 检查安装健康状况</li>
+            <li><code>/diff</code> — 打开未提交更改的交互式查看器，在提交前查看 Claude 做了什么</li>
+          </ul>
+
+          <p><strong>发布前审查</strong> 在代码离开分支前检查你的工作。</p>
+          <ul>
+            <li><code>/code-review</code>（v2.1.147 新增）— 审查当前差异的正确性错误，并报告发现而不编辑文件。接受努力级别（<code>/code-review high</code> 返回更广泛的覆盖；<code>/code-review low</code> 返回更少但置信度更高的发现）和 <code>--comment</code> 以将发现作为内联评论发布到当前的 GitHub PR。传入路径或 PR 引用以审查特定目标。这是一个内置技能；<code>/code-review --fix</code> 将发现应用到你的工作树。从 v2.1.154 开始，<code>/simplify</code> 是一个独立的仅清理技能，应用修复而不寻找错误 — 使用 <code>/code-review</code> 来查找错误。</li>
+            <li><code>/code-review ultra</code> — 在云端沙箱中使用并行分析和评审运行深度多代理代码审查。无参数时审查当前分支；传入 PR 编号（<code>/code-review ultra 123</code>）来获取和审查 GitHub PR。<code>/ultrareview</code> 是别名。Pro 和 Max 包含少量免费运行，之后消耗使用额度。</li>
+            <li><code>/review</code> — 对更改集进行只读深入检查</li>
+            <li><code>/security-review</code> — 对待定更改进行安全重点审查</li>
+          </ul>
+
+          <div class="code-block">
+            <pre><code><span>/context</span>
+<span>/compact keep the auth refactor plan</span>
+<span>/model opus</span>
+<span>/effort high</span>
+<span>/cost</span>
+<span>/code-review high</span>
+<span>/code-review --comment</span></code></pre>
+          </div>
+        </article>
+
+        <!-- Report link -->
+        <a href="#" class="report-link">
+          <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/>
+          </svg>
+          报告本模块问题
+        </a>
+
+        <!-- Prev / Next -->
+        <nav class="module-nav" aria-label="模块导航">
+          <a href="#" class="module-nav-link">
+            <svg class="module-nav-arrow prev" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/>
+            </svg>
+            <div>
+              <span class="module-nav-label">上一节</span>
+              <span class="module-nav-text">入门指南</span>
+            </div>
+          </a>
+          <a href="#" class="module-nav-link next">
+            <div>
+              <span class="module-nav-label">下一节</span>
+              <span class="module-nav-text">记忆与 CLAUDE.md</span>
+            </div>
+            <svg class="module-nav-arrow next" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/>
+            </svg>
+          </a>
+        </nav>
+      </div>
+
+      <!-- Right Panel (Desktop only) -->
+      <aside class="right-panel" aria-label="互动面板">
+        <div class="right-panel-inner">
+          <div class="right-panel-section">
+            <h3 class="section-title">
+              <span class="section-icon brand">▶</span>
+              引导式教程
+            </h3>
+            <!-- Terminal: Guided -->
+            <div class="terminal" role="application" aria-label="斜杠命令引导式教程">
+              <div class="terminal-titlebar">
+                <span class="terminal-dot red"></span>
+                <span class="terminal-dot yellow"></span>
+                <span class="terminal-dot green"></span>
+                <span class="terminal-label">Claude Code — 引导式教程</span>
+              </div>
+              <div class="terminal-body" id="guidedTerminalBody">
+                <div class="terminal-output" id="guidedOutput"></div>
+              </div>
+              <div class="terminal-footer">
+                <p class="terminal-desc" id="guidedDesc">让我们从探索可用命令开始。点击"运行"查看 /help 输出。</p>
+                <button class="terminal-btn" id="guidedRunBtn">运行</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="right-panel-section">
+            <h3 class="section-title">
+              <span class="section-icon muted">&gt;_</span>
+              自己试试
+            </h3>
+            <!-- Terminal: Free Type -->
+            <div class="terminal" role="application" aria-label="斜杠命令自由输入终端">
+              <div class="terminal-titlebar">
+                <span class="terminal-dot red"></span>
+                <span class="terminal-dot yellow"></span>
+                <span class="terminal-dot green"></span>
+                <span class="terminal-label">Claude Code — 自由输入</span>
+              </div>
+              <div class="terminal-body">
+                <div class="welcome">欢迎使用 Claude Code！输入命令或 /help 开始使用。</div>
+                <div id="freeTypeOutput"></div>
+                <div class="prompt-line" style="margin-top:0.5rem;">
+                  <span class="prompt">&gt;</span>
+                  <input type="text" class="terminal-input" id="freeTypeInput" placeholder="输入命令..." aria-label="终端命令输入" autocomplete="off" spellcheck="false">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="right-panel-section">
+            <h3 class="section-title">
+              <span class="section-icon brand">?</span>
+              检查你的理解
+            </h3>
+            <div class="quiz-card" id="quizCard">
+              <div class="quiz-header">
+                <span id="quizCounter">第 1 题，共 7 题</span>
+                <span id="quizPercent">0%</span>
+              </div>
+              <div class="quiz-progress">
+                <div class="quiz-progress-bar" id="quizProgressBar" style="width:0%"></div>
+              </div>
+              <p class="quiz-question" id="quizQuestion">当你在 Claude Code 中运行 /compact 时会发生什么？</p>
+              <div class="quiz-options" id="quizOptions" role="radiogroup"></div>
+              <div id="quizResult" style="margin-top: 1rem;"></div>
+            </div>
+          </div>
+
+          <div class="right-panel-section">
+            <section aria-label="斜杠命令模板">
+              <h3 class="section-title" style="font-size:1rem;margin-bottom:1rem;">斜杠命令模板</h3>
+
+              <!-- Template 1 -->
+              <div class="template-card">
+                <div class="template-header">
+                  <div>
+                    <h4 class="template-name">专注与检查工作流</h4>
+                    <p class="template-desc">在开始实施之前，用于引导 Claude 了解仓库的斜杠命令序列。</p>
+                  </div>
+                  <span class="template-lang">markdown</span>
+                </div>
+                <div class="template-code-wrap" aria-label="专注与检查工作流模板代码">
+                  <button class="copy-btn" aria-label="复制专注与检查工作流模板" onclick="navigator.clipboard?.writeText('/context\nRead `README.md`, `CLAUDE.md`, and `package.json`, then summarize the project conventions before making changes.\n')">
+                    <svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/>
+                    </svg>
+                  </button>
+                  <div class="template-code">/context
+Read `README.md`, `CLAUDE.md`, and `package.json`, then summarize the project conventions before making changes.
+</div>
+                </div>
+                <button class="share-btn" aria-label="分享专注与检查工作流">
+                  <svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.282a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.258 8.07"/>
+                  </svg>
+                  分享
+                </button>
+              </div>
+
+              <!-- Template 2 -->
+              <div class="template-card">
+                <div class="template-header">
+                  <div>
+                    <h4 class="template-name">任务间上下文重置</h4>
+                    <p class="template-desc">完成任务后压缩上下文，以便以干净的状态开始下一个任务。</p>
+                  </div>
+                  <span class="template-lang">markdown</span>
+                </div>
+                <div class="template-code-wrap" aria-label="任务间上下文重置模板代码">
+                  <button class="copy-btn" aria-label="复制任务间上下文重置模板" onclick="navigator.clipboard?.writeText('/compact summarize what was completed and preserve any open questions, then drop implementation details\n')">
+                    <svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/>
+                    </svg>
+                  </button>
+                  <div class="template-code">/compact summarize what was completed and preserve any open questions, then drop implementation details
+</div>
+                </div>
+                <button class="share-btn" aria-label="分享任务间上下文重置">
+                  <svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.282a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.258 8.07"/>
+                  </svg>
+                  分享
+                </button>
+              </div>
+
+              <!-- Template 3 -->
+              <div class="template-card">
+                <div class="template-header">
+                  <div>
+                    <h4 class="template-name">发布前正确性扫描</h4>
+                    <p class="template-desc">在当前差异上运行内置的 /code-review 技能，然后将发现发布到打开的 PR。自 v2.1.147 可用 — 从 /simplify 重命名而来。从 v2.1.154 起 /simplify 是一个独立的仅清理技能。</p>
+                  </div>
+                  <span class="template-lang">markdown</span>
+                </div>
+                <div class="template-code-wrap" aria-label="发布前正确性扫描模板代码">
+                  <button class="copy-btn" aria-label="复制发布前正确性扫描模板" onclick="navigator.clipboard?.writeText('/code-review high\n# Once the findings look reasonable, post them to the PR:\n/code-review high --comment\n')">
+                    <svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/>
+                    </svg>
+                  </button>
+                  <div class="template-code">/code-review high
+# Once the findings look reasonable, post them to the PR:
+/code-review high --comment
+</div>
+                </div>
+                <button class="share-btn" aria-label="分享发布前正确性扫描">
+                  <svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.282a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.258 8.07"/>
+                  </svg>
+                  分享
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<!-- ===== Footer ===== -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-top">
+      <div class="footer-brand">
+        <a href="/" style="display:inline-flex;align-items:center;gap:0.5rem;font-size:1rem;font-weight:700;letter-spacing:-0.025em;text-decoration:none;color:var(--color-text-primary);">
+          <span class="logo-icon">P</span>
+          <span><span class="logo-brand">Pai</span><span style="color:var(--color-text-muted);">CLI</span></span>
+        </a>
+        <p class="footer-brand-text">
+          Claude Code 的互动学习平台。<br>灵感来源于 <a href="https://github.com/luongnv89/claude-howto" style="text-decoration:underline;text-underline-offset:2px;">luongnv89/claude-howto</a>。
+        </p>
+      </div>
+      <nav class="footer-nav" aria-label="页脚导航">
+        <section>
+          <span class="footer-nav-section-title">从这里开始</span>
+          <ul class="footer-nav-list">
+            <li><a href="#">学习模块</a></li>
+            <li><a href="#">找到你的水平</a></li>
+            <li><a href="#">演练场</a></li>
+          </ul>
+        </section>
+        <section>
+          <span class="footer-nav-section-title">构建与参考</span>
+          <ul class="footer-nav-list">
+            <li><a href="#">配置构建</a></li>
+            <li><a href="#">速查表</a></li>
+            <li><a href="#">功能索引</a></li>
+            <li><a href="#">资源</a></li>
+          </ul>
+        </section>
+        <section>
+          <span class="footer-nav-section-title">反馈</span>
+          <ul class="footer-nav-list">
+            <li><a href="#">反馈追踪</a></li>
+            <li><a href="#">更新日志</a></li>
+          </ul>
+        </section>
+      </nav>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 PaiCLI · v1.0.0</span>
+      <span>灵感来源于 <a href="https://github.com/luongnv89/claude-howto" target="_blank" rel="noopener noreferrer">luongnv89/claude-howto</a></span>
+    </div>
+  </div>
+</footer>
+
+<!-- ===== JavaScript ===== -->
+<script>
+// ===== Dark Mode =====
+(function() {
+  const STORAGE_KEY = 'paicli-state';
+  let mode = 'system';
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const state = JSON.parse(raw);
+      if (state.preferences && state.preferences.darkMode) {
+        mode = state.preferences.darkMode;
+      }
+    }
+  } catch(e) {}
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = mode === 'dark' || (mode === 'system' && prefersDark);
+  if (isDark) document.documentElement.classList.add('dark');
+
+  const toggle = document.getElementById('darkModeToggle');
+  if (toggle) {
+    toggle.addEventListener('click', function() {
+      const isDark = document.documentElement.classList.toggle('dark');
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const state = raw ? JSON.parse(raw) : {};
+        state.preferences = state.preferences || {};
+        state.preferences.darkMode = isDark ? 'dark' : 'light';
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch(e) {}
+    });
+  }
+})();
+
+// ===== Guided Tutorial =====
+(function() {
+  const steps = [
+    {
+      command: '/help',
+      output: '可用斜杠命令：\n  /help         显示此帮助信息\n  /compact      压缩对话历史\n  /clear        开始新对话\n  /memory       编辑 CLAUDE.md 记忆文件\n  /review       审查代码更改\n  /code-review  审查当前差异的正确性错误（技能）\n  /init         初始化项目 CLAUDE.md\n  /cost         显示此会话的 token 使用量\n  /doctor       检查 Claude Code 健康状况\n  /login        切换 Anthropic 账户',
+      desc: '让我们从探索可用命令开始。点击"运行"查看 /help 输出。',
+      nextLabel: '下一步：尝试 /compact →'
+    },
+    {
+      command: '/theme',
+      output: '当前主题：深色（默认）\n\n可用主题：\n  dark       — 默认深色主题\n  light      — 适合明亮环境\n  solarized  — 太阳配色\n  dracula    — 德古拉配色\n\n自定义主题：~/.claude/themes/\n切换：/theme <名称>',
+      desc: '/theme 让你切换颜色主题。自定义主题可以以 JSON 文件存储在 ~/.claude/themes/ 中。',
+      nextLabel: '下一步：尝试 /compact →'
+    },
+    {
+      command: '/compact',
+      output: '对话已压缩。\n之前上下文：15,234 tokens → 2,841 tokens（减少 81%）\n\n保留的摘要：\n- 正在开发一个 React todo 应用\n- 上次编辑：src/components/TodoList.tsx\n- 测试通过：src/__tests__/',
+      desc: '/compact 命令节省上下文窗口空间。运行它看看效果。',
+      nextLabel: '下一步：检查 /memory →'
+    },
+    {
+      command: '/memory',
+      output: '找到 CLAUDE.md 文件：\n\n1. ~/.claude/CLAUDE.md（用户全局）\n   → 包含：首选语言，编码风格\n\n2. ./CLAUDE.md（项目根目录）\n   → 包含：项目约定，测试命令\n\n正在打开 ./CLAUDE.md 编辑器...\n\n提示：CLAUDE.md 文件跨会话持久化指令。\n全局文件适用于任何地方。项目文件是仓库特定的。',
+      desc: '/memory 命令让你编辑持久化指令。看看它做什么。',
+      nextLabel: '下一步：尝试 /code-review →'
+    },
+    {
+      command: '/code-review',
+      output: '审查当前差异（努力级别：中等）...\n\n更改的文件：3\n  M  src/utils/format.ts        (+28, -2)\n  M  src/components/Header.tsx  (+12, -4)\n  M  src/hooks/useAuth.ts        (+9, -3)\n\n发现（高置信度）：\n  src/utils/format.ts:15\n    → 缺少输入验证。formatDate(undefined) 抛出 TypeError。\n  src/hooks/useAuth.ts:28\n    → Promise 拒绝被吞没。.catch(() => null) 隐藏了 401/403。\n\n发现（较低置信度）：\n  src/components/Header.tsx:45\n    → useCallback 依赖数组中缺少 'title'。\n\n3 个发现，涉及 3 个文件。未修改文件。\n提示：传入 --comment 可将这些发布到当前 GitHub PR，\n    或 --fix 以应用修复。v2.1.147 由 /simplify 重命名而来。',
+      desc: 'v2.1.146 新增内置技能。审查差异的正确性错误并报告发现，无需编辑文件。传入努力级别（low/medium/high/xhigh/max/ultra）或 --comment 以发布内联 PR 评论。',
+      nextLabel: '完成'
+    }
+  ];
+
+  let currentStep = 0;
+  const outputEl = document.getElementById('guidedOutput');
+  const descEl = document.getElementById('guidedDesc');
+  const btnEl = document.getElementById('guidedRunBtn');
+
+  function renderStep() {
+    const step = steps[currentStep];
+    descEl.textContent = step.desc;
+    btnEl.textContent = step.nextLabel || '下一步';
+    outputEl.innerHTML = '';
+  }
+
+  function runStep() {
+    const step = steps[currentStep];
+    outputEl.innerHTML = '<span style="color:#fbbf24;">$ ' + step.command + '</span>\n' + step.output;
+    if (currentStep < steps.length - 1) {
+      currentStep++;
+      renderStep();
+    } else {
+      btnEl.disabled = true;
+      btnEl.style.opacity = '0.5';
+      btnEl.textContent = '已完成 ✓';
+    }
+  }
+
+  if (btnEl) {
+    renderStep();
+    btnEl.addEventListener('click', runStep);
+  }
+})();
+
+// ===== Free Type Terminal =====
+(function() {
+  const responses = {
+    '/help': '可用斜杠命令：\n  /help          显示此帮助信息\n  /compact       压缩对话历史\n  /clear         开始新对话\n  /memory        编辑 CLAUDE.md 记忆文件\n  /review        审查代码更改\n  /code-review   审查当前差异的正确性错误（技能，原 /simplify）\n  /security-review 安全重点审查\n  /init          初始化项目 CLAUDE.md\n  /cost          显示 token 使用量\n  /doctor        检查 Claude Code 健康状况\n  /login         切换账户\n  /status        显示当前 git 状态\n  /cd            将会话移至新工作目录（保留提示缓存）\n  /model         切换 Claude 模型\n  /permissions   查看/管理工具权限\n  /config        编辑设置\n  /diff          显示未提交更改\n  /context       显示上下文窗口使用量\n  /branch        分叉对话到并行分支\n  /rewind        回滚到上一条消息\n  /resume        恢复已保存的会话\n  /rename        重命名当前会话\n  /export        导出会话到文件\n  /effort        设置推理深度（low/medium/high/xhigh/max/ultracode）\n  /plan          进入规划模式\n  /btw           提问辅助问题（不加入历史）\n  /batch         跨并行代理拆分工作\n  /loop          按循环间隔运行任务\n  /schedule      创建云备份定时任务\n  /debug         切换详细模式\n  /context       显示上下文窗口使用量\n  /status        显示版本、模型和账户信息\n  /cost          显示会话费用、时长、代码更改和 token 使用量',
+    '/compact': '对话已压缩。\n之前上下文：15,234 tokens → 2,841 tokens（减少 81%）\n保留的摘要：\n- 正在处理当前项目\n- 保留了最近的文件编辑\n- 测试结果已延续',
+    '/clear': '开始新对话。\n所有上下文已清除。CLAUDE.md 指令仍然有效。',
+    '/context': '上下文窗口使用量：\n\n  ████████████████████░░░░░░░░░░  67%\n\n  输入 tokens：   134,521 / 200,000\n  缓存：          42,800（32%）\n  CLAUDE.md：      1,240\n  对话：          90,481\n\n  提示：使用 /compact 在超过 80% 时释放空间。',
+    '/model': '当前模型：claude-sonnet-4-6（200k 上下文）\n\n可用模型：\n  ● claude-sonnet-4-6     200k 上下文（当前）\n  ● claude-opus-4-6       1M 上下文\n  ● claude-haiku-4-5      200k 上下文\n\n切换：/model <名称>\n快捷方式：/model opus, /model sonnet, /model haiku',
+    '/effort': '推理努力级别：high\n\n可用级别：\n  low      — 快速响应，最小推理\n  medium   — 平衡（默认）\n  high     — 深入分析，彻底推理\n  xhigh    — 超深度推理\n  max      — 最大深度，扩展思考（仅会话）\n  ultracode — xhigh 努力 + 自动工作流编排（v2.1.154+）',
+    '/cost': '会话 token 使用量：\n  输入：   42,156 tokens\n  输出：   18,934 tokens\n  缓存：   12,340 tokens（读取），8,200 tokens（写入）\n  总计：  ~$0.23',
+    '/doctor': 'Claude Code 健康检查\n\n✓ 认证：有效\n✓ 模型访问：claude-sonnet-4-20250514\n✓ Node.js：v22.12.0\n✓ Git：v2.43.0\n✓ npm：v10.9.0\n✓ 工作目录：干净\n\n所有检查通过！',
+    '/status': 'Claude Code v2.1.87\n\n模型：   claude-sonnet-4-6（200k 上下文）\n账户：   user@example.com（Pro）\n努力：   medium\n会话：   auth-refactor（12 条消息）\n\n项目：~/my-project\n分支：  feature/terminal-simulator',
+    '/rename': '会话已重命名。\n\n  之前：session-2026-03-28-1430\n  现在：auth-refactor\n\n稍后用以下命令恢复：/resume auth-refactor',
+    '/resume': '已保存的会话：\n\n  1. auth-refactor      （2 小时前）    12 条消息\n  2. fix-payment-bug     （昨天）       8 条消息\n  3. database-migration   （3 天前）     24 条消息\n\n恢复：/resume <名称或编号>',
+    '/rewind': '对话历史：\n\n  1. [你] 修复登录表单验证\n  2. [Claude] 我将更新验证逻辑...\n  3. [你] 还要添加限流\n  4. [Claude] 添加限流中间件...\n  ► 5. [你] 实际上，撤销限流\n\n回滚到消息 3。消息 4-5 的更改已被撤销。\n之后的文件更改也被还原。',
+    '/branch': '对话已分叉。\n\n  main ──● 当前消息\n         ├── branch-1（此分支）\n         └── original（继续独立发展）\n\n你现在在 branch-1 中。两个分支共享到此点的历史。\n使用 /resume 在分支之间切换。',
+    '/export': '会话已导出。\n\n  文件：./session-export-2026-03-28.md\n  消息：18\n  大小：12.4 KB\n\n  包含：对话历史，文件更改和工具调用。',
+    '/code-review': '审查当前差异（努力级别：中等）...\n\n更改的文件：3\n  M  src/utils/format.ts        (+28, -2)\n  M  src/components/Header.tsx  (+12, -4)\n  M  src/hooks/useAuth.ts        (+9, -3)\n\n发现（高置信度）：\n  src/utils/format.ts:15\n    → 缺少输入验证。formatDate(undefined) 抛出 TypeError。\n  src/hooks/useAuth.ts:28\n    → Promise 拒绝被吞没。.catch(() => null) 隐藏了 401/403。\n\n发现（较低置信度）：\n  src/components/Header.tsx:45\n    → useCallback 依赖数组中缺少 'title'。\n\n3 个发现，涉及 3 个文件。未修改文件。\n提示：传入 --comment 可将这些发布到当前 GitHub PR，或 --fix 以应用修复。'
+  };
+
+  const input = document.getElementById('freeTypeInput');
+  const output = document.getElementById('freeTypeOutput');
+
+  if (input) {
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        const cmd = this.value.trim();
+        if (!cmd) return;
+        const resp = responses[cmd] || '未知命令：' + cmd + '\n输入 /help 查看可用命令。';
+        const line = document.createElement('div');
+        line.style.marginBottom = '0.5rem';
+        line.innerHTML = '<span style="color:#fbbf24;">$</span> <span style="color:#e7e5e4;">' + cmd.replace(/</g,'&lt;') + '</span>\n<pre style="white-space:pre-wrap;font-family:inherit;font-size:inherit;color:#a8a29e;margin:0.25rem 0 0 0;">' + resp + '</pre>';
+        output.appendChild(line);
+        this.value = '';
+        output.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    });
+  }
+})();
+
+// ===== Quiz =====
+(function() {
+  const questions = [
+    {
+      text: '当你在 Claude Code 中运行 /compact 时会发生什么？',
+      options: [
+        { text: '它会永久删除对话历史', correct: false, explanation: '/compact 压缩对话以节省上下文空间，但不会删除历史。使用 /clear 开始新对话。' },
+        { text: '它会压缩当前上下文，并可选指令专注于特定区域', correct: true, explanation: '/compact 减小对话上下文的大小。你可以传入聚焦指令如 \'/compact focus on the auth module\' 来保留最重要的内容。' },
+        { text: '它会切换到更小的模型以节省 token', correct: false, explanation: '切换模型请使用 /model。/compact 压缩当前对话上下文而不改变模型。' },
+        { text: '它会将会话导出到文件', correct: false, explanation: '要导出一会话，使用 /export。/compact 让你留在会话中但减少上下文窗口使用量。' }
+      ]
+    },
+    {
+      text: '/branch 命令的目的是什么？',
+      options: [
+        { text: '它为你的代码更改创建新的 git 分支', correct: false, explanation: '/branch 创建并行对话分支，而非 git 分支。对于 git 操作，使用 Claude 直接运行 git 命令或将其配置为技能。' },
+        { text: '它显示当前 git 分支名称', correct: false, explanation: '要查看 git 分支，运行 bash 命令。/branch 从会话当前点创建并行对话分叉。' },
+        { text: '它从当前点创建并行对话，以便你可以并排探索两种方案', correct: true, explanation: '/branch（原 /fork）让你拆分对话，探索不同解决方案而不丢失任一方向。两个分支从同一起点继续。' },
+        { text: '它将两个对话合并在一起', correct: false, explanation: '/branch 创建新的并行对话。没有内置命令可以合并对话 — /rewind 用于回到更早的状态。' }
+      ]
+    },
+    {
+      text: '/context 显示什么，何时应该检查它？',
+      options: [
+        { text: '它显示你的 git 上下文（分支、暂存文件、最近提交）', correct: false, explanation: '/context 显示你的上下文窗口使用量，而非 git 上下文。要获取 git 信息，使用 /status 或直接运行 git 命令。' },
+        { text: '它显示你的上下文窗口使用情况的可视化网格 — 当响应开始丢失早期上下文时检查它', correct: true, explanation: '/context 显示可视化网格，显示上下文窗口的使用量（绿色/黄色/红色）。当 Claude 似乎忘记早期指令或你已工作一段时间时检查它。超过 80% 时使用 /compact 释放空间。' },
+        { text: '它显示哪些 CLAUDE.md 文件已加载到当前会话', correct: false, explanation: '/context 显示整体上下文窗口使用量的可视化网格，而非加载的文件列表。它帮助你决定何时运行 /compact。' },
+        { text: '它显示当前项目目录和环境设置', correct: false, explanation: '/context 是关于上下文窗口使用量的，而非项目设置。使用 /status 获取版本和账户信息，或使用 /config 获取设置。' }
+      ]
+    },
+    {
+      text: '你想回顾昨天工作的会话。哪些命令帮助你保存和返回会话？',
+      options: [
+        { text: '/export 保存到文件，/branch 稍后重新打开', correct: false, explanation: '/export 将会话保存到文件或剪贴板供离线阅读。/branch 创建并行对话分叉，不是重新打开会话的方式。使用 /rename 和 /resume 进行保存和返回。' },
+        { text: '/rename 给会话起可读的名称，/resume 稍后恢复', correct: true, explanation: '/rename my-feature 给会话起一个难忘的名称。稍后，/resume 显示已保存会话列表，让你继续之前的工作。即使不重命名，会话也会持久化，但名称让它们易于找到。' },
+        { text: '/rewind 回到昨天的工作，/clear 重新打开', correct: false, explanation: '/rewind 在当前会话内回滚到更早的时间点，而非跨会话。/clear 开始新对话。使用 /rename 和 /resume 来保存和返回会话。' },
+        { text: '会话自动保存 — 只需使用 /export 重新打开', correct: false, explanation: '会话自动保存，但 /export 保存到文件供离线阅读 — 它不重新打开会话。使用 /resume 恢复之前的会话，以及 /rename 先给它起个可读的名称。' }
+      ]
+    },
+    {
+      text: '/doctor 检查什么，何时使用它？',
+      options: [
+        { text: '它检查你的代码是否有错误 — 在提交前使用', correct: false, explanation: '/doctor 检查 Claude Code 的安装健康状况，而非你的代码。代码审查使用 /review 或 /simplify。' },
+        { text: '它检查 Claude Code 的安装健康状况（认证、Node.js、git）— 当出现问题时使用', correct: true, explanation: '/doctor 验证认证、模型访问、Node.js 版本、git 安装和其他依赖。当 Claude Code 行为异常或升级后运行它。' },
+        { text: '它对项目依赖运行安全审计', correct: false, explanation: '/doctor 检查 Claude Code 自身的安装健康状况，而非项目安全。它验证认证、模型访问和系统依赖。' },
+        { text: '它显示上次会话的诊断日志 — 用于调试错误', correct: false, explanation: '调试日志使用 /debug 或 Ctrl+O 启用详细模式。/doctor 是 Claude Code 安装的快速健康检查 — 认证、版本和依赖。' }
+      ]
+    },
+    {
+      text: '你读到一份较旧的 Claude Code 指南提到 /extra-usage，但当前文档使用 /usage-credits。发生了什么变化，今天你应该输入哪个？',
+      options: [
+        { text: '/extra-usage 在 v2.1.144 重命名为 /usage-credits；两者仍然有效，但 /usage-credits 是当前名称', correct: true, explanation: 'v2.1.144 将 "extra usage" 重命名为 "usage credits"，斜杠命令也从 /extra-usage 改为 /usage-credits。旧的 /extra-usage 名称仍然作为别名有效，但新文档、快速模式错误消息和选择器都使用 credits 措辞。' },
+        { text: '/usage-credits 和 /extra-usage 是不同的命令 — credits 管理计费，extra-usage 管理超额限制', correct: false, explanation: '它们是同一个命令。v2.1.144 将 /extra-usage 重命名为 /usage-credits 作为 CLI 中一致的 "usage credits" 措辞的一部分。旧名称只是一个别名。' },
+        { text: '/extra-usage 在 v2.1.144 中被完全移除 — 现在输入它会报错', correct: false, explanation: '旧名称保留为向后兼容的别名。它仍然有效，但每个提示、选择器和错误消息现在都使用 /usage-credits。' },
+        { text: '/usage-credits 替换了 /usage — 它们合并了仪表板和额度管理', correct: false, explanation: '/usage（统一的会话仪表板，合并了 /cost 和 /stats）不受影响。/usage-credits 是用于管理账户使用额度的单独命令，原为 /extra-usage。' }
+      ]
+    },
+    {
+      text: '你完成了重构，想要 Claude 在推送前标记任何正确性错误。哪个命令最合适，--comment 标志做什么？',
+      options: [
+        { text: '/code-review — 默认以仅报告模式审查当前差异（使用 --fix 应用更改）；--comment 将发现作为内联评论发布到当前 GitHub PR', correct: true, explanation: '/code-review 是一个内置技能（v2.1.147 从 /simplify 重命名为 /code-review）。它审查差异并报告发现而不编辑文件 — /code-review --fix 是将发现应用到工作树的变体。--comment 标志将这些发现作为内联评论发布到当前 GitHub PR。你还可以传入努力级别如 `/code-review high` 获得更广泛的覆盖，`/code-review low` 获得更少但置信度更高的发现，或 `/code-review ultra` 进行云端更深度的多代理审查。自 v2.1.154 起，/simplify 运行单独的仅清理审查，应用修复而不寻找错误 — 它不再是 /code-review 的简单别名；要查找错误并应用修复，使用 /code-review --fix。' },
+        { text: '/security-review — 运行深度安全审计；--comment 跳过审计直接评论', correct: false, explanation: '/security-review 是用于安全重点审查的，而非一般正确性错误。没有 `--comment skip-the-audit` 的行为。使用 /code-review 进行正确性错误审查，使用 /security-review 关注安全漏洞。' },
+        { text: '/diff — 显示更改的行；--comment 打开编辑器让你自己写审查', correct: false, explanation: '/diff 打开未提交更改的交互式查看器 — 它不运行审查也不接受 --comment 标志。/code-review 是审查差异的内置技能，支持 --comment 将发现发布到 GitHub PR。' },
+        { text: '/review --comment — Claude 重写代码，在发现问题的地方加上内联 TODO 注释', correct: false, explanation: '/review 和 /code-review 不编辑你的文件。/code-review 以响应形式（或使用 --comment 作为 PR 评论）报告发现；它从不重写代码。如果你想要应用修复，在审查发现后要求 Claude 处理它们。' }
+      ]
+    }
+  ];
+
+  let currentQ = 0;
+  const counter = document.getElementById('quizCounter');
+  const percent = document.getElementById('quizPercent');
+  const bar = document.getElementById('quizProgressBar');
+  const question = document.getElementById('quizQuestion');
+  const options = document.getElementById('quizOptions');
+  const result = document.getElementById('quizResult');
+
+  function renderQuestion() {
+    const q = questions[currentQ];
+    counter.textContent = '第 ' + (currentQ + 1) + ' 题，共 ' + questions.length + ' 题';
+    const pct = Math.round((currentQ / questions.length) * 100);
+    percent.textContent = pct + '%';
+    bar.style.width = pct + '%';
+    question.textContent = q.text;
+    options.innerHTML = '';
+    result.innerHTML = '';
+    q.options.forEach((opt, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.role = 'radio';
+      btn.setAttribute('aria-checked', 'false');
+      btn.className = 'quiz-option';
+      btn.innerHTML = '<span class="quiz-radio"></span><span>' + opt.text + '</span>';
+      btn.addEventListener('click', function() {
+        if (this.disabled) return;
+        // Disable all
+        options.querySelectorAll('.quiz-option').forEach(b => b.disabled = true);
+        // Mark selected
+        const radios = options.querySelectorAll('.quiz-radio');
+        radios.forEach((r, idx) => {
+          if (idx === i) {
+            r.style.borderColor = opt.correct ? '#22c55e' : '#ef4444';
+            r.style.background = opt.correct ? '#22c55e' : '#ef4444';
+            r.innerHTML = opt.correct ? '✓' : '✗';
+            r.style.color = 'white';
+            r.style.fontSize = '12px';
+          }
+        });
+        // Show explanation
+        const correctOpt = q.options.find(o => o.correct);
+        result.innerHTML = '<div style="padding:0.75rem;border-radius:0.5rem;' + (opt.correct ? 'background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;' : 'background:#fef2f2;border:1px solid #fecaca;color:#991b1b;') + 'font-size:0.875rem;line-height:1.5;">' +
+          (opt.correct ? '✓ 正确！' : '✗ ' + opt.explanation) +
+          '</div>';
+        if (!opt.correct) {
+          result.innerHTML += '<div style="margin-top:0.5rem;padding:0.75rem;border-radius:0.5rem;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;font-size:0.875rem;line-height:1.5;">✓ 正确答案：' + correctOpt.text + '</div>';
+        }
+        // Next button
+        if (currentQ < questions.length - 1) {
+          result.innerHTML += '<button class="terminal-btn" style="margin-top:1rem;width:100%;" onclick="nextQuestion()">下一题 →</button>';
+        } else {
+          result.innerHTML += '<button class="terminal-btn" style="margin-top:1rem;width:100%;background:#22c55e;" onclick="resetQuiz()">重新开始</button>';
+        }
+      });
+      options.appendChild(btn);
+    });
+  }
+
+  window.nextQuestion = function() {
+    if (currentQ < questions.length - 1) {
+      currentQ++;
+      renderQuestion();
+    }
+  };
+  window.resetQuiz = function() {
+    currentQ = 0;
+    renderQuestion();
+  };
+
+  renderQuestion();
+})();
+
+// ===== Sidebar Collapse =====
+(function() {
+  const toggle = document.getElementById('sidebarCollapseToggle');
+  const sidebar = document.getElementById('desktopSidebar');
+  const grid = document.getElementById('layoutGrid');
+  if (toggle && sidebar && grid) {
+    toggle.addEventListener('click', function() {
+      sidebar.classList.toggle('sidebar-collapsed');
+      grid.classList.toggle('sidebar-collapsed-grid');
+    });
+  }
+})();
+</script>
+
+</body>
+</html>

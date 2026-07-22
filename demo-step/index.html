@@ -1,0 +1,1321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>斜杠命令 — PaiCLI 学习中心</title>
+  <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #111118;
+      --bg-tertiary: #1a1a24;
+      --text-primary: #e4e4e7;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --border: #27272a;
+      --border-hover: #3f3f46;
+      --code-bg: #0d0d14;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --info: #3b82f6;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    a:hover {
+      color: var(--accent-hover);
+    }
+
+    /* Header */
+    .site-header {
+      border-bottom: 1px solid var(--border);
+      background: rgba(10, 10, 15, 0.9);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .header-inner {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+    }
+
+    .logo {
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      letter-spacing: -0.02em;
+    }
+
+    .logo span {
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .nav-links a {
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .nav-links a:hover {
+      color: var(--text-primary);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .search-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    .search-btn:hover {
+      border-color: var(--border-hover);
+      color: var(--text-secondary);
+    }
+
+    .search-btn kbd {
+      font-family: inherit;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+    }
+
+    .lang-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .lang-toggle button {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: color 0.2s;
+    }
+
+    .lang-toggle button:hover {
+      color: var(--text-secondary);
+    }
+
+    .lang-toggle button.active {
+      color: var(--text-primary);
+      background: var(--bg-tertiary);
+    }
+
+    .theme-toggle {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.2s, background 0.2s;
+    }
+
+    .theme-toggle:hover {
+      color: var(--text-secondary);
+      background: var(--bg-tertiary);
+    }
+
+    /* Layout */
+    .layout {
+      display: flex;
+      flex: 1;
+      max-width: 1440px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 260px;
+      border-right: 1px solid var(--border);
+      padding: 24px 0;
+      position: sticky;
+      top: 56px;
+      height: calc(100vh - 56px);
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    .sidebar-header {
+      padding: 0 24px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .sidebar-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .sidebar-toggle {
+      display: none;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    .module-list {
+      list-style: none;
+    }
+
+    .module-list li {
+      margin: 0;
+    }
+
+    .module-list a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 24px;
+      color: var(--text-secondary);
+      font-size: 14px;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .module-list a:hover {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+    }
+
+    .module-list a.active {
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+      border-right: 2px solid var(--accent);
+    }
+
+    .module-num {
+      font-size: 12px;
+      color: var(--text-muted);
+      width: 16px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .module-list a.active .module-num {
+      color: var(--text-secondary);
+    }
+
+    /* Main */
+    .main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .content-wrapper {
+      flex: 1;
+      padding: 0 48px;
+      max-width: 720px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* Breadcrumb */
+    .breadcrumb {
+      padding: 16px 0;
+      font-size: 13px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .breadcrumb a {
+      color: var(--text-muted);
+    }
+
+    .breadcrumb a:hover {
+      color: var(--accent);
+    }
+
+    .breadcrumb .sep {
+      color: var(--text-muted);
+      opacity: 0.5;
+    }
+
+    .breadcrumb .current {
+      color: var(--text-primary);
+    }
+
+    /* Hero */
+    .hero {
+      padding: 40px 0 32px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hero-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .hero-num {
+      font-size: 14px;
+      color: var(--text-muted);
+      font-weight: 500;
+      margin-top: 8px;
+    }
+
+    .hero h1 {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+    }
+
+    .hero-description {
+      font-size: 16px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+
+    .meta-tags {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+    }
+
+    .tag.beginner {
+      border-color: rgba(34, 197, 94, 0.3);
+      color: var(--success);
+      background: rgba(34, 197, 94, 0.08);
+    }
+
+    .tag.time {
+      border-color: rgba(59, 130, 246, 0.3);
+      color: var(--info);
+      background: rgba(59, 130, 246, 0.08);
+    }
+
+    /* Content */
+    .content {
+      padding: 32px 0;
+      flex: 1;
+    }
+
+    .section {
+      margin-bottom: 40px;
+    }
+
+    .section h2 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      letter-spacing: -0.01em;
+      color: var(--text-primary);
+    }
+
+    .section p {
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      font-size: 15px;
+      line-height: 1.75;
+    }
+
+    .section ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .section ul li {
+      padding: 8px 0;
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.75;
+    }
+
+    .section ul li strong {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .section code {
+      font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      background: var(--bg-tertiary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--text-primary);
+    }
+
+    /* Code block (standalone) */
+    .code-block {
+      margin: 20px 0;
+    }
+
+    .code-block pre {
+      font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #e4e4e7;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Inline command list */
+    .command-list {
+      margin: 16px 0;
+    }
+
+    .command-item {
+      padding: 8px 0;
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+
+    .command-item code {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 14px;
+      color: var(--accent-hover);
+      background: none;
+      padding: 0;
+    }
+
+    .command-item .desc {
+      color: var(--text-secondary);
+      font-size: 15px;
+    }
+
+    /* Module nav */
+    .module-nav {
+      border-top: 1px solid var(--border);
+      padding: 24px 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      margin-top: 40px;
+    }
+
+    .nav-card {
+      flex: 1;
+      padding: 16px 20px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      transition: border-color 0.2s, transform 0.2s;
+      text-decoration: none;
+      display: block;
+    }
+
+    .nav-card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+    }
+
+    .nav-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .nav-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .nav-card.next {
+      text-align: right;
+    }
+
+    .feedback-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 0;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .feedback-link:hover {
+      color: var(--text-secondary);
+    }
+
+    /* Right sidebar */
+    .right-sidebar {
+      width: 320px;
+      border-left: 1px solid var(--border);
+      padding: 24px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    .widget {
+      margin-bottom: 32px;
+    }
+
+    .widget h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--text-primary);
+    }
+
+    .terminal {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .terminal-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border-hover);
+    }
+
+    .terminal-body {
+      padding: 16px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+      min-height: 120px;
+    }
+
+    .terminal-input-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .terminal-prompt {
+      color: var(--success);
+    }
+
+    .terminal-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: inherit;
+      outline: none;
+    }
+
+    .run-btn {
+      margin-top: 12px;
+      width: 100%;
+      padding: 8px 16px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .run-btn:hover {
+      background: var(--accent-hover);
+    }
+
+    .quiz-widget {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+    }
+
+    .quiz-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .quiz-progress-text {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .quiz-progress-bar {
+      width: 100%;
+      height: 4px;
+      background: var(--bg-tertiary);
+      border-radius: 2px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+
+    .quiz-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+
+    .quiz-question {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--text-primary);
+    }
+
+    .quiz-options {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .quiz-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-secondary);
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .quiz-option:hover {
+      border-color: var(--border-hover);
+      color: var(--text-primary);
+    }
+
+    .quiz-option input[type="radio"] {
+      accent-color: var(--accent);
+    }
+
+    .template-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .template-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text-primary);
+    }
+
+    .template-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    .template-code {
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      position: relative;
+    }
+
+    .template-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .template-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .template-btn:hover {
+      border-color: var(--border-hover);
+      color: var(--text-primary);
+    }
+
+    /* Footer */
+    .site-footer {
+      border-top: 1px solid var(--border);
+      padding: 48px 24px 32px;
+      margin-top: auto;
+    }
+
+    .footer-inner {
+      max-width: 1440px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      gap: 48px;
+    }
+
+    .footer-brand {
+      max-width: 280px;
+    }
+
+    .footer-logo {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text-primary);
+    }
+
+    .footer-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 32px;
+    }
+
+    .footer-col h4 {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .footer-col ul {
+      list-style: none;
+    }
+
+    .footer-col li {
+      margin-bottom: 8px;
+    }
+
+    .footer-col a {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .footer-col a:hover {
+      color: var(--text-primary);
+    }
+
+    .footer-bottom {
+      max-width: 1440px;
+      margin: 32px auto 0;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* Responsive */
+    @media (max-width: 1100px) {
+      .right-sidebar {
+        display: none;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .sidebar {
+        display: none;
+      }
+
+      .content-wrapper {
+        padding: 0 24px;
+      }
+
+      .header-left .nav-links {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <a href="#" class="logo">PaiCLI <span>.nagdy.me</span></a>
+        <nav class="nav-links">
+          <a href="#">学习中心</a>
+          <a href="#">实验场</a>
+          <a href="#">配置生成器</a>
+          <a href="#">速查表</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-btn" onclick="alert('搜索功能即将上线')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+          搜索
+          <kbd>⌘K</kbd>
+        </button>
+        <div class="lang-toggle">
+          <button class="active">中</button>
+          <button>EN</button>
+        </div>
+        <button class="theme-toggle" onclick="toggleTheme()" title="切换深色模式">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m4.93 19.07 1.41-1.41"></path><path d="m17.66 6.34 1.41-1.41"></path></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- Left Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">模块</span>
+        <button class="sidebar-toggle">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>
+        </button>
+      </div>
+      <ul class="module-list">
+        <li><a href="#"><span class="module-num">0</span> 入门指南</a></li>
+        <li><a href="#" class="active"><span class="module-num">1</span> 斜杠命令</a></li>
+        <li><a href="#"><span class="module-num">2</span> 记忆与 CLAUDE.md</a></li>
+        <li><a href="#"><span class="module-num">3</span> 项目配置</a></li>
+        <li><a href="#"><span class="module-num">4</span> 命令详解</a></li>
+        <li><a href="#"><span class="module-num">5</span> 技能</a></li>
+        <li><a href="#"><span class="module-num">6</span> 钩子</a></li>
+        <li><a href="#"><span class="module-num">7</span> MCP 服务器</a></li>
+        <li><a href="#"><span class="module-num">8</span> 子代理</a></li>
+        <li><a href="#"><span class="module-num">9</span> 高级功能</a></li>
+        <li><a href="#"><span class="module-num">10</span> 工作流</a></li>
+        <li><a href="#"><span class="module-num">11</span> 插件</a></li>
+      </ul>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <div class="main-content">
+        <div class="content-wrapper">
+          <!-- Breadcrumb -->
+          <nav class="breadcrumb">
+            <a href="#">首页</a>
+            <span class="sep">/</span>
+            <a href="#">学习</a>
+            <span class="sep">/</span>
+            <span class="current">斜杠命令</span>
+          </nav>
+
+          <!-- Hero -->
+          <section class="hero">
+            <div class="hero-header">
+              <span class="hero-num">1</span>
+              <h1>斜杠命令</h1>
+            </div>
+            <p class="hero-description">
+              学习使用 PaiCLI 内置的斜杠命令，高效管理上下文、控制会话行为与调整配置。
+            </p>
+            <div class="meta-tags">
+              <span class="tag beginner">入门级</span>
+              <span class="tag time">15 分钟</span>
+            </div>
+          </section>
+
+          <!-- Content -->
+          <div class="content">
+            <div class="section">
+              <p>
+                斜杠命令是在交互式会话中控制 PaiCLI 行为的最快方式。在任意提示符处输入 <code>/</code> 即可查看完整列表，或输入几个字母进行过滤。本模块涵盖了你每天都会用到的内置命令。
+              </p>
+
+              <h2>发现命令</h2>
+              <p>
+                在提示符处输入 <code>/</code>，会弹出一个包含所有可用命令的菜单。继续输入即可过滤 —— 例如 <code>/co</code> 会筛选出 <code>/compact</code>、<code>/color</code>、<code>/config</code>、<code>/context</code>、<code>/cost</code>、<code>/copy</code>。使用方向键导航，回车确认。对于当前环境不适用的命令会自动隐藏，只显示可用的选项。
+              </p>
+              <p>
+                如果你是 PaiCLI 的新手，可以试试 <code>/powerup</code> —— 它会运行交互式教程，通过动画演示带你快速掌握核心功能。
+              </p>
+              <p>
+                部分命令可以直接接收参数：<code>/compact focus on the API layer</code>、<code>/model opus</code>、<code>/effort high</code>、<code>/rename auth-refactor</code>。而 <code>/context</code>、<code>/cost</code> 和 <code>/status</code> 这类命令则无需参数，直接运行即可。
+              </p>
+
+              <div class="code-block">
+                <pre>/compact focus on the payment service</pre>
+              </div>
+
+              <h2>命令分类</h2>
+              <p>
+                内置命令按功能划分为几个类别。了解这些分类，有助于你在不刻意记忆所有命令的情况下，快速找到所需功能。
+              </p>
+
+              <p><strong>上下文管理</strong> 控制 PaiCLI 在对话中可查看的内容范围。</p>
+              <ul>
+                <li><code>/context</code> — 以可视化网格展示当前上下文使用情况</li>
+                <li><code>/compact</code> — 压缩对话历史。可传入指令控制保留内容：<code>/compact keep the migration plan, drop the debugging</code></li>
+                <li><code>/clear</code> — 完全清空上下文，重新开始</li>
+              </ul>
+
+              <p><strong>会话工具</strong> 让你管理和回顾工作。</p>
+              <ul>
+                <li><code>/rename my-feature</code> — 为当前会话命名</li>
+                <li><code>/resume</code> — 恢复之前的会话</li>
+                <li><code>/branch</code> — 创建并行对话，在不丢失当前状态的前提下探索替代方案</li>
+                <li><code>/rewind</code> — 回滚到更早的节点。<code>/undo</code> 是它的别名。</li>
+                <li><code>/export</code> — 将会话导出为文件或复制到剪贴板</li>
+                <li><code>/recap</code> — 生成会话的单行摘要。当你离开终端一段时间后返回时，也会自动运行。</li>
+              </ul>
+
+              <p><strong>配置</strong> 在会话中调整 PaiCLI 的行为。</p>
+              <ul>
+                <li><code>/model</code> — 在可用模型间切换，如 Sonnet、Opus、Haiku，或别名如 <code>best</code>、<code>opusplan</code></li>
+                <li><code>/effort</code> — 设置推理深度：<code>low</code>、<code>medium</code>、<code>high</code>、<code>xhigh</code>、<code>max</code>（仅当前会话）或 <code>auto</code></li>
+                <li><code>/permissions</code> — 管理 PaiCLI 无需询问即可执行的操作</li>
+                <li><code>/config</code> — 打开设置菜单</li>
+                <li><code>/theme</code>（v2.1.118 新增）— 创建并切换自定义主题。主题以 JSON 文件形式存储在 <code>~/.pai/themes/</code> 下，也可直接手动编辑。</li>
+                <li><code>/tui</code> — 在经典模式和无闪烁全屏渲染之间切换</li>
+                <li><code>/focus</code> — 切换专注视图，实现无干扰输入</li>
+                <li><code>/less-permission-prompts</code> — 扫描最近的会话记录，针对常见的只读 Bash 和 MCP 工具调用提出允许列表建议，减少后续权限询问</li>
+              </ul>
+
+              <p><strong>诊断</strong> 当遇到问题时提供排查帮助。</p>
+              <ul>
+                <li><code>/cost</code> — 显示会话成本、耗时、代码变更和令牌使用情况</li>
+                <li><code>/usage-credits</code>（v2.1.144 新增）— 查看和管理账户使用额度。原名 <code>/extra-usage</code>，旧名称仍可用。</li>
+                <li><code>/status</code> — 显示版本、模型和账户信息</li>
+                <li><code>/doctor</code> — 检查安装健康状况</li>
+                <li><code>/diff</code> — 打开交互式查看器查看未提交的更改，提交前预览 PaiCLI 的改动很有用</li>
+              </ul>
+
+              <p><strong>发布前审查</strong> 在代码离开你的分支之前检查工作质量。</p>
+              <ul>
+                <li>
+                  <code>/code-review</code>（v2.1.147 新增）— 审查当前差异的正确性缺陷，报告发现而不修改文件。接受强度级别（<code>/code-review high</code> 返回更广泛的覆盖范围；<code>/code-review low</code> 返回更少但更高置信度的发现），以及 <code>--comment</code> 将发现作为内联评论发布在当前 GitHub PR 上。这是内置技能；<code>/code-review --fix</code> 会将发现应用到工作树。从 v2.1.154 起，<code>/simplify</code> 是一个独立的仅修复技能，用于应用修复而不排查缺陷 —— 查找缺陷请使用 <code>/code-review</code>。
+                </li>
+                <li>
+                  <code>/code-review ultra</code> — 在云沙箱中运行深度、多智能体代码审查，使用并行分析和批判。无参数时审查当前分支；传入 PR 编号（如 <code>/code-review ultra 123</code>）可获取并审查 GitHub PR。<code>/ultrareview</code> 是别名。Pro 和 Max 版本包含少量免费运行次数，之后将消耗使用额度。
+                </li>
+                <li><code>/review</code> — 对变更集进行只读的深度检查</li>
+                <li><code>/security-review</code> — 对待处理的更改进行安全重点审查</li>
+              </ul>
+
+              <div class="code-block">
+                <pre><span style="color: var(--text-muted);"># 常用命令速查</span>
+/context
+
+/compact keep the auth refactor plan
+
+/model opus
+
+/effort high
+
+/cost
+
+/code-review high
+/code-review --comment</pre>
+              </div>
+            </div>
+
+            <!-- Feedback & Module Nav -->
+            <a href="#" class="feedback-link">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
+              报告此模块问题
+            </a>
+
+            <nav class="module-nav">
+              <a href="#" class="nav-card">
+                <div class="nav-label">← 上一篇</div>
+                <div class="nav-title">入门指南</div>
+              </a>
+              <a href="#" class="nav-card next">
+                <div class="nav-label">下一篇 →</div>
+                <div class="nav-title">记忆与 CLAUDE.md</div>
+              </a>
+            </nav>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Sidebar -->
+      <aside class="right-sidebar">
+        <!-- Guided Tutorial -->
+        <div class="widget">
+          <h3>引导教程</h3>
+          <div class="terminal">
+            <div class="terminal-header">
+              <div class="terminal-dots">
+                <div class="terminal-dot"></div>
+                <div class="terminal-dot"></div>
+                <div class="terminal-dot"></div>
+              </div>
+              <span>PaiCLI — 引导教程</span>
+            </div>
+            <div class="terminal-body" id="guidedOutput">
+              <div>让我们先探索可用命令。点击 Run 查看 /help 输出。</div>
+            </div>
+            <button class="run-btn" id="guidedRunBtn" style="margin: 12px; width: calc(100% - 24px);">运行</button>
+          </div>
+        </div>
+
+        <!-- Try It Yourself -->
+        <div class="widget">
+          <h3>亲自尝试</h3>
+          <div class="terminal">
+            <div class="terminal-header">
+              <div class="terminal-dots">
+                <div class="terminal-dot"></div>
+                <div class="terminal-dot"></div>
+                <div class="terminal-dot"></div>
+              </div>
+              <span>PaiCLI — 自由输入</span>
+            </div>
+            <div class="terminal-body">
+              <div>欢迎使用 PaiCLI！输入命令或 /help 开始。</div>
+              <div class="terminal-input-line">
+                <span class="terminal-prompt">❯</span>
+                <input type="text" class="terminal-input" id="freeInput" placeholder="输入命令..." autocomplete="off">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Check Your Understanding -->
+        <div class="widget">
+          <h3>检验你的理解</h3>
+          <div class="quiz-widget">
+            <div class="quiz-header">
+              <span class="quiz-progress-text">第 1 题，共 7 题</span>
+              <span class="quiz-progress-text" id="quizPercent">0%</span>
+            </div>
+            <div class="quiz-progress-bar">
+              <div class="quiz-progress-fill" id="quizFill" style="width: 0%"></div>
+            </div>
+            <div class="quiz-question" id="quizQuestion">在 PaiCLI 中运行 /compact 会发生什么？</div>
+            <div class="quiz-options" id="quizOptions">
+              <label class="quiz-option">
+                <input type="radio" name="quiz" value="0">
+                <span>永久删除对话历史</span>
+              </label>
+              <label class="quiz-option">
+                <input type="radio" name="quiz" value="1">
+                <span>压缩当前上下文，可选择性地聚焦特定区域</span>
+              </label>
+              <label class="quiz-option">
+                <input type="radio" name="quiz" value="2">
+                <span>切换到更小的模型以节省令牌</span>
+              </label>
+              <label class="quiz-option">
+                <input type="radio" name="quiz" value="3">
+                <span>将会话导出为文件</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Templates -->
+        <div class="widget">
+          <h3>斜杠命令模板</h3>
+
+          <div class="template-card">
+            <div class="template-title">聚焦与检查工作流</div>
+            <div class="template-desc">在开始实现之前，引导 PaiCLI 熟悉仓库的一组斜杠命令序列。</div>
+            <div class="template-code">/context
+Read `README.md`, `CLAUDE.md`, and `package.json`, then summarize the project conventions before making changes.</div>
+            <div class="template-actions">
+              <button class="template-btn" onclick="copyTemplate(this)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+                复制
+              </button>
+              <button class="template-btn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"></line><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"></line></svg>
+                分享
+              </button>
+            </div>
+          </div>
+
+          <div class="template-card">
+            <div class="template-title">任务间上下文重置</div>
+            <div class="template-desc">完成任务后压缩上下文，以便在干净的状态下开始下一个任务。</div>
+            <div class="template-code">/compact summarize what was completed and preserve any open questions, then drop implementation details</div>
+            <div class="template-actions">
+              <button class="template-btn" onclick="copyTemplate(this)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+                复制
+              </button>
+              <button class="template-btn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"></line><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"></line></svg>
+                分享
+              </button>
+            </div>
+          </div>
+
+          <div class="template-card">
+            <div class="template-title">发布前正确性扫描</div>
+            <div class="template-desc">对当前差异运行内置的 /code-review 技能，然后将发现发布到开放的 PR 上。</div>
+            <div class="template-code">/code-review high
+# Once the findings look reasonable, post them to the PR:
+/code-review high --comment</div>
+            <div class="template-actions">
+              <button class="template-btn" onclick="copyTemplate(this)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+                复制
+              </button>
+              <button class="template-btn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"></line><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"></line></svg>
+                分享
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div class="footer-logo">PaiCLI</div>
+        <p class="footer-desc">An interactive learning platform for Claude Code.</p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h4>开始学习</h4>
+          <ul>
+            <li><a href="#">学习模块</a></li>
+            <li><a href="#">评估你的水平</a></li>
+            <li><a href="#">实验场</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>构建与参考</h4>
+          <ul>
+            <li><a href="#">配置生成器</a></li>
+            <li><a href="#">速查表</a></li>
+            <li><a href="#">功能索引</a></li>
+            <li><a href="#">资源</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>反馈</h4>
+          <ul>
+            <li><a href="#">反馈追踪</a></li>
+            <li><a href="#">更新日志</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 PaiCLI · v1.0.0</span>
+      <span>基于 claude.nagdy.me 灵感构建</span>
+    </div>
+  </footer>
+
+  <script>
+    // Guided tutorial simulation
+    const guidedOutput = document.getElementById('guidedOutput');
+    const guidedRunBtn = document.getElementById('guidedRunBtn');
+
+    const guidedSteps = [
+      { text: '> /help', delay: 300 },
+      { text: '', delay: 100 },
+      { text: 'Available commands:', delay: 200 },
+      { text: '  /compact        Compress the current conversation', delay: 100 },
+      { text: '  /config         Open the settings menu', delay: 80 },
+      { text: '  /context        Show context usage', delay: 80 },
+      { text: '  /cost           Show session cost', delay: 80 },
+      { text: '  /help           Show this help message', delay: 80 },
+      { text: '  ...', delay: 80 },
+    ];
+
+    let guidedRunning = false;
+    guidedRunBtn.addEventListener('click', async () => {
+      if (guidedRunning) return;
+      guidedRunning = true;
+      guidedRunBtn.disabled = true;
+      guidedRunBtn.textContent = '运行中...';
+      guidedOutput.innerHTML = '';
+
+      for (const step of guidedSteps) {
+        await new Promise(r => setTimeout(r, step.delay));
+        const div = document.createElement('div');
+        div.textContent = step.text;
+        guidedOutput.appendChild(div);
+      }
+
+      guidedRunning = false;
+      guidedRunBtn.disabled = false;
+      guidedRunBtn.textContent = '运行';
+    });
+
+    // Free type terminal
+    const freeInput = document.getElementById('freeInput');
+    freeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && freeInput.value.trim()) {
+        const terminalBody = freeInput.closest('.terminal-body');
+        const line = document.createElement('div');
+        line.innerHTML = `<span style="color: var(--success);">❯</span> ${freeInput.value}`;
+        terminalBody.insertBefore(line, freeInput.parentElement);
+        freeInput.value = '';
+
+        // Simulate response
+        setTimeout(() => {
+          const response = document.createElement('div');
+          response.style.color = 'var(--text-muted)';
+          response.textContent = `Command executed: ${line.textContent.replace('❯ ', '')}`;
+          terminalBody.insertBefore(response, freeInput.parentElement);
+        }, 300);
+      }
+    });
+
+    // Quiz
+    const quizOptions = document.querySelectorAll('.quiz-option');
+    quizOptions.forEach(opt => {
+      opt.addEventListener('click', () => {
+        quizOptions.forEach(o => o.style.borderColor = 'var(--border)');
+        quizOptions.forEach(o => o.style.color = 'var(--text-secondary)');
+        opt.style.borderColor = 'var(--accent)';
+        opt.style.color = 'var(--text-primary)';
+        document.getElementById('quizFill').style.width = '100%';
+        document.getElementById('quizPercent').textContent = '100%';
+      });
+    });
+
+    // Copy template
+    function copyTemplate(btn) {
+      const code = btn.closest('.template-card').querySelector('.template-code').textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        const original = btn.innerHTML;
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> 已复制';
+        setTimeout(() => {
+          btn.innerHTML = original;
+        }, 2000);
+      });
+    }
+
+    // Theme toggle (placeholder)
+    function toggleTheme() {
+      alert('深色模式切换功能演示');
+    }
+  </script>
+</body>
+</html>

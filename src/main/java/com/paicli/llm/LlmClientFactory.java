@@ -33,6 +33,7 @@ public class LlmClientFactory {
             case "kimi" -> new KimiClient(apiKey, model, baseUrl);
             case "freellmapi" -> new FreeLlmApiClient(apiKey, model, baseUrl);
             case "xfyun" -> new XfyunMaaSClient(apiKey, model, baseUrl, loraId);
+            case "agnes" -> new AgnesClient(apiKey, model, baseUrl);
             default -> null;
         };
     }
@@ -43,7 +44,7 @@ public class LlmClientFactory {
             return client;
         }
 
-        for (String provider : new String[]{"glm", "deepseek", "step", "kimi", "freellmapi", "xfyun"}) {
+        for (String provider : new String[]{"glm", "deepseek", "step", "kimi", "freellmapi", "xfyun", "agnes"}) {
             client = create(provider, config);
             if (client != null) {
                 return client;
@@ -60,6 +61,7 @@ public class LlmClientFactory {
             case "moonshot", "moonshotai", "moonshot-ai" -> "kimi";
             case "free-llm-api", "free_llm_api", "freellm", "free-llm" -> "freellmapi";
             case "xfyun-maas", "xfyun_maas", "iflytek", "iflytek-maas", "iflytek_maas", "maas" -> "xfyun";
+            case "agnes-ai", "agnes_ai", "sapiens", "sapiens-ai", "sapiens_ai" -> "agnes";
             default -> normalized;
         };
     }
