@@ -20,7 +20,7 @@ class CodeIndexTest {
     @Test
     void testIndexCurrentProject() {
         System.setProperty("paicli.rag.dir", "/tmp/paicli-test-rag-index");
-        CodeIndex indexer = new CodeIndex();
+        CodeIndex indexer = new CodeIndex(new FakeEmbeddingClient());
         // 索引测试资源目录
         CodeIndex.IndexResult result = indexer.index("src/test/resources/rag");
         assertTrue(result.chunkCount() > 0, "应该至少索引一个代码块");
@@ -30,7 +30,7 @@ class CodeIndexTest {
     @Test
     void reportsProgressThroughListener() {
         List<String> messages = new ArrayList<>();
-        CodeIndex indexer = new CodeIndex(messages::add);
+        CodeIndex indexer = new CodeIndex(new FakeEmbeddingClient(), messages::add);
 
         CodeIndex.IndexResult result = indexer.index("src/test/resources/rag");
 
@@ -38,5 +38,12 @@ class CodeIndexTest {
         assertTrue(messages.stream().anyMatch(message -> message.startsWith("🔍 开始索引")));
         assertTrue(messages.stream().anyMatch(message -> message.startsWith("📁 发现")));
         assertTrue(messages.stream().anyMatch(message -> message.startsWith("✅ 索引完成")));
+    }
+
+    private static class FakeEmbeddingClient extends EmbeddingClient {
+        @Override
+        public float[] embed(String text) {
+            return new float[]{1.0f, 0.5f, 0.25f};
+        }
     }
 }

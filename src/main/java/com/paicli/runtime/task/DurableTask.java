@@ -8,15 +8,27 @@ public record DurableTask(
         String prompt,
         String result,
         String error,
+        String projectPath,
+        String currentNodeId,
+        String workflowVersion,
+        int attempt,
+        String ownerId,
         Instant createdAt,
         Instant startedAt,
         Instant finishedAt,
+        Instant updatedAt,
+        Instant leaseUntil,
         long durationMs
 ) {
     public boolean terminal() {
         return status == TaskStatus.COMPLETED
                 || status == TaskStatus.FAILED
-                || status == TaskStatus.CANCELED;
+                || status == TaskStatus.CANCELED
+                || status == TaskStatus.COMPENSATED;
+    }
+
+    public boolean runnable() {
+        return status == TaskStatus.ENQUEUED;
     }
 
     public String shortPrompt() {

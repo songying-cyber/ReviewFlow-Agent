@@ -58,6 +58,17 @@ class HitlToolRegistryTest {
         assertTrue(handler.isEnabled());
     }
 
+    @Test
+    void lowWriteToolDoesNotRequestApprovalByDefault() {
+        StubHandler stub = new StubHandler(req -> ApprovalResult.reject("should not ask"));
+        HitlToolRegistry registry = new HitlToolRegistry(stub);
+
+        String result = registry.executeTool("save_memory", "{\"fact\":\"x\"}");
+
+        assertTrue(result.contains("记忆保存器未初始化"));
+        assertEquals(0, stub.requestCount(), "低风险写默认不应触发 HITL");
+    }
+
     // ------------------ 开启 HITL 后的决策分支（新增） ------------------
 
     @Test
@@ -124,6 +135,59 @@ class HitlToolRegistryTest {
     }
 
     @Test
+    void approvalRequestIncludesFingerprintAndWriteFilePreview(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("preview.txt");
+        Files.writeString(target, "old\nsame\n");
+        StubHandler stub = new StubHandler(req -> ApprovalResult.approve());
+        HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
+
+        registry.executeTool("write_file", "{\"path\":\"preview.txt\",\"content\":\"new\\nsame\\n\"}");
+
+        ApprovalRequest request = stub.received.get(0);
+        assertNotNull(request.fingerprint());
+        assertFalse(request.fingerprint().isBlank());
+        assertEquals(ApprovalActionType.TOOL_CALL, request.actionType());
+        assertEquals("write_file", request.subject());
+        assertTrue(request.preview().contains("modify file: preview.txt"));
+        assertTrue(request.preview().contains("- 1 | old"));
+        assertTrue(request.preview().contains("+ 1 | new"));
+    }
+
+    @Test
+    void canonicalFingerprintIgnoresJsonFieldOrder(@TempDir Path tempDir) {
+        HitlToolRegistry registry = new HitlToolRegistry(new StubHandler(req -> ApprovalResult.approve()));
+        registry.setProjectPath(tempDir.toString());
+
+        String first = registry.fingerprintFor("write_file",
+                "{\"path\":\"a.txt\",\"content\":\"x\",\"write_mode\":\"overwrite\"}",
+                registry.getToolMetadata("write_file"));
+        String second = registry.fingerprintFor("write_file",
+                "{\"write_mode\":\"overwrite\",\"content\":\"x\",\"path\":\"a.txt\"}",
+                registry.getToolMetadata("write_file"));
+
+        assertEquals(first, second);
+    }
+
+    @Test
+    void modifiedArgumentsAreAuditedWithFinalFingerprint(@TempDir Path tempDir) throws Exception {
+        Path original = tempDir.resolve("audit-original.txt");
+        Path modified = tempDir.resolve("audit-modified.txt");
+        String modifiedArgs = "{\"path\":\"audit-modified.txt\",\"content\":\"modified\"}";
+        StubHandler stub = new StubHandler(req -> ApprovalResult.modify(modifiedArgs));
+        HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
+
+        registry.executeTool("write_file", "{\"path\":\"audit-original.txt\",\"content\":\"original\"}");
+
+        String expected = registry.fingerprintFor("write_file", modifiedArgs, registry.getToolMetadata("write_file"));
+        var entry = registry.getAuditLog().readRecent(1).get(0);
+        assertEquals(expected, entry.fingerprint());
+        assertTrue(Files.exists(modified));
+        assertFalse(Files.exists(original));
+    }
+
+    @Test
     void approvedAllDecisionExecutesTool(@TempDir Path tempDir) throws Exception {
         Path target = tempDir.resolve("approved-all.txt");
         StubHandler stub = new StubHandler(req -> ApprovalResult.approveAll());
@@ -138,7 +202,7 @@ class HitlToolRegistryTest {
     }
 
     @Test
-    void approvedAllByServerDecisionExecutesMcpTool() {
+    void approvedAllByServerDecisionIsRejectedForHighRiskMcpTool() {
         StubHandler stub = new StubHandler(req -> ApprovalResult.approveAllByServer());
         HitlToolRegistry registry = new HitlToolRegistry(stub);
         registerMcpTool(registry, "chrome-devtools", "navigate_page", args -> "navigated");
@@ -146,15 +210,13 @@ class HitlToolRegistryTest {
         String result = registry.executeTool("mcp__chrome-devtools__navigate_page",
                 "{\"url\":\"https://example.com\"}");
 
-        assertEquals("navigated", result);
+        assertTrue(result.contains("高风险操作不支持全部放行"));
         assertEquals(1, stub.requestCount());
     }
 
     @Test
-    void approvedAllByServerCacheSkipsApprovalForSameMcpServer() {
-        StubHandler stub = new StubHandler(req -> {
-            throw new AssertionError("server 维度已放行后不应再次触发审批");
-        });
+    void approvedAllByServerCacheDoesNotSkipHighRiskMcpTool() {
+        StubHandler stub = new StubHandler(req -> ApprovalResult.approve());
         stub.approveServer("chrome-devtools");
         HitlToolRegistry registry = new HitlToolRegistry(stub);
         registerMcpTool(registry, "chrome-devtools", "click", args -> "clicked");
@@ -162,7 +224,7 @@ class HitlToolRegistryTest {
         String result = registry.executeTool("mcp__chrome-devtools__click", "{\"uid\":\"1\"}");
 
         assertEquals("clicked", result);
-        assertEquals(0, stub.requestCount());
+        assertEquals(1, stub.requestCount());
     }
 
     @Test

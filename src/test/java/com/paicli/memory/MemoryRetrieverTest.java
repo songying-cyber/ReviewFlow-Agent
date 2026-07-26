@@ -102,4 +102,20 @@ class MemoryRetrieverTest {
         assertTrue(context.contains("当前项目使用 Java 17"));
         assertFalse(context.contains("其他项目使用 Python"));
     }
+
+    @Test
+    void shouldRecallByTopicMetadata() {
+        longTerm.store(new MemoryEntry("topic-testing", "运行前先准备外部服务。", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "project",
+                        "project", "/repo/current",
+                        "name", "测试策略",
+                        "description", "集成测试使用真实数据库"),
+                10));
+
+        var recalls = retriever.recallLongTerm("真实数据库", 5, "/repo/current");
+
+        assertEquals(1, recalls.size());
+        assertEquals("topic-testing", recalls.get(0).entry().getId());
+        assertTrue(recalls.get(0).reason().contains("topic"));
+    }
 }

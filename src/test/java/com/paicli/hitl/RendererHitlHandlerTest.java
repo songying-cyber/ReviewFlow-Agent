@@ -48,19 +48,17 @@ class RendererHitlHandlerTest {
     }
 
     @Test
-    void approveAllByServerCoversFutureMcpCalls() {
+    void approveAllByServerIsRejectedForHighRiskMcpCalls() {
         StubRenderer stub = new StubRenderer();
         stub.nextResult = ApprovalResult.approveAllByServer();
         RendererHitlHandler handler = new RendererHitlHandler(stub, true);
 
-        handler.requestApproval(ApprovalRequest.of("mcp__chrome-devtools__click", "{}", "test"));
-        assertTrue(handler.isApprovedAllByServer("chrome-devtools"));
-
-        // Different tool from same server — fast path
         ApprovalResult result = handler.requestApproval(
-                ApprovalRequest.of("mcp__chrome-devtools__navigate_page", "{}", "test"));
+                ApprovalRequest.of("mcp__chrome-devtools__click", "{}", "test"));
+
         assertEquals(1, stub.promptCount);
-        assertEquals(ApprovalResult.Decision.APPROVED_ALL_BY_SERVER, result.decision());
+        assertEquals(ApprovalResult.Decision.REJECTED, result.decision());
+        assertFalse(handler.isApprovedAllByServer("chrome-devtools"));
     }
 
     @Test

@@ -14,14 +14,16 @@
 - 定位：面向商业使用的 Java Agent CLI 产品，对标 Claude Code
 - 已交付 23 期（ReAct → Plan+DAG → Memory → RAG → Multi-Agent → HITL → 并行工具 → 多模型 → 联网 → MCP 核心 → MCP 高级 → 长上下文 → Chrome DevTools → CDP 会话复用 → Skill → TUI → LSP 诊断 → Side-Git 快照 → Prompt 分层 → Runtime API → 图片输入 → 微信 iLink 通道文本 MVP）
 - `PAI.md` 是 PaiCLI 的项目级记忆文件：启动时自动注入 system prompt，适合团队共享的长期稳定规则；个人/会变化的经验继续用 `/save` 长期记忆。
+- GitHub PR review 结构化 client 基础模块已交付：`com.paicli.github` 可拉取 PR metadata / diff / changed files / review comments / CI 状态，按 patch 映射 inline comment 行号，过滤 outdated diff 定位，并可发布 review；CLI 入口 `/review pr <url|owner/repo#number|number>` 会拉取上下文并启动当前 Agent 审查，当前不会自动发布 review；非交互 `review pr <url|owner/repo#number|number> --dry-run --format json` 可输出 benchmark/CI 烟测摘要；`benchmark code-review-bench <offline-dir> --mode smoke|review` 可生成 Code Review Bench 兼容 reviews/candidates，默认 sparse checkout 目标仓库并使用高召回 benchmark prompt，`--only-url <PR_URL>` 可只重跑单个 PR，`--parallel N` 沿用 PaiCLI 有界并发风格并行处理 PR。
 - 下一步：OAuth / sampling / recovery 作为后续 MCP 增强
-- Banner 版本：`v16.1.0`，Maven 产物：`paicli-1.0-SNAPSHOT.jar`（两者不一致是正常状态）
+- Banner 内部版本常量：`v16.1.0`，Maven 产物：`paicli-1.0-SNAPSHOT.jar`（两者不一致是正常状态；默认启动首屏品牌标题显示 `codeflow`，不展示版本号）
 
 ## 运行前提
 
 - Java 17+ / Maven
 - 可选：`ripgrep`（`grep_code` 会优先使用；未安装时自动回退 Java 扫描）
 - 至少一个 API Key：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY` / `XFYUN_MAAS_API_KEY` / `AGNES_API_KEY`
+- GitHub PR review client 可选：`PAICLI_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN`；GitHub Enterprise 可用 `PAICLI_GITHUB_API_BASE_URL` / `PAICLI_GITHUB_GRAPHQL_URL`
 
 ## 常用命令
 
@@ -38,6 +40,9 @@ mvn test -Dtest=XxxTest -DskipTests=false   # 针对性
 mvn test -DskipTests=false                  # 全量回归
 /init                    # 生成精简项目级记忆 PAI.md；已有文件不覆盖，/init --force 可重写
 /export                  # 导出当前 ReAct 会话为 Markdown，包含完整 system prompt
+/review pr <url|number>  # 拉取 GitHub PR 上下文并启动代码审查
+java -jar target/paicli-1.0-SNAPSHOT.jar review pr <url|number> --dry-run --format json
+java -jar target/paicli-1.0-SNAPSHOT.jar benchmark code-review-bench <offline-dir> --mode smoke --limit 1 --parallel 2 --only-url <PR_URL> --timeout-seconds 60
 ```
 
 ## 架构概览
@@ -50,9 +55,9 @@ mvn test -DskipTests=false                  # 全量回归
 | Plan-and-Execute | `PlanExecuteAgent.java` | `/plan` |
 | Multi-Agent | `AgentOrchestrator.java` | `/team` |
 
-核心内置工具 11 个：`read_file` / `write_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`
+核心内置工具 13 个：`read_file` / `write_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn` / `tool_status` / `tool_compensate`
 
-代码库理解默认走 Claude Code 式实时探索：`glob_files` 找候选文件、`grep_code` 精确定位符号或字符串、`read_file` 按需读取具体行段。`grep_code` 优先使用本机 `ripgrep`，不可用时回退到 Java 扫描；结果受 `max_results` / `head_limit` / `max_chars` 预算约束，返回 `partial: true` 或 `suggested_reads` 时应继续缩小搜索范围或按建议读取行段。`search_code` 是 RAG 语义辅助，适合模糊自然语言、关键词不明确、常规搜索无果、巨型/跨知识检索场景，不作为精确代码定位的首选。
+代码库理解默认走 Claude Code 式实时探索：`glob_files` 找候选文件、`grep_code` 精确定位符号或字符串、`read_file` 按需读取具体行段。`grep_code` 优先使用本机 `ripgrep`，不可用时回退到 Java 扫描；结果受 `max_results` / `head_limit` / `max_chars` 预算约束，返回 `partial: true` 或 `suggested_reads` 时应继续缩小搜索范围或按建议读取行段。`search_code` 是 RAG 语义辅助，适合模糊自然语言、关键词不明确、常规搜索无果、巨型/跨知识检索场景，不作为精确代码定位的首选。内置工具 schema 使用 `additionalProperties: false`、enum、数值范围、默认值和“何时使用/何时不要使用”描述来减少模型误选；`write_file` 明确是整文件覆盖，不支持 diff/patch/追加。
 
 MCP 动态工具：`mcp__{server}__{tool}`（+ resources 虚拟工具）
 
@@ -74,6 +79,7 @@ src/main/java/com/paicli/
 ├── browser/     BrowserSession, BrowserGuard, SensitivePagePolicy
 ├── llm/         GLMClient, DeepSeekClient, StepClient, KimiClient, FreeLlmApiClient, AgnesClient
 ├── context/     ContextProfile, ContextMode, TokenUsageFormatter
+├── github/      GitHubPrClient, GitHubPrReviewService, PR snapshot/review models
 ├── memory/      MemoryManager, ConversationHistoryCompactor, LongTermMemory
 ├── plan/        Planner, ExecutionPlan, Task
 ├── rag/         CodeIndex, CodeRetriever, VectorStore, CodeChunker
@@ -88,13 +94,14 @@ src/main/java/com/paicli/
 ├── hitl/        HitlToolRegistry, ApprovalPolicy, TerminalHitlHandler
 ├── web/         SearchProvider, WebFetcher, HtmlExtractor, NetworkPolicy
 ├── policy/      PathGuard, CommandGuard, AuditLog
+├── sandbox/     macOS Seatbelt command sandbox for execute_command
 ├── skill/       SkillRegistry, SkillContextBuffer, SkillIndexFormatter
 └── render/      Renderer, InlineRenderer, PlainRenderer, RendererFactory
 ```
 
 启动与 inline 渲染当前约定：
 
-- 开屏 Banner 使用无右边框的简洁布局，避免 CJK/ANSI 字宽导致右侧竖线错位；Phase 22 后默认是 π 主题彩色 logo + Qoder 风格首屏，只展示模型、MCP、Skill、ReAct 状态和三条 getting-started tips，不再把 MCP server 明细刷成启动日志。
+- 开屏 Banner 使用无右边框的简洁布局，避免 CJK/ANSI 字宽导致右侧竖线错位；Phase 22 后默认是 CODE 字符块 logo + `codeflow` 品牌标题（不展示版本号）+ Qoder 风格首屏，只展示模型、MCP、Skill、ReAct 状态和三条 getting-started tips，不再把 MCP server 明细刷成启动日志。CODE logo 使用 ANSI 256 色彩虹流光相位渲染，每次 banner 生成按时间偏移颜色；`NO_COLOR=1` 或 dumb terminal 下自动降级为纯文本。
 - inline 模式使用 JLine 4 的 LineReader 编辑能力，默认提示符是 `* `，右提示显示 `message / @path / @image`。
 - 默认 CLI 启动路径应先 `Renderer.start()` 并初始化底部 dock；inline 首屏不要在 `readLine` 前裸写 stdout，而是通过 `InlineRenderer.installStartupScreen(...)` 挂到 `LineReader.CALLBACK_INIT`，首次进入输入时用 `printAbove` 一次性显示完整 Banner + tips，避免 logo 被 LineReader 首次重绘滚出可视区域。
 - `BottomStatusBar` 现在是 JLine `Status` 托管的底部 dock：由 JLine 维护滚动区域和状态行位置，不再手写 `\n` / `moveUp` / `CLEAR_TO_EOS` 清屏。输入期会把 LineReader 光标定位到 dock 上方一行，让 `*` 输入行和 Status 同处底部区域；dock 保留两类信息：上层模式 + MCP/Skill 摘要，下层 Auto Model / model / phase / ctx 百分比与 token / cost / elapsed / cwd。关键字段可用克制的 JLine `AttributedString` 彩色样式突出，但纯文本格式和宽度裁剪逻辑要保持稳定。`ctx` 表示当前仍会带入下一轮请求的上下文估算；`in/out/cache` 表示最近任务的 LLM 调用统计，二者不要混用。
@@ -107,13 +114,15 @@ src/main/java/com/paicli/
 - 默认 CLI 启动路径应尽早建立 `Terminal -> LineReader -> Renderer`，启动 Banner、模型加载、MCP 启动、Skill summary、ReAct 提示和退出提示都应走 `Renderer.stream()`；除 fatal bootstrap / runtime API / legacy TUI 降级外，不要在交互主路径新增裸 `System.out.println`。
 - 启动期 MCP 不得阻塞首屏：CLI 默认最多等待 8 秒（`PAICLI_MCP_STARTUP_WAIT_SECONDS` / `-Dpaicli.mcp.startup.wait.seconds` 可调），超时后保留未完成 server 为 `STARTING` 并后台继续初始化；`/mcp` 查看最新状态。
 - `LineReader` 使用 `PaiCliHighlighter` 做输入实时高亮：slash 命令、`@` 引用、`@image:`、`@clipboard`、敏感词和明显危险 shell 片段会在编辑阶段被标记；不要把这类视觉提示混入最终提交文本。
-- `LineReader` 使用 `PaiCliCompleter` 做上下文补全：`/model` provider、`/mcp` 子命令与 server、`/skill` 子命令与 skill name、`/task` / `/browser` / `/snapshot` 子命令、`@image:` 本地路径、本地 `@path` 和 MCP resource `@server:uri` 引用都应从同一个 completer 出口维护。
+- `LineReader` 使用 `PaiCliCompleter` 做上下文补全：`/model` provider、`/mcp` 子命令与 server、`/skill` 子命令与 skill name、`/review pr`、`/task` / `/browser` / `/sandbox` / `/snapshot` 子命令、`@image:` 本地路径、本地 `@path` 和 MCP resource `@server:uri` 引用都应从同一个 completer 出口维护。
 - 普通用户输入进入 Agent 前会先展开 MCP resource mention，再由 `LocalPathMentionExpander` 展开本地 `@path`：文件会内联为 `<file>` 块，目录会内联为 `<directory>` 列表；绝对路径或符号链接逃逸项目根时保持原文不展开。
 - `LineReader` 使用 `PaiCliHistory` 持久化输入历史到 `~/.paicli/history/input.history`；如果 `paicli.history.file` / `PAICLI_HISTORY_FILE` 指向目录，也会自动使用该目录下的 `input.history`，避免把目录当文件读；默认忽略空白、重复、明显密钥/Bearer、base64 图片和超长输入，用户可用 `/history clear` 清空本机输入历史。
 - 启动期会加载 `~/.paicli/PAI.md`、项目根 `PAI.md`、项目根 `.paicli/PAI.md`、`PAI.local.md`、`.paicli/PAI.local.md`，按此顺序注入 Project Context；`@relative/path.md` 可导入项目根内文件，总注入内容有字符预算，避免项目记忆变成 token 噪音。
 - `/init` 会根据当前项目生成短 `PAI.md`，只放 commands / project positioning / architecture / pitfalls / don'ts；默认不覆盖已有文件。
 - `/export` 导出当前 ReAct `conversationHistory` 为 Markdown 到 `~/.paicli/exports/session-*.md`；只支持无参数命令，包含完整 system prompt，便于检查 LLM 实际接收前的指令。
 - JLine 交互升级计划记录在 `docs/phase-22-jline-interaction-upgrade.md`。
+- `/task` 后台 ReAct 路径已升级为 durable workflow MVP：`runtime_tasks` 保存任务 State，`runtime_checkpoints` 保存 Agent 安全边界 checkpoint，`runtime_tool_executions` 保存写工具幂等记录、`operation_id` 状态和补偿元数据。后台写工具返回 `operation_id`，`tool_status` 可查询 `SUCCESS/FAILED/PENDING/UNKNOWN`，`tool_compensate` 可按单次可逆操作恢复快照。支持 `/task pause|resume|retry|cancel|compensate|log`；`TaskQueue` 是可替换 MQ 唤醒层，默认 `LocalTaskQueue` 为进程内队列，`PAICLI_TASK_QUEUE=redis` 使用 Redis list（`RPUSH`/`BLPOP`，`PAICLI_TASK_REDIS_URL` / `PAICLI_TASK_REDIS_KEY` 可配），scheduler 扫描 DB 可运行任务并投递 taskId，worker 收到消息后仍必须 DB claim 成功才执行；worker claim 会写 `owner_id` / `lease_until`，`paicli-task-heartbeat` 定期续租，SQLite 连接启用 `busy_timeout` / WAL，checkpoint 和 worker 终态写回都用 owner/lease fencing；重启时只回收过期或缺失 lease 的 `running/compensating`，`pause_requested` 恢复为 `paused`，`cancel_requested` 恢复为 `canceled`。当前持久恢复先覆盖后台 ReAct，Plan DAG 节点持久化仍是后续增强。
+- `AgentLoopController` 是 ReAct / SubAgent / Plan 单节点循环兜底：默认 token 硬预算不限、ReAct/SubAgent 硬上限 50 轮、Plan 单节点默认 8 轮；还会检测连续相同工具调用、连续无新工具观察、无效反思（说要继续检查/调用工具但未发 tool call）和连续工具失败。系统属性：`paicli.react.token.budget`、`paicli.react.stagnation.window`、`paicli.react.hard.max.iterations`、`paicli.react.no.progress.window`、`paicli.react.invalid.reflection.window`、`paicli.react.tool.failure.window`、`paicli.plan.task.max.iterations`。
 
 ## 关键行为约束（Agent 必读）
 
@@ -121,9 +130,13 @@ src/main/java/com/paicli/
 
 - 长期记忆只通过 `/save` 或用户明确要求保存；不要自动提取事实
 - `PAI.md` 管团队共享的项目规则，长期记忆管个人或项目作用域的稳定事实；不要把一次性协作经验写进 `PAI.md`
+- 长期记忆默认同时维护 JSON 兼容文件和 Markdown topic 体系：`~/.paicli/memory/MEMORY.md` 是索引，`topics/*.md` 放详情；召回会综合内容、topic frontmatter 和 metadata 评分。
 - 长期记忆只保存跨会话稳定事实，不保存临时指令；默认项目级作用域，跨项目通用偏好才用 global
+- 自动长期记忆归纳默认关闭，只有 `PAICLI_AUTO_MEMORY=true` / `-Dpaicli.auto.memory=true` 时才会在任务完成后提取稳定事实并保存为当前项目 scope。
 - 长期记忆必须可审计和可删除：`/memory list` / `/memory search <关键词>` / `/memory delete <id>` / `/memory clear`
 - 两道压缩不要混淆：shortTermMemory 压缩 vs conversationHistory 压缩（后者是防 window 超限的关键）
+- ReAct / Plan / SubAgent 调 LLM 前会先对旧的大型 tool result 做 microcompact：保留最近工具结果，较早的大输出替换为短标记；随后才按阈值触发 conversationHistory 结构化摘要压缩。
+- `ConversationHistoryCompactor` 的摘要消息带 `[compact_boundary]` 锚点，后续 resume/transcript 链路应以该边界之后的有效 history 为准。
 - 自动压缩阈值按 Claude Code 风格预留摘要输出和安全缓冲：大窗口使用 `window - 20k - 13k`，例如 200k 窗口约 167k 触发、1M 窗口约 967k 触发；小窗口按比例缩小预留。
 
 ### HITL + 策略层
@@ -132,6 +145,15 @@ src/main/java/com/paicli/
 - 用户无法批准策略拒绝的请求
 - PathGuard 强制路径限定在项目根内
 - CommandGuard 是辅助黑名单，不是主防线
+- macOS 命令沙箱只包裹 `execute_command` 及其子进程，不沙箱整个 PaiCLI；开启后由 `com.paicli.sandbox` 生成 Seatbelt profile 并通过 `sandbox-exec` 执行。`read_file` / `write_file`、`web_fetch`、MCP、浏览器 shared session、微信 daemon 仍由各自权限层管理。
+- `/sandbox status|on|off|strict on|strict off|excluded add|excluded remove|doctor` 管理命令沙箱；`sandbox.required=true` 且 Seatbelt 不可用时，`execute_command` 必须策略拒绝。命中 `excludedCommands` 或 `dangerously_disable_sandbox=true` 的非沙箱命令回到高风险 HITL。
+- 工具注册时必须声明 `ToolMetadata` 风险等级：`READ_ONLY` 默认放行，`LOW_WRITE` 默认放行并审计，`MEDIUM_WRITE` / `HIGH_RISK` 默认触发 HITL；MCP 工具默认 `HIGH_RISK`。
+- 审批请求按 `ApprovalActionType + subject + canonical arguments + risk + context` 生成 fingerprint；修改参数后必须按最终参数重算 fingerprint，AuditLog 必须记录 fingerprint。
+- `write_file` 审批要提供 preview：新文件显示 create file + size，修改文件显示简短 diff；高风险操作不支持 approve-all，只能逐次按 exact fingerprint 放行。
+- 工具结果回灌模型前必须经过 `ToolResultTrustWrapper` 标记为 `<paicli_tool_result trust="untrusted">`；原始内容逐行加前缀，防止网页/文件/MCP/命令输出伪造系统指令或闭合标签。
+- 工具结果必须带统一 `ToolExecutionStatus`：`SUCCESS` / `FAILED` / `PARTIAL` / `UNKNOWN` / `PENDING`。截断/分页结果用 `PARTIAL`，超时或副作用不确定用 `UNKNOWN`，外部 accepted/queued 用 `PENDING`；Agent 按 status 和 `recoverable` 决策，不从纯文本猜。
+- 后台 durable 写工具必须记录幂等键和 `operation_id`；同参数重放只能复用已有成功结果，遇到 `running/pending/unknown/failed` 不得直接重复执行，应先走 `tool_status`。文件类可逆副作用通过 Side-Git 快照生成补偿元数据，用户明确要求回滚某个操作时用 `tool_compensate`。
+- 可通过 `PAICLI_TOOL_INTENT_VALIDATION=true` 启用 LLM 工具意图校验：工具执行前用当前用户/任务意图校验模型选择的工具是否匹配；明确不匹配时返回结构化 `INTENT_TOOL_MISMATCH`，不进入 HITL 或真实工具执行。
 - 微信 iLink 通道没有人工审批面板，必须走非交互式默认拒绝策略：只读工具默认允许，`execute_command` 必须精确命中命令白名单，`mcp__*` 必须命中 MCP 白名单，`revert_turn` 和浏览器会话切换默认拒绝，文件写入仍由 PathGuard 限定在绑定 workspace 内。
 
 ### Plan 审阅交互
@@ -189,7 +211,7 @@ src/main/java/com/paicli/
 
 ### 5.3 改 Memory → `MemoryManager` + `LongTermMemory` + `TokenBudget` + 测试 + 文档
 
-### 5.4 改 HITL/策略 → `policy/` + ToolRegistry + HitlToolRegistry + 提示词 + `.env.example` + 文档 + 测试
+### 5.4 改 HITL/策略/命令沙箱 → `policy/` + `sandbox/` + ToolRegistry + HitlToolRegistry + 提示词 + `.env.example` + 文档 + 测试
 
 ### 5.5 改 MCP → `mcp/` + ToolRegistry + HITL + AuditLog + 提示词 + 文档 + 测试
 
@@ -202,7 +224,8 @@ src/main/java/com/paicli/
 | 场景 | 命令 |
 |------|------|
 | 代码搜索工具 | `mvn test -Dtest=ToolRegistryTest,CodeSearchGoldenSetTest,ApprovalPolicyTest` |
-| 命令解析 | `mvn test -Dtest=CliCommandParserTest,PlanReviewInputParserTest,MainInputNormalizationTest` |
+| GitHub PR client | `mvn test -Dtest=GitHubPrReferenceTest,GitHubPrClientTest,GitHubDiffLineMapTest,GitHubReviewPreparerTest -DskipTests=false` |
+| 命令解析 | `mvn test -Dtest=CliCommandParserTest,PaiCliCompleterTest,MainReviewPromptTest,MainReviewCommandTest,CodeReviewBenchRunnerTest,PlanReviewInputParserTest,MainInputNormalizationTest` |
 | DAG/Plan | `mvn test -Dtest=ExecutionPlanTest` |
 | Multi-Agent | `mvn test -Dtest=AgentRoleTest,AgentMessageTest,AgentOrchestratorTest` |
 | TUI/终端 | `mvn test -Pphase16-smoke` |
@@ -218,6 +241,7 @@ src/main/java/com/paicli/
 | CLI 命令 | Main.java + CliCommandParser.java |
 | 规划/DAG | PlanExecuteAgent.java + Planner.java + ExecutionPlan.java |
 | 工具调用 | ToolRegistry.java + Agent.java |
+| GitHub PR 审查 | GitHubPrClient.java + GitHubPrReviewService.java + GitHubReviewPreparer.java + GitHubDiffLineMap.java |
 | 代码搜索 | ToolRegistry.java (`glob_files` / `grep_code` / `read_file`) |
 | 模型/API | llm/*Client.java + LlmClientFactory.java |
 | RAG 语义辅助 | CodeRetriever.java + CodeIndex.java + VectorStore.java |

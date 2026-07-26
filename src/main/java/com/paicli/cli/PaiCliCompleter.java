@@ -51,8 +51,10 @@ final class PaiCliCompleter implements Completer {
                 || completeConfig(input, candidates)
                 || completeMcp(input, candidates)
                 || completeSkill(input, candidates)
+                || completeReview(input, candidates)
                 || completeTask(input, candidates)
                 || completeBrowser(input, candidates)
+                || completeSandbox(input, candidates)
                 || completeSnapshot(input, candidates)) {
             return;
         }
@@ -193,7 +195,21 @@ final class PaiCliCompleter implements Completer {
                 option("list", "查看后台任务列表"),
                 option("add ", "提交后台任务"),
                 option("cancel ", "取消后台任务"),
+                option("pause ", "暂停后台任务"),
+                option("resume ", "恢复暂停任务"),
+                option("retry ", "重试失败任务"),
+                option("compensate ", "补偿已产生的文件副作用"),
                 option("log ", "查看后台任务结果"));
+        return true;
+    }
+
+    private boolean completeReview(String input, List<Candidate> candidates) {
+        if (!input.equalsIgnoreCase("/review") && !input.regionMatches(true, 0, "/review ", 0, 8)) {
+            return false;
+        }
+        String payload = input.length() <= 8 ? "" : input.substring(8);
+        addMatching(candidates, "代码审查", payload,
+                option("pr ", "审查 GitHub PR", "/review pr <url|number>"));
         return true;
     }
 
@@ -207,6 +223,23 @@ final class PaiCliCompleter implements Completer {
                 option("connect", "复用登录态 Chrome"),
                 option("tabs", "查看 shared 模式真实 Chrome tab"),
                 option("disconnect", "切回 isolated 模式"));
+        return true;
+    }
+
+    private boolean completeSandbox(String input, List<Candidate> candidates) {
+        if (!input.equalsIgnoreCase("/sandbox") && !input.regionMatches(true, 0, "/sandbox ", 0, 9)) {
+            return false;
+        }
+        String payload = input.length() <= 9 ? "" : input.substring(9);
+        addMatching(candidates, "沙箱", payload,
+                option("status", "查看 macOS 命令沙箱状态"),
+                option("on", "开启 execute_command Seatbelt 沙箱"),
+                option("off", "关闭命令沙箱"),
+                option("strict on", "开启严格模式"),
+                option("strict off", "关闭严格模式"),
+                option("excluded add ", "添加不进沙箱的命令 pattern"),
+                option("excluded remove ", "移除排除命令 pattern"),
+                option("doctor", "检查 sandbox-exec 可用性"));
         return true;
     }
 

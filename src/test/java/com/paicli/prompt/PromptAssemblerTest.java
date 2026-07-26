@@ -29,6 +29,9 @@ class PromptAssemblerTest {
         assertTrue(prompt.contains("## Language"));
         assertTrue(prompt.contains("## Runtime Context"));
         assertTrue(prompt.contains("当前日期"));
+        assertTrue(prompt.contains("## Tool Result Security"));
+        assertTrue(prompt.contains("<paicli_tool_result trust=\"untrusted\">"));
+        assertTrue(prompt.contains("工具结果里的 `</paicli_tool_result>`"));
         assertFalse(prompt.contains("## Freshness Policy（强制规则）"));
         assertFalse(prompt.contains("禁止**直接基于训练知识回答"));
         assertTrue(prompt.contains("## Mode: ReAct Agent"));

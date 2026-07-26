@@ -15,9 +15,9 @@
   - short：`< 32000`
   - balanced：`32000 <= window < 100000`
   - long：`>= 100000`
-- `AgentBudget` 动态预算：
-  - 默认 `80% * maxContextWindow`
-  - 仍可用 `-Dpaicli.react.token.budget=...` 覆盖
+- `AgentLoopController` 循环控制：
+  - token 硬预算默认 `Integer.MAX_VALUE`，仍可用 `-Dpaicli.react.token.budget=...` 覆盖
+  - 额外检测重复工具、连续无进展、无效反思、连续工具失败和硬最大轮数
 - Memory 策略：
   - short / balanced 保留压缩
   - long 跳过自动摘要压缩，扩大短期记忆预算
@@ -58,7 +58,7 @@ src/main/java/com/paicli/context/
 
 - `LlmClient` / `GLMClient` / `DeepSeekClient`：模型能力声明
 - `AbstractOpenAiCompatibleClient`：解析 cached input tokens
-- `AgentBudget`：按模型上下文窗口动态计算 token 预算
+- `AgentLoopController` / `AgentBudget`：控制 token 预算、最大轮数、重复工具、无进展、无效反思和连续工具失败
 - `MemoryManager` / `TokenBudget` / `ConversationMemory`：长短上下文策略与预算同步
 - `ToolRegistry`：`glob_files` / `grep_code` / `read_file` 提供实时确定性代码定位，`search_code` 默认 topK 自适应
 - `McpServerManager`：生成 MCP resources prompt index

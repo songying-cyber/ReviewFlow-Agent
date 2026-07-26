@@ -37,8 +37,10 @@ final class CliCommandParser {
         MCP_RESOURCES,
         MCP_PROMPTS,
         BROWSER,
+        SANDBOX,
         WECHAT,
         TASK,
+        REVIEW_PR,
         SKILL_LIST,
         SKILL_SHOW,
         SKILL_ON,
@@ -242,6 +244,14 @@ final class CliCommandParser {
             return new ParsedCommand(CommandType.BROWSER, trimmed.substring(9).trim());
         }
 
+        if (trimmed.equalsIgnoreCase("/sandbox")) {
+            return new ParsedCommand(CommandType.SANDBOX, "status");
+        }
+
+        if (trimmed.regionMatches(true, 0, "/sandbox ", 0, 9)) {
+            return new ParsedCommand(CommandType.SANDBOX, trimmed.substring(9).trim());
+        }
+
         if (trimmed.equalsIgnoreCase("/wechat")) {
             return new ParsedCommand(CommandType.WECHAT, "start");
         }
@@ -256,6 +266,14 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/task ", 0, 6)) {
             return new ParsedCommand(CommandType.TASK, trimmed.substring(6).trim());
+        }
+
+        if (trimmed.equalsIgnoreCase("/review") || trimmed.equalsIgnoreCase("/review pr")) {
+            return new ParsedCommand(CommandType.REVIEW_PR, null);
+        }
+
+        if (trimmed.regionMatches(true, 0, "/review pr ", 0, 11)) {
+            return new ParsedCommand(CommandType.REVIEW_PR, trimmed.substring(11).trim());
         }
 
         if (trimmed.equalsIgnoreCase("/skill") || trimmed.equalsIgnoreCase("/skill list")) {

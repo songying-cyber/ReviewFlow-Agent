@@ -96,6 +96,37 @@ class MemoryManagerTest {
         assertEquals(167000, memoryManager.getContextProfile().compressionTriggerTokens());
     }
 
+    @Test
+    void autoMemoryExtractionIsOptInAndProjectScoped() {
+        String old = System.getProperty("paicli.auto.memory");
+        try {
+            System.setProperty("paicli.auto.memory", "true");
+            LongTermMemory longTermMemory = new LongTermMemory(tempDir.toFile());
+            MemoryManager memoryManager = new MemoryManager(
+                    new StubGLMClient(List.of(new LlmClient.ChatResponse("assistant",
+                            "- 用户偏好使用中文交流", null, 10, 5))),
+                    32768,
+                    128000,
+                    longTermMemory);
+            memoryManager.setProjectPath("/repo/current");
+            memoryManager.addUserMessage("以后记得我偏好使用中文交流");
+            memoryManager.addAssistantMessage("好的");
+
+            List<String> facts = memoryManager.maybeAutoExtractLongTermMemories();
+
+            assertEquals(1, facts.size());
+            MemoryEntry entry = longTermMemory.search("中文", 10, memoryManager.getCurrentProject()).get(0);
+            assertEquals("project", entry.getMetadata().get("scope"));
+            assertTrue(entry.getMetadata().get("project").endsWith("/repo/current"));
+        } finally {
+            if (old == null) {
+                System.clearProperty("paicli.auto.memory");
+            } else {
+                System.setProperty("paicli.auto.memory", old);
+            }
+        }
+    }
+
     private static final class StubGLMClient extends GLMClient {
         private final Queue<ChatResponse> responses;
 

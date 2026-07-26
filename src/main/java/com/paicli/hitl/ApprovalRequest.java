@@ -2,6 +2,8 @@ package com.paicli.hitl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.paicli.tool.ToolMetadata;
+import com.paicli.tool.ToolRiskLevel;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -14,10 +16,15 @@ import java.util.Map;
  * 包含工具调用的完整信息，用于向用户展示"即将执行什么操作"。
  */
 public record ApprovalRequest(
+        ApprovalActionType actionType,
+        String subject,
         String toolName,
         String arguments,
+        ToolRiskLevel riskLevel,
         String dangerLevel,
         String riskDescription,
+        String fingerprint,
+        String preview,
         String suggestion,
         String callerContext,
         String sensitiveNotice
@@ -38,15 +45,42 @@ public record ApprovalRequest(
 
     public static ApprovalRequest of(String toolName, String arguments, String suggestion, String callerContext,
                                      String sensitiveNotice) {
+        return of(toolName, arguments, suggestion, callerContext, sensitiveNotice, null);
+    }
+
+    public static ApprovalRequest of(String toolName, String arguments, String suggestion, String callerContext,
+                                     String sensitiveNotice, ToolMetadata metadata) {
+        return of(ApprovalActionType.TOOL_CALL, toolName, toolName, arguments, suggestion, callerContext,
+                sensitiveNotice, metadata, null, "");
+    }
+
+    public static ApprovalRequest of(ApprovalActionType actionType, String subject, String toolName,
+                                     String arguments, String suggestion, String callerContext,
+                                     String sensitiveNotice, ToolMetadata metadata, String fingerprint,
+                                     String preview) {
+        ToolMetadata effective = metadata == null ? ApprovalPolicy.metadataForToolName(toolName) : metadata;
+        ToolRiskLevel riskLevel = effective == null ? null : effective.riskLevel();
+        String resolvedFingerprint = fingerprint == null || fingerprint.isBlank()
+                ? ApprovalFingerprint.create(actionType, subject, arguments, riskLevel, callerContext)
+                : fingerprint;
         return new ApprovalRequest(
+                actionType == null ? ApprovalActionType.TOOL_CALL : actionType,
+                subject == null || subject.isBlank() ? toolName : subject,
                 toolName,
                 arguments,
-                ApprovalPolicy.getDangerLevel(toolName),
-                ApprovalPolicy.getRiskDescription(toolName),
+                riskLevel == null ? ToolRiskLevel.READ_ONLY : riskLevel,
+                ApprovalPolicy.getDangerLevel(effective),
+                ApprovalPolicy.getRiskDescription(effective),
+                resolvedFingerprint,
+                preview == null ? "" : preview,
                 suggestion,
                 callerContext,
                 sensitiveNotice
         );
+    }
+
+    public boolean allowsApproveAll() {
+        return riskLevel != ToolRiskLevel.HIGH_RISK;
     }
 
     /**
@@ -62,6 +96,8 @@ public record ApprovalRequest(
         sb.append(formatBoxLine("⚠️  需要审批")).append("\n");
         sb.append("├").append(border).append("┤\n");
         sb.append(formatBoxField("工具", toolName)).append("\n");
+        sb.append(formatBoxField("动作", actionType + " / " + subject)).append("\n");
+        sb.append(formatBoxField("审批", fingerprint)).append("\n");
         String mcpServer = ApprovalPolicy.mcpServerName(toolName);
         if (mcpServer != null && !mcpServer.isBlank()) {
             sb.append(formatBoxField("MCP server", mcpServer)).append("\n");
@@ -73,6 +109,15 @@ public record ApprovalRequest(
         }
         if (sensitiveNotice != null && !sensitiveNotice.isBlank()) {
             sb.append(formatBoxField("敏感页面", sensitiveNotice)).append("\n");
+        }
+        if (preview != null && !preview.isBlank()) {
+            sb.append("├").append(border).append("┤\n");
+            sb.append(formatBoxLine("影响预览:")).append("\n");
+            for (String rawLine : preview.split("\\R", -1)) {
+                for (String line : wrapByDisplayWidth(rawLine, ARG_LINE_WIDTH)) {
+                    sb.append(formatBoxIndented(line)).append("\n");
+                }
+            }
         }
         sb.append("├").append(border).append("┤\n");
         sb.append(formatBoxLine("参数:")).append("\n");

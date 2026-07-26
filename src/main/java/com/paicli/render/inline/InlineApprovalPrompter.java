@@ -52,7 +52,7 @@ public final class InlineApprovalPrompter {
         out.println(request.toDisplayText());
 
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-            String optionsLine = sensitive
+            String optionsLine = sensitive || !request.allowsApproveAll()
                     ? AnsiStyle.subtle("[y] approve  [n] reject  [s] skip  [m] modify")
                     : AnsiStyle.subtle("[y] approve  [a] all  [n] reject  [s] skip  [m] modify");
             out.print("> " + optionsLine + " ");
@@ -75,6 +75,10 @@ public final class InlineApprovalPrompter {
                 case 'a' -> {
                     if (sensitive) {
                         out.println(AnsiStyle.subtle("  敏感操作不支持全部放行，请选 y/n/s/m"));
+                        continue;
+                    }
+                    if (!request.allowsApproveAll()) {
+                        out.println(AnsiStyle.subtle("  高风险操作不支持全部放行，请选 y/n/s/m"));
                         continue;
                     }
                     return promptApproveAllScope(request);

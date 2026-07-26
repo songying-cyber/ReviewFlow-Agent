@@ -66,13 +66,18 @@ public class MemoryRetriever {
     }
 
     public List<MemoryEntry> retrieveLongTerm(String query, int limit, String projectKey) {
+        return recallLongTerm(query, limit, projectKey).stream()
+                .map(MemoryRecall::entry)
+                .collect(Collectors.toList());
+    }
+
+    public List<MemoryRecall> recallLongTerm(String query, int limit, String projectKey) {
         return longTermMemory.getAll().stream()
                 .filter(entry -> LongTermMemory.isVisibleInProject(entry, projectKey))
-                .map(entry -> new ScoredEntry(entry, computeRelevanceScore(entry, query) * 1.2, false))
-                .filter(scoredEntry -> scoredEntry.score() > 0)
-                .sorted(Comparator.comparingDouble(ScoredEntry::score).reversed())
+                .map(entry -> scoreMemoryRecall(entry, query))
+                .filter(recall -> recall.score() > 0)
+                .sorted(Comparator.comparingDouble(MemoryRecall::score).reversed())
                 .limit(limit)
-                .map(ScoredEntry::entry)
                 .collect(Collectors.toList());
     }
 
@@ -84,14 +89,15 @@ public class MemoryRetriever {
     }
 
     public String buildContextForQuery(String query, int maxTokens, String projectKey) {
-        List<MemoryEntry> relevant = retrieveLongTerm(query, 10, projectKey);
+        List<MemoryRecall> relevant = recallLongTerm(query, 10, projectKey);
         if (relevant.isEmpty()) return "";
 
         StringBuilder context = new StringBuilder();
         context.append("## 相关长期记忆\n\n");
 
         int usedTokens = 0;
-        for (MemoryEntry entry : relevant) {
+        for (MemoryRecall recall : relevant) {
+            MemoryEntry entry = recall.entry();
             if (usedTokens + entry.getTokenCount() > maxTokens) break;
 
             context.append("- [").append(entry.getType()).append("] ")
@@ -136,5 +142,62 @@ public class MemoryRetriever {
         return keywordScore * timeDecay;
     }
 
+    private MemoryRecall scoreMemoryRecall(MemoryEntry entry, String query) {
+        String normalizedQuery = query == null ? "" : query.toLowerCase(Locale.ROOT).trim();
+        if (normalizedQuery.isBlank()) {
+            return new MemoryRecall(entry, 0, "");
+        }
+        Set<String> queryWords = MemoryQueryTokenizer.tokenize(normalizedQuery);
+        String content = entry.getContent() == null ? "" : entry.getContent().toLowerCase(Locale.ROOT);
+        String metadataText = entry.getMetadata().values().stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining(" "))
+                .toLowerCase(Locale.ROOT);
+        String searchable = (content + " " + metadataText).strip();
+
+        double score = 0;
+        List<String> reasons = new ArrayList<>();
+        if (content.contains(normalizedQuery)) {
+            score += 4.0;
+            reasons.add("内容精确匹配");
+        }
+        if (metadataText.contains(normalizedQuery)) {
+            score += 3.0;
+            reasons.add("topic 元数据匹配");
+        }
+
+        int contentMatches = 0;
+        int metadataMatches = 0;
+        for (String word : queryWords) {
+            if (content.contains(word)) {
+                contentMatches++;
+            }
+            if (metadataText.contains(word)) {
+                metadataMatches++;
+            }
+        }
+        if (!queryWords.isEmpty()) {
+            if (contentMatches > 0) {
+                score += 2.0 * contentMatches / queryWords.size();
+                reasons.add("内容关键词 " + contentMatches + "/" + queryWords.size());
+            }
+            if (metadataMatches > 0) {
+                score += 1.5 * metadataMatches / queryWords.size();
+                reasons.add("topic 关键词 " + metadataMatches + "/" + queryWords.size());
+            }
+        }
+
+        if (searchable.contains("默认") || searchable.contains("偏好") || searchable.contains("规则")) {
+            score *= 1.05;
+        }
+        if (score <= 0) {
+            return new MemoryRecall(entry, 0, "");
+        }
+        return new MemoryRecall(entry, score, reasons.isEmpty() ? "关键词相关" : String.join("；", reasons));
+    }
+
     private record ScoredEntry(MemoryEntry entry, double score, boolean fromShortTerm) {}
+
+    public record MemoryRecall(MemoryEntry entry, double score, String reason) {
+    }
 }

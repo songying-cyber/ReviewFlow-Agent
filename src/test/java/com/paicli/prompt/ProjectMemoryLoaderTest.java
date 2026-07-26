@@ -61,4 +61,54 @@ class ProjectMemoryLoaderTest {
 
         assertTrue(context.isEmpty());
     }
+
+    @Test
+    void loadsUnconditionalRulesAndDefersPathScopedRules() throws Exception {
+        Path userDir = tempDir.resolve("user");
+        Path projectRoot = tempDir.resolve("project");
+        Files.createDirectories(userDir);
+        Files.createDirectories(projectRoot.resolve(".paicli/rules"));
+        Files.createDirectories(projectRoot.resolve("src/main/java/com/example"));
+        Path matched = projectRoot.resolve("src/main/java/com/example/App.java");
+        Files.writeString(matched, "class App {}");
+        Files.writeString(projectRoot.resolve(".paicli/rules/general.md"), "- general rule");
+        Files.writeString(projectRoot.resolve(".paicli/rules/java.md"), """
+                ---
+                paths:
+                  - src/main/java/**
+                ---
+                - java scoped rule
+                """);
+
+        ProjectMemoryLoader loader = new ProjectMemoryLoader(userDir, projectRoot);
+
+        String base = loader.loadForPrompt();
+        assertTrue(base.contains("- general rule"));
+        assertFalse(base.contains("- java scoped rule"));
+
+        String scoped = loader.loadForPrompt(java.util.List.of(matched));
+        assertTrue(scoped.contains("- general rule"));
+        assertTrue(scoped.contains("- java scoped rule"));
+        assertFalse(scoped.contains("paths:"));
+    }
+
+    @Test
+    void loadsNestedMemoryAfterObservedFileRead() throws Exception {
+        Path userDir = tempDir.resolve("user");
+        Path projectRoot = tempDir.resolve("project");
+        Path module = projectRoot.resolve("src/main/java/com/paicli/memory");
+        Files.createDirectories(userDir);
+        Files.createDirectories(module);
+        Path observed = module.resolve("MemoryManager.java");
+        Files.writeString(observed, "class MemoryManager {}");
+        Files.writeString(module.resolve("PAI.md"), "- nested memory rule");
+
+        ProjectMemoryLoader loader = new ProjectMemoryLoader(userDir, projectRoot);
+
+        String base = loader.loadForPrompt();
+        String nested = loader.loadForPrompt(java.util.List.of(observed));
+
+        assertFalse(base.contains("- nested memory rule"));
+        assertTrue(nested.contains("- nested memory rule"));
+    }
 }

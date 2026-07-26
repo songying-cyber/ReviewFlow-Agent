@@ -1,8 +1,8 @@
-# PaiCLI
+# ReviewFlow Agent
 
 一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十六期的 `TUI 产品化`。
 
-当前进度：已完成第 16.1 期 inline 流式 TUI 形态修正、第 17 期 `LSP 诊断注入` MVP、第 18 期 `Git Side-History 快照与回滚` MVP、第 19 期 `Prompt 分层架构` MVP、第 20 期 `异步后台任务 + Runtime API` MVP、第 21 期 `图片复制粘贴输入` MVP、第 23 期 `微信 iLink 通道` 文本 MVP。
+当前进度：已完成第 16.1 期 inline 流式 TUI 形态修正、第 17 期 `LSP 诊断注入` MVP、第 18 期 `Git Side-History 快照与回滚` MVP、第 19 期 `Prompt 分层架构` MVP、第 20 期 `异步后台任务 + Runtime API` MVP、第 21 期 `图片复制粘贴输入` MVP、第 23 期 `微信 iLink 通道` 文本 MVP；已新增 GitHub PR review 结构化 client 基础模块和 `/review pr` CLI 审查入口。
 
 ## 测试策略
 
@@ -27,7 +27,7 @@ mvn test -DskipTests=false
 ### 第一期：ReAct Agent CLI
 
 - 单轮对话驱动的 `ReAct` 循环
-- 支持工具调用：读文件、写文件、列目录、文件 glob、代码 grep、执行命令、创建项目、RAG 语义辅助检索、联网搜索、MCP 动态工具
+- 支持工具调用：读文件、写文件、列目录、文件 glob、代码 grep、执行命令、创建项目、RAG 语义辅助检索、联网搜索、写工具状态查询/补偿、MCP 动态工具
 - 更适合简单任务或单步操作
 
 ### 第二期：Plan-and-Execute + DAG
@@ -66,9 +66,10 @@ mvn test -DskipTests=false
 
 ### 第六期：Human-in-the-Loop + 审批流
 
-- 危险操作静态规则识别：`write_file`、`execute_command`、`create_project`、`revert_turn`
-- 三级危险等级：高危（`execute_command`）、中危（`write_file` / `create_project`）
-- 审批决策：批准 / 全部放行 / 拒绝 / 跳过 / 修改参数后执行
+- 工具风险等级元数据：`READ_ONLY` / `LOW_WRITE` / `MEDIUM_WRITE` / `HIGH_RISK`
+- 审批策略按风险等级推导：只读默认放行，低风险写默认放行并审计，中/高风险写触发 HITL
+- 审批请求带稳定 fingerprint（如 `approval: 9f31c2ab`），同一风险动作按规范化参数生成 hash；`write_file` 审批会展示新建文件大小或简短 diff 预览
+- 审批决策：批准 / 全部放行 / 拒绝 / 跳过 / 修改参数后执行；高风险操作不支持全部放行，只按最终参数逐次批准
 - HITL 默认关闭，通过 `/hitl on` 启用
 - 新增 `/hitl` CLI 命令，支持 `/hitl on`、`/hitl off`、`/hitl`（查看状态）
 
@@ -114,12 +115,12 @@ mvn test -DskipTests=false
 
 - `LlmClient` 声明模型能力：`maxContextWindow()`、`supportsPromptCaching()`、`promptCacheMode()`
 - GLM-5.1 默认 200k window，DeepSeek V4 默认 1M window，Agnes 2.0 Flash 默认 1M window，StepFun 默认 256k window，Kimi K2.6 默认 256k window，FreeLLMAPI 默认按 128k 保守预算
-- `AgentBudget` 按当前模型动态计算预算，默认 `80% * maxContextWindow`，仍可用系统属性覆盖
+- `AgentLoopController` 统一控制 ReAct/SubAgent 循环：默认 token 硬预算不限，仍可用系统属性覆盖；同时检测重复工具、连续无进展、无效反思、连续工具失败和硬最大轮数
 - short / balanced / long 三种上下文模式：长上下文模式跳过摘要压缩，语义检索 topK 可提升到 20
 - `search_code` 未显式传 `top_k` 时按上下文模式自适应；默认代码定位仍优先实时 grep/read
 - 长上下文模式下自动把 MCP resources 的 URI / 描述索引注入 system prompt，不自动注入正文
 - inline 模式下 Token / cached input tokens / 估算成本 / 耗时进入底部状态栏，避免占用正文输出区
-- `/context` 会显示当前上下文模式、prompt cache 模式、RAG topK、resources 自动索引状态
+- `/context` 会显示模型下一轮大致会携带的上下文：system/tools/conversation/user/assistant/tool result token 拆分、PAI.md 来源、当前项目可见长期记忆数量、工具结果 microcompact 状态、prompt cache 与 MCP resource 自动索引状态
 
 ### 第十三期：Chrome DevTools MCP
 
@@ -137,7 +138,7 @@ mvn test -DskipTests=false
 - Agent 遇到登录页、权限不足或明确需要登录态页面时，会先调用 `browser_connect` 自动切到 shared；公开页面如微信公众号文章不提前切换
 - `/browser connect <port>` 保留旧式 CDP 端口兼容路径：先探活 `127.0.0.1:<port>/json/version`，成功后切到 `--browser-url=http://127.0.0.1:<port>`；失败时不会改 MCP 启动参数，并输出 macOS / Windows / Linux 的 Chrome 启动命令
 - 切换 shared / isolated 模式都会清空 `chrome-devtools` 的 server 维度全部放行，避免旧信任跨模式延续
-- shared 模式下 `close_page` 只能关闭 PaiCLI 自己创建的 tab；无法证明是 PaiCLI 创建的 tab 会被策略层拒绝
+- shared 模式下 `close_page` 只能关闭 ReviewFlow Agent 自己创建的 tab；无法证明是 ReviewFlow Agent 创建的 tab 会被策略层拒绝
 - 敏感页面命中规则后，`click` / `fill_form` / `evaluate_script` 等改写型浏览器工具必须单步 HITL 审批，不复用全部放行；读型工具如 `take_snapshot` 仍可继续使用
 - 审计日志为 chrome-devtools 工具追加可选浏览器 metadata：`browser_mode`、`sensitive`、`target_url`，旧格式 JSONL 仍可读取
 
@@ -147,14 +148,14 @@ mvn test -DskipTests=false
 
 - 三层加载位置（按优先级，后者整体覆盖同名 skill）：jar 内置 < 用户级 `~/.paicli/skills/<name>/` < 项目级 `<project>/.paicli/skills/<name>/`
 - 启动期把启用 skill 的 `name` + `description` 注入三处 Agent 系统提示词索引段（启用上限 20 个，索引段 ≤ 4KB）
-- 内置工具 `load_skill(name)`：LLM 在 system prompt 看到匹配 description 时主动调用，PaiCLI 把 SKILL.md 正文（5KB 截断）写入 `SkillContextBuffer`，下一轮 user message 自动前置注入
+- 内置工具 `load_skill(name)`：LLM 在 system prompt 看到匹配 description 时主动调用，ReviewFlow Agent 把 SKILL.md 正文（5KB 截断）写入 `SkillContextBuffer`，下一轮 user message 自动前置注入
 - 内置 web-access skill：决策手册（浏览哲学四步法 + 工具选择表 + 浏览器优先级 + Jina 兜底说明）+ 6 个站点经验文件（mp.weixin / zhuanlan.zhihu / x.com / xiaohongshu / github / juejin）+ cdp-cheatsheet
 - frontmatter 走手写 YAML 子集解析，不引 SnakeYAML；解析失败 stderr 警告但不阻塞启动
 - CLI 命令：`/skill list` / `/skill show <name>` / `/skill on <name>` / `/skill off <name>` / `/skill reload`
 - 启用状态持久化：`~/.paicli/skills.json` 的 `disabled` 列表，默认全启用
 - 与 HITL 协同：Skill 内调用 `execute_command` 等危险工具仍走既有 HITL 审批，沿用 `execute_command` 工具维度全放行；不给 Skill 单独审批维度
 
-设计意图：从「写工具」演进到「打包专家手册」。当工具堆成山（PaiCLI 当前内置 9 个 + MCP 60+ 工具），用 Skill 给 LLM 一份按场景展开的"专家手册"，比往 system prompt 里塞更多规则更可扩展。
+设计意图：从「写工具」演进到「打包专家手册」。当工具堆成山（ReviewFlow Agent 当前内置 9 个 + MCP 60+ 工具），用 Skill 给 LLM 一份按场景展开的"专家手册"，比往 system prompt 里塞更多规则更可扩展。
 
 ### 第十六期：TUI 产品化（v16.1 形态修正后：双形态可切换）
 
@@ -204,9 +205,13 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 ### 第二十期：异步后台任务 + Runtime API（MVP）
 
 - `DurableTaskManager` 使用 SQLite 持久化后台任务队列，默认位置 `~/.paicli/tasks/tasks.db`
-- 任务生命周期：`enqueued -> running -> completed / failed / canceled`
-- `/task`、`/task add <任务内容>`、`/task cancel <task_id>`、`/task log <task_id>` 提供 CLI 闭环
-- Worker Pool 默认 2 个后台 worker，可通过 `PAICLI_TASK_WORKERS` 调整
+- 后台任务已升级为 durable workflow MVP：任务 State、checkpoint、写工具幂等记录、`operation_id` 状态、owner/lease、pause/resume/retry/cancel 和文件类补偿共用同一套持久化表
+- 任务生命周期：`enqueued -> running -> pause_requested -> paused -> running -> completed / failed / canceled`，补偿路径为 `failed/canceled -> compensating -> compensated`
+- 后台执行已抽出 `TaskQueue` 唤醒层：默认 `LocalTaskQueue` 作为进程内 MQ；`PAICLI_TASK_QUEUE=redis` 时使用 Redis list（默认 `redis://localhost:6379/0`，key 为 `paicli:tasks:ready`）；scheduler 定期扫描 DB 中可运行任务并投递 taskId，worker 消费消息后仍必须通过 DB 原子 claim，重复/过期消息不会重复执行任务
+- Agent 循环会在 LLM 前、LLM 后工具前、工具后和完成边界写 checkpoint；worker claim 会写入 `owner_id` / `lease_until`，后台 heartbeat 会持续续租；checkpoint 和 worker 终态写回都会校验 owner/lease，服务重启后只回收过期或缺失 lease 的 `running` / `compensating` 任务，活跃 lease 不会被新实例抢走
+- 后台 ReAct 写工具通过 `DurableToolRegistry` 记录幂等键、`operation_id` 与执行结果；`write_file` / `create_project` 会保存 Side-Git 快照与文件 hash，恢复或重试时同一成功工具调用会回放旧结果，避免重复写入。`tool_status` 可按 `operation_id` 查询状态，`tool_compensate` 可按单次可逆操作恢复写入前快照
+- `/task`、`/task add <任务内容>`、`/task cancel <task_id>`、`/task pause <task_id>`、`/task resume <task_id>`、`/task retry <task_id>`、`/task compensate <task_id>`、`/task log <task_id>` 提供 CLI 闭环
+- Worker Pool 默认 2 个后台 worker，可通过 `PAICLI_TASK_WORKERS` 调整；Redis 队列可通过 `PAICLI_TASK_REDIS_URL` / `PAICLI_TASK_REDIS_KEY` 配置
 - `java -jar target/paicli-1.0-SNAPSHOT.jar serve --http --port 8080` 启动 localhost Runtime API
 - Runtime API 端点：`POST /v1/threads`、`POST /v1/threads/{id}/turns`、`GET /v1/threads/{id}/events`
 - Runtime API 强制要求 `PAICLI_RUNTIME_API_KEY` 或 `-Dpaicli.runtime.api.key`
@@ -229,26 +234,27 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 ### 第二十三期：微信 iLink 通道（文本 MVP）
 
 - 新增进程级入口：`paicli wechat setup`、`paicli wechat start`、`paicli wechat status`、`paicli wechat daemon start|stop|restart|status|logs`
-- 新增交互式入口：在 PaiCLI 主界面输入 `/wechat` 可扫码绑定并在当前进程后台启动微信通道；`/wechat setup` 重新扫码绑定，`/wechat status` 查看状态，`/wechat stop` 停止通道
+- 新增交互式入口：在 ReviewFlow Agent 主界面输入 `/wechat` 可扫码绑定并在当前进程后台启动微信通道；`/wechat setup` 重新扫码绑定，`/wechat status` 查看状态，`/wechat stop` 停止通道
 - 默认不开启微信通道；用户必须主动执行 `setup` 并扫码确认完成绑定
 - 支持在 Warp / iTerm2 / WezTerm 等兼容终端内直接显示 260px PNG 二维码；不支持终端图片协议时回退为字符二维码和链接
 - 微信侧使用 iLink `getupdates` 长轮询收消息、`sendmessage` 分片回消息，不依赖 SSE；这是独立通道，不是 Skill，也不是 Runtime API
 - 运行时只接受绑定用户私聊；普通消息单并发排队，`/help`、`/status`、`/pause`、`/resume`、`/stop` 走队列外控制路径
-- 微信侧用户消息会回显到 PaiCLI 终端 transcript；PaiCLI 终端继续显示 thinking / 工具调用过程，微信侧只接收 assistant 正文。iLink 协议层仍是 `text_item.text` 文本消息，没有显式 Markdown parse mode；PaiCLI 会保留 ClawBot 稳定支持的 Markdown 子集（列表、引用、粗体、行内代码、真实代码块），把标题转成粗体标题、把表格转成移动端更稳的键值/列表，并过滤图片 Markdown / H5-H6 / 中文斜体等兼容性差的标记；非代码类 fenced block（流程说明、长中文箭头链）会解包并换行，避免微信侧出现横向滚动代码块。iLink 不提供真正 SSE 或改单条消息能力。
+- 微信侧用户消息会回显到 ReviewFlow Agent 终端 transcript；ReviewFlow Agent 终端继续显示 thinking / 工具调用过程，微信侧只接收 assistant 正文。iLink 协议层仍是 `text_item.text` 文本消息，没有显式 Markdown parse mode；ReviewFlow Agent 会保留 ClawBot 稳定支持的 Markdown 子集（列表、引用、粗体、行内代码、真实代码块），把标题转成粗体标题、把表格转成移动端更稳的键值/列表，并过滤图片 Markdown / H5-H6 / 中文斜体等兼容性差的标记；非代码类 fenced block（流程说明、长中文箭头链）会解包并换行，避免微信侧出现横向滚动代码块。iLink 不提供真正 SSE 或改单条消息能力。
 - 微信通道使用非交互式默认拒绝策略：只读工具默认允许，`write_file` / `create_project` 继续受 workspace PathGuard 限制，`execute_command` 必须精确命中命令白名单，`mcp__*` 必须命中 MCP 白名单，`revert_turn` 和浏览器会话切换默认拒绝
 - 当前文本 MVP 会保留图片 / 文件消息的媒体元数据提示，但 CDN 下载解密、图片块输入和 `/send` 文件推送仍待后续媒体链路补齐
 
-### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
+### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计 / macOS 命令沙箱）
 
-`com.paicli.policy` 包，作为 HITL 之外的辅助层（不是沙箱、不提供进程隔离）：
+`com.paicli.policy` 与 `com.paicli.sandbox` 包，作为 HITL 之外的辅助层：
 
 - `PathGuard` 路径围栏：文件类工具强制限定在项目根之内，拦截绝对路径外逃 / `..` 穿越 / 符号链接逃逸
 - `CommandGuard` 命令快速拒绝：HITL 之前的 fast-fail 黑名单（`sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` / `find /` / `chmod 777 /` / `shutdown`），减少 HITL 弹窗骚扰
-- `AuditLog` 结构化审计：危险工具调用按天写 JSONL 到 `~/.paicli/audit/`，含 `outcome (allow|deny|error)` 与 `approver (hitl|policy|none)`；`revert_turn` 也纳入危险工具链
+- macOS command sandbox：开启 `/sandbox on` 后，`execute_command` 会通过 macOS Seatbelt (`sandbox-exec`) 包裹执行；只沙箱命令及其子进程，不沙箱整个 ReviewFlow Agent 进程。默认禁网络、限制写入到项目目录和 ReviewFlow Agent 临时目录，并拒绝 `.paicli/**`、`.env`、`PAI.md`、`AGENTS.md`、`.git/hooks/**` 等敏感写入
+- `AuditLog` 结构化审计：低风险写及以上工具调用按天写 JSONL 到 `~/.paicli/audit/`，含 `outcome (allow|deny|error)`、`approver (hitl|policy|none)`、审批 fingerprint 与 sandbox metadata；`revert_turn` 也纳入高风险工具链
 - `write_file` 单文件 5MB 上限
-- CLI 命令：`/policy` 查看安全策略状态、`/audit [N]` 看最近 N 条审计
+- CLI 命令：`/policy` 查看安全策略状态、`/audit [N]` 看最近 N 条审计，`/sandbox status|on|off|doctor` 管理 macOS 命令沙箱
 
-**为什么不叫沙箱**：本地 Agent CLI（参考 Claude Code / Cursor / Aider）默认都不做容器/VM 沙箱——沙箱削弱 Agent 能力、给虚假安全感、体验更差。生产级 Agent 沙箱实际是 microVM-level（Devin / Modal / Anthropic Computer Use 用 Firecracker / gVisor）。PaiCLI 的安全模型是 **HITL + 路径校验 + 命令快速拒绝 + 审计**，不是隔离。
+边界说明：ReviewFlow Agent 内置沙箱是 **command sandbox**。它只保护 `execute_command` 启动的 shell 及其子进程；`read_file` / `write_file` 继续由 `PathGuard` 和 HITL 管理，`web_fetch` 继续由 `NetworkPolicy` 管理，MCP server / 浏览器 shared session / 微信 daemon 不在该沙箱内。
 
 ## 启动界面
 
@@ -257,11 +263,12 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 当前启动输出以命令行实际产物为准：
 
 ```text
-   ████████    PaiCLI π  v16.1.0
-     ██  ██    Model step-3.5-flash-2603 (step)
-     ██  ██    MCP 4/4 · 61 tools · 2/2 skills · ReAct
-     ██  ██    ReAct · Plan · MCP · Browser · Image
-     ██  ██
+    ██████   ██████  ███████   ███████     ReviewFlow Agent
+   ██       ██    ██ ██    ██  ██          Model step-3.5-flash-2603 (step)
+   ██       ██    ██ ██     ██ ██          MCP 4/4 · 61 tools · 2/2 skills · ReAct
+   ██       ██    ██ ██     ██ █████       ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG
+   ██       ██    ██ ██    ██  ██
+    ██████   ██████  ███████   ███████
 
 Tips for getting started:
 1. Type / for commands and Tab completion
@@ -311,9 +318,9 @@ Tips for getting started:
 
 ### 第六期
 
-- 🔒 危险操作静态规则识别（`write_file` / `execute_command` / `create_project` / `revert_turn`）
-- ⚠️ 三级危险等级展示（高危 / 中危 / 安全）
-- ✅ 审批决策：批准、全部放行、拒绝、跳过、修改参数后执行
+- 🔒 工具风险等级元数据（只读 / 低风险写 / 中风险写 / 高风险）
+- ⚠️ 审批策略按风险等级推导（中风险写和高风险默认触发 HITL）
+- ✅ 审批决策：批准、全部放行、拒绝、跳过、修改参数后执行；高风险只按最终参数 fingerprint 单次放行
 - 🔓 HITL 默认关闭，`/hitl on` 启用、`/hitl off` 关闭
 
 ### 第七期
@@ -336,12 +343,24 @@ Tips for getting started:
 - 🛡️ 内置网络访问策略：屏蔽内网、loopback、`file://`；5MB 响应上限；每分钟 30 次限流
 - 🚧 边界明确：SPA / 防爬墙返回空正文 + 已知边界提示，不重试
 
+### GitHub PR Review Client（基础模块）
+
+- `com.paicli.github.GitHubPrClient` 内置 GitHub REST / GraphQL 访问封装，可结构化拉取 PR metadata、diff、changed files、review comments、commit status 与 check runs
+- `GitHubPrReviewService` 提供 review agent 后续可复用的加载上下文、prepare review 与发布 review 薄封装
+- `GitHubDiffLineMap` 根据 changed file patch 映射 `RIGHT` / `LEFT` 行号；`GitHubReviewPreparer` 会把 findings 转成 GitHub inline comments，并跳过不在当前 diff 中的 outdated 定位
+- inline comment 支持 title / severity / suggestion Markdown 格式化；发布前会校验 path、line、body，避免无效评论打到 GitHub 后返回 422
+- 支持向 GitHub 发布 PR review summary 与 inline comments；需要 `PAICLI_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN`
+- 支持 GitHub Enterprise：`PAICLI_GITHUB_API_BASE_URL`、`PAICLI_GITHUB_GRAPHQL_URL`
+- CLI 入口：`/review pr <url|owner/repo#number|number>` 会拉取 PR 上下文并启动当前 Agent 审查；只传 number 时从当前 git `remote.origin.url` 推断仓库；当前不会自动发布 review
+- 非交互烟测入口：`java -jar target/paicli-1.0-SNAPSHOT.jar review pr <url|owner/repo#number|number> --dry-run --format json` 会在不初始化 LLM 的情况下拉取 PR snapshot、构造 review prompt，并输出机器可读摘要，适合接入 Code Review Bench 等离线评测流水线做链路健康检查
+- Code Review Bench 适配入口：`benchmark code-review-bench <offline-dir> --mode smoke|review` 会读取 `offline/results/benchmark_data.json`；`smoke` 模式验证 PR 拉取、prompt 构造和目标仓库 sparse checkout，`review` 模式调用 ReviewFlow Agent 配置的 LLM 生成 findings，并写出 benchmark 兼容的 `reviews` 和 `results/<MARTIAN_MODEL>/candidates.json`；benchmark prompt 默认高召回，覆盖低严重度但有证据的 doc/style/test_gap/translation/locale 问题，并会针对 CLI exit 行为、`picocli.exit`/`System.exit`、exit code 变更缺 release/migration note 等 benchmark 常见 golden 做专项提示；diff 按文件分块写入，并补充 checked-out head changed file 内容，不再走 60k 整体 diff 截断；`--only-url <PR_URL>` 可只重跑指定 PR，便于 prompt 调试；`--parallel N` 沿用 ReviewFlow Agent 有界并发风格并行处理 PR，结果仍按 benchmark 输入顺序串行合并，当前最大 4；加 `--in-place` 后会更新官方 step3 默认读取的 `results/benchmark_data.json`；`--timeout-seconds` 控制单个 PR 的模型审查上限；`--no-checkout` 可退回纯 diff 模式；正式跑 50 条建议配置 `PAICLI_GITHUB_TOKEN` / `GITHUB_TOKEN` 避免 GitHub 匿名 API rate limit
+
 ### 第六期 HITL 增强
 
 - 🛡️ 路径围栏：文件类工具强制限定在项目根之内，绝对路径外逃 / `..` 穿越 / 符号链接逃逸全部拦截
 - 🧯 命令快速拒绝：HITL 之前的 fast-fail 黑名单（`sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` / `find /` / `chmod 777 /` / `shutdown`），减少 HITL 弹窗骚扰
 - 📦 资源上限：`write_file` 5MB；`execute_command` 60 秒超时 + 8KB 输出截断
-- 📋 结构化审计：危险工具调用按天写一行 JSONL 到 `~/.paicli/audit/`，可通过 `/audit [N]` 查看
+- 📋 结构化审计：低风险写及以上工具调用按天写一行 JSONL 到 `~/.paicli/audit/`，可通过 `/audit [N]` 查看
 - 🧱 定位：HITL 之外的辅助层，不是沙箱、不提供进程隔离
 
 ## 快速开始
@@ -371,11 +390,13 @@ export FREELLMAPI_BASE_URL=http://localhost:5173/v1
 export FREELLMAPI_MODEL=auto
 # 或
 export AGNES_API_KEY=your_agnes_api_key_here
+# GitHub PR review client（后续 review agent 使用）
+export PAICLI_GITHUB_TOKEN=your_github_token_here
 export AGNES_MODEL=agnes-2.0-flash
 export AGNES_BASE_URL=https://apihub.agnes-ai.com/v1
 ```
 
-也可以在 PaiCLI 内用命令写入 `~/.paicli/config.json`，不会覆盖 Kimi 配置：
+也可以在 ReviewFlow Agent 内用命令写入 `~/.paicli/config.json`，不会覆盖 Kimi 配置：
 
 ```text
 /config provider freellmapi --base-url http://localhost:5173/v1 --api-key <key> --model auto
@@ -384,15 +405,20 @@ export AGNES_BASE_URL=https://apihub.agnes-ai.com/v1
 /model agnes
 ```
 
-长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
+长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`，同时会维护 Markdown 形态的 `~/.paicli/memory/MEMORY.md` 索引和 `~/.paicli/memory/topics/*.md` topic 文件；JSON 用于兼容旧数据，Markdown 便于审计、编辑和后续 topic 召回。
 长期记忆只保存显式保存意图下的稳定事实：`/save <事实>`，或用户在自然语言里明确说“记一下 / 记住 / 以后记得”时由 Agent 调用 `save_memory`。默认保存为当前项目作用域；跨项目通用偏好可用 `/save --global <事实>` 或 `save_memory(scope=global)`。它不应包含一次性任务请求或临时文件名/目录名。
+可选自动记忆归纳默认关闭；设置 `PAICLI_AUTO_MEMORY=true` 或 `-Dpaicli.auto.memory=true` 后，ReAct/Plan 完成后会从短期记忆提取稳定事实并按当前项目 scope 保存。
 可用 `/memory list` 查看长期记忆，`/memory search <关键词>` 搜索当前项目可见记忆，`/memory delete <id>` 删除单条记忆。
+长期记忆召回会综合内容、topic frontmatter 的 `name/description`、metadata 和查询关键词评分，`/context` 会展示上一轮实际注入的长期记忆及召回原因。
+上下文压缩分三层：`ConversationMicroCompactor` 先清理旧的大型 tool result；`ConversationHistoryCompactor` 再把真实发给 LLM 的 `conversationHistory` 结构化摘要，并在摘要消息写入 `[compact_boundary]` 锚点；`ContextCompressor` 只压缩 MemoryManager 内部的 shortTermMemory。`/compact` 手动路径也会先 microcompact，再保留最近 1 个 user 轮次做结构化摘要。
 
 项目级记忆使用 Markdown 文件维护，和 `/save` 的长期记忆分工不同：
 
 - `~/.paicli/PAI.md`：用户级稳定偏好，所有项目可见。
 - `PAI.md` / `.paicli/PAI.md`：项目级团队规则，建议提交到 git。
 - `PAI.local.md` / `.paicli/PAI.local.md`：本地覆盖，适合个人调试约定，建议加入 `.gitignore`。
+- `.paicli/rules/*.md`：项目规则文件；无 `paths:` frontmatter 时启动即加载，有 `paths:` 时只在读到匹配文件后加载。
+- nested memory：当 `read_file` 读取子目录文件后，ReviewFlow Agent 会在下一轮模型调用前加载该子目录链路上的 `PAI.md` / `.paicli/PAI.md` / local 文件和匹配 rules。
 - `@relative/path.md`：在 `PAI.md` 中导入项目根内的相对文件；越靠后的文件越接近本地覆盖，优先级越高。
 
 可用 `/init` 为当前项目生成一份短 `PAI.md`。该命令默认不覆盖已有文件；确认需要重建时使用 `/init --force`。
@@ -430,7 +456,7 @@ PAICLI_LOG_TOTAL_SIZE_CAP=100MB
 
 ### 2. 可选：配置 MCP server
 
-MCP 子系统默认开启。`~/.paicli/mcp.json` 不存在时，PaiCLI 会自动创建默认 chrome-devtools 配置：
+MCP 子系统默认开启。`~/.paicli/mcp.json` 不存在时，ReviewFlow Agent 会自动创建默认 chrome-devtools 配置：
 
 ```json
 {
@@ -470,7 +496,7 @@ MCP 子系统默认开启。`~/.paicli/mcp.json` 不存在时，PaiCLI 会自动
 
 `command` 表示 stdio server，`url` 表示 Streamable HTTP server。`${PROJECT_DIR}` / `${HOME}` 是内置变量，其他 `${VAR}` 从环境变量读取；缺失会在启动时直接提示。
 
-`step_search` 是约定名称：如果项目 `.env`、用户 `~/.env` 或系统环境变量里存在 `STEP_API_KEY`，PaiCLI 会自动内置这个远程 MCP；上面的手写配置只用于覆盖默认地址或自定义鉴权。当前模型为 `step-3.7-flash*` 时，内置 `web_search` / `web_fetch` 会优先代理到该 MCP server。
+`step_search` 是约定名称：如果项目 `.env`、用户 `~/.env` 或系统环境变量里存在 `STEP_API_KEY`，ReviewFlow Agent 会自动内置这个远程 MCP；上面的手写配置只用于覆盖默认地址或自定义鉴权。当前模型为 `step-3.7-flash*` 时，内置 `web_search` / `web_fetch` 会优先代理到该 MCP server。
 
 需要复用当前登录态时，Chrome 144+ 推荐打开 `chrome://inspect/#remote-debugging` 并勾选 `Allow remote debugging for this browser instance`。旧版本或需要显式 CDP 端口时，可以启动带远程调试端口和独立 user-data-dir 的 Chrome，并在这个调试 Chrome 中完成登录：
 
@@ -485,7 +511,7 @@ start chrome.exe --remote-debugging-port=9222 --user-data-dir=%TEMP%\paicli-chro
 google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/paicli-chrome-profile
 ```
 
-通常不需要用户预先切换；Agent 如果遇到登录页会自己调用 `browser_connect`。手工调试时也可以在 PaiCLI 内执行：
+通常不需要用户预先切换；Agent 如果遇到登录页会自己调用 `browser_connect`。手工调试时也可以在 ReviewFlow Agent 内执行：
 
 ```text
 /browser status
@@ -621,8 +647,8 @@ I
 
 ## 可用工具
 
-- `read_file` - 读取文件内容
-- `write_file` - 写入文件内容
+- `read_file` - 读取已知路径的项目文件内容（大文件用 offset/limit）
+- `write_file` - 整文件覆盖写入项目文件（不支持 patch/diff/追加）
 - `list_dir` - 列出目录内容
 - `glob_files` - 按文件名 glob 实时查找项目内文件（只读，自动跳过常见构建/依赖目录）
 - `grep_code` - 按关键字或正则实时搜索项目内代码，优先使用 ripgrep，返回文件、行号、可选上下文、partial 状态与 suggested_reads
@@ -632,12 +658,16 @@ I
 - `web_search` - 搜索互联网获取实时信息
 - `web_fetch` - 抓取已知 URL 并提取正文 Markdown
 - `revert_turn` - 恢复到最近第 N 个 pre-turn 快照（走 HITL 与审计）
+- `tool_status` - 按 `operation_id` 查询有副作用工具调用的状态
+- `tool_compensate` - 按 `operation_id` 补偿已成功且可逆的写工具副作用（高风险，走 HITL 与审计）
 - `mcp__{server}__{tool}` - MCP server 动态提供的外部工具
 - `mcp__{server}__list_resources` / `mcp__{server}__read_resource` - 支持 resources 的 MCP server 自动注册的虚拟工具
 
-同一轮模型返回多个工具调用时，PaiCLI 会并行执行这些工具；如果工具之间有依赖关系，模型应分多轮调用。
+同一轮模型返回多个工具调用时，ReviewFlow Agent 会并行执行这些工具；如果工具之间有依赖关系，模型应分多轮调用。
 
-文件类与代码检索工具（`read_file` / `write_file` / `list_dir` / `glob_files` / `grep_code` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。`revert_turn` 会批量回写工作区，默认触发 HITL 和审计。所有 `mcp__` 前缀工具默认触发 HITL 和审计。详见 `/policy`。
+内置工具 schema 会通过 `additionalProperties: false`、枚举、数值范围、默认值和更明确的“何时使用/何时不要使用”描述约束模型选工具；`create_project.type`、`save_memory.scope` 等选项参数使用 enum，`grep_code` / `web_fetch` 等预算参数带上下限。
+
+文件类与代码检索工具（`read_file` / `write_file` / `list_dir` / `glob_files` / `grep_code` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。工具注册时声明风险等级：`READ_ONLY` 默认放行，`LOW_WRITE` 默认放行并审计，`MEDIUM_WRITE` / `HIGH_RISK` 默认触发 HITL；所有 `mcp__` 前缀工具默认按 `HIGH_RISK` 处理。审批请求会展示 fingerprint，参数 JSON 会 canonical normalize 后参与 hash；用户修改参数后按最终参数重新计算 fingerprint；`write_file` 会展示新建文件大小或简短 diff；高风险操作不支持 approve-all。后台 durable 写工具会把幂等键、`operation_id`、前后文件 hash 和可选补偿快照写入 `runtime_tool_executions`；遇到 `UNKNOWN/PENDING` 时 Agent 应先用 `tool_status` 查状态，用户明确要求回滚某个可逆操作时再用 `tool_compensate`。工具结果回灌模型前会包装为 `<paicli_tool_result trust="untrusted">`，原始内容逐行加前缀，并带 `SUCCESS` / `FAILED` / `PARTIAL` / `UNKNOWN` / `PENDING` 统一状态，防止网页、文件、命令输出或 MCP 返回内容反向提示注入，也避免 Agent 从纯文本猜执行结果。设置 `PAICLI_TOOL_INTENT_VALIDATION=true` 后，ReviewFlow Agent 会在工具执行前用 LLM 校验工具调用是否符合用户业务意图；明确不匹配时返回结构化 `INTENT_TOOL_MISMATCH`，不执行真实工具。详见 `/policy`。
 
 ## 命令
 
@@ -652,8 +682,8 @@ I
 
 - `/wechat` - 扫码绑定并启动微信 iLink 通道；已绑定时直接启动
 - `/wechat setup` - 重新扫码绑定并启动微信通道
-- `/wechat status` - 查看当前 PaiCLI 进程内微信通道状态
-- `/wechat stop` - 停止当前 PaiCLI 进程内微信通道
+- `/wechat status` - 查看当前 ReviewFlow Agent 进程内微信通道状态
+- `/wechat stop` - 停止当前 ReviewFlow Agent 进程内微信通道
 - `/plan` - 下一条任务使用 Plan-and-Execute 模式
 - `/plan <任务>` - 直接用 Plan-and-Execute 模式执行这条任务
 - `/team` - 下一条任务使用 Multi-Agent 协作模式
@@ -669,8 +699,15 @@ I
 - `/mcp enable <name>` - 运行时启用 MCP server
 - `/mcp resources <name>` - 查看 MCP server 暴露的 resources
 - `/mcp prompts <name>` - 查看 MCP server 暴露的 prompts（只查看，不注入对话）
+- `/review pr <url|owner/repo#number|number>` - 拉取 GitHub PR diff / changed files / comments / CI，并启动代码审查
+- `review pr <url|owner/repo#number|number> --dry-run --format json` - 非交互拉取 PR 上下文并输出 benchmark/CI 烟测摘要
+- `benchmark code-review-bench <offline-dir> --mode smoke|review --limit N --parallel N --only-url PR_URL --timeout-seconds N [--no-checkout]` - 运行 Code Review Bench ReviewFlow Agent 适配层
 - `/policy` - 查看安全策略状态（路径围栏 / 命令黑名单 / 资源上限 / 审计目录）
-- `/audit [N]` - 查看今日最近 N 条危险工具审计记录（默认 10）
+- `/audit [N]` - 查看今日最近 N 条工具审计记录（默认 10）
+- `/sandbox status` - 查看 macOS `execute_command` Seatbelt 沙箱状态
+- `/sandbox on` / `/sandbox off` - 开启或关闭 macOS 命令沙箱
+- `/sandbox strict on` / `/sandbox strict off` - 控制沙箱不可用时是否拒绝命令
+- `/sandbox doctor` - 检查当前 macOS 沙箱依赖
 - `/snapshot` - 查看最近 Side-Git 快照
 - `/snapshot status` - 查看 Side-Git 快照状态
 - `/snapshot clean` - 清理当前项目 Side-Git 快照目录
@@ -712,11 +749,12 @@ I
 ### 第三期：当前运行效果
 
 ```text
-   ████████    PaiCLI π  v16.1.0
-     ██  ██    Model glm-5.1 (glm)
-     ██  ██    MCP 4/4 · 61 tools · 2/2 skills · ReAct
-     ██  ██    ReAct · Plan · MCP · Browser · Image
-     ██  ██
+    ██████   ██████  ███████   ███████     ReviewFlow Agent
+   ██       ██    ██ ██    ██  ██          Model glm-5.1 (glm)
+   ██       ██    ██ ██     ██ ██          MCP 4/4 · 61 tools · 2/2 skills · ReAct
+   ██       ██    ██ ██     ██ █████       ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG
+   ██       ██    ██ ██    ██  ██
+    ██████   ██████  ███████   ███████
 
 Tips for getting started:
 1. Type / for commands and Tab completion

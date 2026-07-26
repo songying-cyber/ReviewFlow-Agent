@@ -110,15 +110,16 @@ class PlainRendererTest {
     }
 
     @Test
-    void promptApprovalApproveAllByServerForMcp() {
+    void promptApprovalRejectsApproveAllForHighRiskMcp() {
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BufferedReader reader = new BufferedReader(new StringReader("a\nserver\n"));
+        BufferedReader reader = new BufferedReader(new StringReader("a\ny\n"));
         PlainRenderer renderer = new PlainRenderer(
                 new PrintStream(sink, true, StandardCharsets.UTF_8), reader);
 
         ApprovalResult result = renderer.promptApproval(
                 ApprovalRequest.of("mcp__chrome-devtools__click", "{}", "Test"));
-        assertEquals(ApprovalResult.Decision.APPROVED_ALL_BY_SERVER, result.decision());
+        assertEquals(ApprovalResult.Decision.APPROVED, result.decision());
+        assertTrue(sink.toString(StandardCharsets.UTF_8).contains("高风险操作不支持全部放行"));
     }
 
     @Test

@@ -35,16 +35,37 @@ public class ConversationHistoryCompactor {
 
     private static final int DEFAULT_RETAIN_RECENT_ROUNDS = 3;
     private static final int MAX_SUMMARY_INPUT_CHARS = 60_000;
+    public static final String COMPACT_BOUNDARY_MARKER = "[compact_boundary]";
 
     private static final String SUMMARY_PROMPT = """
-            请把下面的对话历史压缩成简明摘要，保留：
-            1. 用户提出的关键诉求与目标
-            2. Agent 已经完成的关键操作（哪些工具调用了什么、返回了什么核心结果）
-            3. 已经达成的共识或结论
-            4. 仍未解决的问题或待办
+            请把下面的 coding-agent 对话历史压缩成结构化摘要。摘要会替换旧上下文继续交给模型，
+            所以必须保留能安全续接任务的信息，尤其是用户原始目标、当前工作、文件路径和未完成事项。
 
-            不要复述每条原文，不要列举所有工具调用，不要保留无关闲聊。
-            输出 1-3 段中文，不要用列表，不要加任何前缀或元描述。
+            输出 Markdown，严格使用以下标题，缺失则写“无”：
+
+            ## 用户目标与约束
+            保留所有仍然相关的用户目标、偏好、限制、验收标准，以及用户明确补充过的要求。
+
+            ## 关键文件与代码位置
+            记录已读、已改、需要继续关注的文件路径、类/方法/测试名、配置项和命令入口。
+
+            ## 已完成的操作
+            概括已经执行的关键工具调用、代码修改、测试/命令结果和得到的结论。
+
+            ## 错误、风险与决策
+            记录遇到的错误、失败原因、绕过方式、关键技术决策和不能重复踩的坑。
+
+            ## 当前状态
+            说明压缩发生时任务推进到哪里，当前工作区/对话里最重要的上下文是什么。
+
+            ## 待办与下一步
+            列出仍未解决的问题、下一步应该做什么、需要优先验证什么。
+
+            要求：
+            - 不要逐条复述所有消息，但“用户提出过的实质性要求”必须完整保留。
+            - 工具结果只保留核心事实，不保留大段原文。
+            - 不要编造没有出现过的文件、命令、结果或结论。
+            - 不要输出额外前缀、寒暄或元解释。
 
             === 待压缩的对话 ===
             %s
@@ -130,7 +151,7 @@ public class ConversationHistoryCompactor {
         for (int i = 0; i < systemEnd; i++) {
             rebuilt.add(history.get(i));
         }
-        rebuilt.add(LlmClient.Message.user("[已压缩的历史对话摘要]\n" + summary.trim()));
+        rebuilt.add(LlmClient.Message.user(COMPACT_BOUNDARY_MARKER + "\n[已压缩的历史对话摘要]\n" + summary.trim()));
         rebuilt.add(LlmClient.Message.assistant("好的，我已了解之前的上下文，请继续。"));
         rebuilt.addAll(history.subList(splitIdx, history.size()));
 

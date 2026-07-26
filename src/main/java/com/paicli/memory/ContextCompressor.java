@@ -146,6 +146,21 @@ public class ContextCompressor {
      * 从对话中提取关键事实，存入长期记忆
      */
     public List<String> extractFacts(List<MemoryEntry> entries, LongTermMemory longTermMemory) {
+        List<String> facts = extractFacts(entries);
+        for (String fact : facts) {
+            MemoryEntry factEntry = new MemoryEntry(
+                    "fact-" + UUID.randomUUID().toString().substring(0, 8),
+                    fact,
+                    MemoryEntry.MemoryType.FACT,
+                    java.util.Map.of("source", "fact_extractor"),
+                    MemoryEntry.estimateTokens(fact)
+            );
+            longTermMemory.store(factEntry);
+        }
+        return facts;
+    }
+
+    public List<String> extractFacts(List<MemoryEntry> entries) {
         if (entries.isEmpty()) return List.of();
 
         StringBuilder conversation = new StringBuilder();
@@ -170,16 +185,6 @@ public class ContextCompressor {
                 String fact = normalizeFactLine(line);
                 if (isPersistentFactCandidate(fact)) {
                     facts.add(fact);
-
-                    // 存入长期记忆
-                    MemoryEntry factEntry = new MemoryEntry(
-                            "fact-" + UUID.randomUUID().toString().substring(0, 8),
-                            fact,
-                            MemoryEntry.MemoryType.FACT,
-                            java.util.Map.of("source", "fact_extractor"),
-                            MemoryEntry.estimateTokens(fact)
-                    );
-                    longTermMemory.store(factEntry);
                 }
             }
             return facts;

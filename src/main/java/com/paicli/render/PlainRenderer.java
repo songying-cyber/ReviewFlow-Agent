@@ -102,6 +102,7 @@ public final class PlainRenderer implements Renderer {
     @Override
     public ApprovalResult promptApproval(ApprovalRequest request) {
         boolean sensitivePerCall = request.sensitiveNotice() != null && !request.sensitiveNotice().isBlank();
+        boolean allowApproveAll = !sensitivePerCall && request.allowsApproveAll();
         out.println();
         out.println("────────── ⚠️  HITL 审批请求 ──────────");
         if (sensitivePerCall) {
@@ -111,7 +112,7 @@ public final class PlainRenderer implements Renderer {
 
         for (int attempt = 0; attempt < 5; attempt++) {
             out.println();
-            if (sensitivePerCall) {
+            if (!allowApproveAll) {
                 out.println("请选择操作：[y/Enter] 批准本次  [n] 拒绝  [s] 跳过  [m] 修改参数");
             } else {
                 out.println("请选择操作：[y/Enter] 批准  [a] 全部放行  [n] 拒绝  [s] 跳过  [m] 修改参数");
@@ -140,6 +141,10 @@ public final class PlainRenderer implements Renderer {
                 case "a" -> {
                     if (sensitivePerCall) {
                         out.println("  敏感页面操作不支持全部放行，请选择 y/n/s/m");
+                        continue;
+                    }
+                    if (!request.allowsApproveAll()) {
+                        out.println("  高风险操作不支持全部放行，请选择 y/n/s/m");
                         continue;
                     }
                     return promptApproveAllScope(request);

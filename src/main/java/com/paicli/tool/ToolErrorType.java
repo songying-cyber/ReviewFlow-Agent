@@ -1,0 +1,14 @@
+package com.paicli.tool;
+
+public enum ToolErrorType {
+    INVALID_ARGUMENT,
+    SEMANTIC_ERROR,
+    POLICY_DENIED,
+    APPROVAL_DENIED,
+    INTENT_TOOL_MISMATCH,
+    NOT_FOUND,
+    TIMEOUT,
+    CANCELED,
+    EXECUTION_ERROR,
+    EXTERNAL_ERROR
+}

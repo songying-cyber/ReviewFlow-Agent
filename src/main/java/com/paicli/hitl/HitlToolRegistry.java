@@ -2,6 +2,8 @@ package com.paicli.hitl;
 
 import com.paicli.browser.BrowserCheckResult;
 import com.paicli.policy.AuditLog;
+import com.paicli.tool.ToolErrorType;
+import com.paicli.tool.ToolMetadata;
 import com.paicli.tool.ToolOutput;
 import com.paicli.tool.ToolRegistry;
 
@@ -34,8 +36,12 @@ public class HitlToolRegistry extends ToolRegistry {
 
     @Override
     public ToolOutput executeToolOutput(String name, String argumentsJson) {
+        ToolMetadata metadata = getToolMetadata(name);
         // HITL 未启用或该工具不需要审批，直接执行
-        if (!hitlHandler.isEnabled() || !ApprovalPolicy.requiresApproval(name)) {
+        if (!hitlHandler.isEnabled() || !ApprovalPolicy.requiresApproval(metadata)) {
+            return super.doExecuteTool(name, argumentsJson);
+        }
+        if (isSandboxAutoAllowedCommand(name, argumentsJson)) {
             return super.doExecuteTool(name, argumentsJson);
         }
         BrowserCheckResult browserCheck = checkBrowserTool(name, argumentsJson, true);
@@ -43,19 +49,21 @@ public class HitlToolRegistry extends ToolRegistry {
             return super.doExecuteTool(name, argumentsJson);
         }
         if (browserCheck.requiresPerCallApproval()) {
-            return executeAfterExplicitApproval(name, argumentsJson, browserCheck.sensitiveNotice());
+            return executeAfterExplicitApproval(name, argumentsJson, metadata, browserCheck.sensitiveNotice());
         }
         String mcpServer = ApprovalPolicy.mcpServerName(name);
-        if (hitlHandler.isApprovedAllByTool(name) || hitlHandler.isApprovedAllByServer(mcpServer)) {
+        boolean allowApproveAll = metadata.riskLevel().allowsApproveAll();
+        if (allowApproveAll && (hitlHandler.isApprovedAllByTool(name) || hitlHandler.isApprovedAllByServer(mcpServer))) {
             return super.doExecuteTool(name, argumentsJson);
         }
 
-        return executeAfterExplicitApproval(name, argumentsJson, null);
+        return executeAfterExplicitApproval(name, argumentsJson, metadata, null);
     }
 
-    private ToolOutput executeAfterExplicitApproval(String name, String argumentsJson, String sensitiveNotice) {
+    private ToolOutput executeAfterExplicitApproval(String name, String argumentsJson, ToolMetadata metadata,
+                                                    String sensitiveNotice) {
         long start = System.nanoTime();
-        ApprovalRequest request = ApprovalRequest.of(name, argumentsJson, null, null, sensitiveNotice);
+        ApprovalRequest request = createApprovalRequest(name, argumentsJson, metadata, sensitiveNotice);
         ApprovalResult result = hitlHandler.requestApproval(request);
 
         if (result.isRejected()) {
@@ -63,19 +71,32 @@ public class HitlToolRegistry extends ToolRegistry {
                     ? result.reason()
                     : "用户拒绝了此操作";
             getAuditLog().record(AuditLog.AuditEntry.denyByHitl(
-                    name, argumentsJson, reason, elapsedMillis(start)));
-            return ToolOutput.text("[HITL] 操作已被拒绝：" + reason);
+                    name, argumentsJson, reason, elapsedMillis(start), request.fingerprint()));
+            return ToolOutput.error(ToolErrorType.APPROVAL_DENIED, false,
+                    "[HITL] 操作已被拒绝：" + reason,
+                    "不要绕过用户拒绝；请向用户说明已取消该操作，或等待用户明确给出新的授权。");
         }
 
         if (result.isSkipped()) {
             getAuditLog().record(AuditLog.AuditEntry.denyByHitl(
-                    name, argumentsJson, "用户跳过", elapsedMillis(start)));
-            return ToolOutput.text("[HITL] 操作已被跳过");
+                    name, argumentsJson, "用户跳过", elapsedMillis(start), request.fingerprint()));
+            return ToolOutput.error(ToolErrorType.APPROVAL_DENIED, true,
+                    "[HITL] 操作已被跳过",
+                    "本次操作未执行；可以继续处理无需该操作的部分，或等待用户重新确认。");
+        }
+
+        if ((result.isApprovedAllForTool() || result.isApprovedAllForServer()) && !request.allowsApproveAll()) {
+            getAuditLog().record(AuditLog.AuditEntry.denyByHitl(
+                    name, argumentsJson, "高风险操作不支持全部放行", elapsedMillis(start), request.fingerprint()));
+            return ToolOutput.error(ToolErrorType.APPROVAL_DENIED, true,
+                    "[HITL] 高风险操作不支持全部放行，请逐次批准",
+                    "请重新发起同一高风险动作的单次审批，不要使用 approve-all。");
         }
 
         // 批准（含修改参数）- 使用 effectiveArguments 获取最终参数；父类执行路径会负责 allow audit
         String effectiveArgs = result.effectiveArguments(argumentsJson);
-        return super.doExecuteTool(name, effectiveArgs);
+        ApprovalRequest effectiveRequest = createApprovalRequest(name, effectiveArgs, metadata, sensitiveNotice);
+        return super.doExecuteToolWithApprovalFingerprint(name, effectiveArgs, effectiveRequest.fingerprint());
     }
 
     private static long elapsedMillis(long startNanos) {

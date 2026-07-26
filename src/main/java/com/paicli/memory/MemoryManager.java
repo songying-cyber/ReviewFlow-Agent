@@ -25,6 +25,7 @@ public class MemoryManager {
     private TokenBudget tokenBudget;
     private ContextProfile contextProfile;
     private String currentProject;
+    private List<MemoryRetriever.MemoryRecall> lastMemoryRecalls = List.of();
 
     public MemoryManager(LlmClient llmClient) {
         this(llmClient, ContextProfile.from(llmClient), null);
@@ -156,6 +157,10 @@ public class MemoryManager {
         return longTermMemory.getAll();
     }
 
+    public List<MemoryEntry> listVisibleLongTerm() {
+        return longTermMemory.getAll(currentProject);
+    }
+
     public List<MemoryEntry> searchLongTerm(String query, int limit) {
         return longTermMemory.search(query, limit, currentProject);
     }
@@ -168,7 +173,29 @@ public class MemoryManager {
      * 构建用于 LLM 的记忆上下文
      */
     public String buildContextForQuery(String query, int maxTokens) {
-        return retriever.buildContextForQuery(query, maxTokens, currentProject);
+        List<MemoryRetriever.MemoryRecall> recalls = retriever.recallLongTerm(query, 10, currentProject);
+        this.lastMemoryRecalls = List.copyOf(recalls);
+        if (recalls.isEmpty()) return "";
+
+        StringBuilder context = new StringBuilder();
+        context.append("## 相关长期记忆\n\n");
+
+        int usedTokens = 0;
+        for (MemoryRetriever.MemoryRecall recall : recalls) {
+            MemoryEntry entry = recall.entry();
+            if (usedTokens + entry.getTokenCount() > maxTokens) break;
+
+            context.append("- [").append(entry.getType()).append("] ")
+                    .append(entry.getContent()).append("\n");
+            usedTokens += entry.getTokenCount();
+        }
+
+        context.append("\n");
+        return context.toString();
+    }
+
+    public List<MemoryRetriever.MemoryRecall> getLastMemoryRecalls() {
+        return lastMemoryRecalls;
     }
 
     /**
@@ -216,6 +243,33 @@ public class MemoryManager {
      */
     public void clearLongTerm() {
         longTermMemory.clear();
+    }
+
+    public List<String> maybeAutoExtractLongTermMemories() {
+        if (!autoMemoryEnabled()) {
+            return List.of();
+        }
+        List<MemoryEntry> entries = shortTermMemory.getAll();
+        if (entries.size() < 2) {
+            return List.of();
+        }
+        List<String> facts = compressor.extractFacts(entries);
+        for (String fact : facts) {
+            storeFact(fact, "project");
+        }
+        return facts;
+    }
+
+    private static boolean autoMemoryEnabled() {
+        String configured = System.getProperty("paicli.auto.memory");
+        if (configured == null || configured.isBlank()) {
+            configured = System.getenv("PAICLI_AUTO_MEMORY");
+        }
+        return configured != null && (
+                "1".equals(configured.trim())
+                        || "true".equalsIgnoreCase(configured.trim())
+                        || "yes".equalsIgnoreCase(configured.trim())
+                        || "on".equalsIgnoreCase(configured.trim()));
     }
 
     /**

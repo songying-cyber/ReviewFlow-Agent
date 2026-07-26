@@ -71,11 +71,12 @@ public class TerminalHitlHandler implements HitlHandler {
     public synchronized ApprovalResult requestApproval(ApprovalRequest request) {
         String mcpServer = ApprovalPolicy.mcpServerName(request.toolName());
         boolean sensitivePerCall = request.sensitiveNotice() != null && !request.sensitiveNotice().isBlank();
-        if (!sensitivePerCall && isApprovedAllByTool(request.toolName())) {
+        boolean allowApproveAll = !sensitivePerCall && request.allowsApproveAll();
+        if (allowApproveAll && isApprovedAllByTool(request.toolName())) {
             out.println("  [HITL] " + request.toolName() + " 已在本次会话中全部放行，自动通过");
             return ApprovalResult.approveAll();
         }
-        if (!sensitivePerCall && isApprovedAllByServer(mcpServer)) {
+        if (allowApproveAll && isApprovedAllByServer(mcpServer)) {
             out.println("  [HITL] MCP server " + mcpServer + " 已在本次会话中全部放行，自动通过");
             return ApprovalResult.approveAllByServer();
         }
@@ -98,7 +99,7 @@ public class TerminalHitlHandler implements HitlHandler {
         for (int attempt = 0; attempt < 5; attempt++) {
             out.println();
             boolean sensitivePerCall = request.sensitiveNotice() != null && !request.sensitiveNotice().isBlank();
-            if (sensitivePerCall) {
+            if (sensitivePerCall || !request.allowsApproveAll()) {
                 out.println("请选择操作：[y/Enter] 批准本次  [n] 拒绝  [s] 跳过  [m] 修改参数");
             } else {
                 out.println("请选择操作：[y/Enter] 批准  [a] 全部放行  [n] 拒绝  [s] 跳过  [m] 修改参数");
@@ -129,6 +130,10 @@ public class TerminalHitlHandler implements HitlHandler {
                 case "a" -> {
                     if (sensitivePerCall) {
                         out.println("  敏感页面操作不支持全部放行，请选择 y/n/s/m");
+                        continue;
+                    }
+                    if (!request.allowsApproveAll()) {
+                        out.println("  高风险操作不支持全部放行，请选择 y/n/s/m");
                         continue;
                     }
                     return promptApproveAllScope(request);

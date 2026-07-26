@@ -23,6 +23,27 @@ public final class TaskCommandFormatter {
                     ? "⏹️ 已请求取消后台任务: " + id
                     : "❌ 未找到可取消的后台任务: " + id;
         }
+        if (normalized.regionMatches(true, 0, "pause ", 0, 6)) {
+            String id = normalized.substring(6).trim();
+            return manager.pause(id)
+                    ? "⏸️ 已请求暂停后台任务: " + id
+                    : "❌ 未找到可暂停的后台任务: " + id;
+        }
+        if (normalized.regionMatches(true, 0, "resume ", 0, 7)) {
+            String id = normalized.substring(7).trim();
+            return manager.resume(id)
+                    ? "▶️ 已恢复后台任务: " + id
+                    : "❌ 未找到可恢复的后台任务: " + id;
+        }
+        if (normalized.regionMatches(true, 0, "retry ", 0, 6)) {
+            String id = normalized.substring(6).trim();
+            return manager.retry(id)
+                    ? "🔁 已重新排队后台任务: " + id
+                    : "❌ 未找到可重试的后台任务: " + id;
+        }
+        if (normalized.regionMatches(true, 0, "compensate ", 0, 11)) {
+            return manager.compensate(normalized.substring(11).trim());
+        }
         if (normalized.regionMatches(true, 0, "log ", 0, 4)) {
             return manager.find(normalized.substring(4).trim())
                     .map(TaskCommandFormatter::formatLog)
@@ -35,6 +56,10 @@ public final class TaskCommandFormatter {
                   /task list [N]
                   /task add <任务内容>
                   /task cancel <task_id>
+                  /task pause <task_id>
+                  /task resume <task_id>
+                  /task retry <task_id>
+                  /task compensate <task_id>
                   /task log <task_id>
                 """.formatted(payload).trim();
     }
@@ -62,7 +87,15 @@ public final class TaskCommandFormatter {
         StringBuilder sb = new StringBuilder();
         sb.append("📋 后台任务 ").append(task.id()).append('\n');
         sb.append("状态: ").append(task.status().value()).append('\n');
+        sb.append("节点: ").append(task.currentNodeId()).append('\n');
+        sb.append("尝试: ").append(task.attempt()).append('\n');
+        if (task.projectPath() != null && !task.projectPath().isBlank()) {
+            sb.append("工作区: ").append(task.projectPath()).append('\n');
+        }
         sb.append("创建: ").append(task.createdAt()).append('\n');
+        if (task.updatedAt() != null) {
+            sb.append("更新: ").append(task.updatedAt()).append('\n');
+        }
         if (task.startedAt() != null) {
             sb.append("开始: ").append(task.startedAt()).append('\n');
         }

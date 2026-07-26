@@ -2,8 +2,8 @@ package com.paicli.wechat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
-import java.util.Locale;
+import com.paicli.tool.ToolMetadata;
+import com.paicli.tool.ToolRiskLevel;
 
 public class WechatPolicyDecider {
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -14,11 +14,19 @@ public class WechatPolicyDecider {
     }
 
     public WechatPolicyDecision decide(String toolName, String argumentsJson) {
+        return decide(toolName, argumentsJson, null);
+    }
+
+    public WechatPolicyDecision decide(String toolName, String argumentsJson, ToolMetadata metadata) {
         String name = toolName == null ? "" : toolName.trim();
         if (name.isBlank()) {
             return WechatPolicyDecision.deny("工具名为空");
         }
-        if (isReadOnlyBuiltin(name)) {
+        ToolRiskLevel riskLevel = metadata == null ? null : metadata.riskLevel();
+        if (riskLevel == ToolRiskLevel.READ_ONLY || isReadOnlyBuiltin(name)) {
+            return WechatPolicyDecision.allow();
+        }
+        if (riskLevel == ToolRiskLevel.LOW_WRITE) {
             return WechatPolicyDecision.allow();
         }
         if ("execute_command".equals(name)) {

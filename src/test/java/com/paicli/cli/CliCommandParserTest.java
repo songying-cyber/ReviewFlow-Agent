@@ -409,12 +409,45 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesSandboxCommands() {
+        assertEquals(CliCommandParser.CommandType.SANDBOX, CliCommandParser.parse("/sandbox").type());
+        assertEquals("status", CliCommandParser.parse("/sandbox").payload());
+        assertEquals(CliCommandParser.CommandType.SANDBOX, CliCommandParser.parse("/sandbox on").type());
+        assertEquals("on", CliCommandParser.parse("/sandbox on").payload());
+        assertEquals("excluded add docker:*", CliCommandParser.parse("/sandbox excluded add docker:*").payload());
+    }
+
+    @Test
     void parsesTaskCommands() {
         assertEquals(CliCommandParser.CommandType.TASK, CliCommandParser.parse("/task").type());
         assertEquals("list", CliCommandParser.parse("/task").payload());
         assertEquals("add 重构模块", CliCommandParser.parse("/task add 重构模块").payload());
         assertEquals("cancel task_123", CliCommandParser.parse("/task cancel task_123").payload());
         assertEquals("log task_123", CliCommandParser.parse("/task log task_123").payload());
+    }
+
+    @Test
+    void parsesReviewPrCommand() {
+        assertEquals(CliCommandParser.CommandType.REVIEW_PR, CliCommandParser.parse("/review").type());
+        assertNull(CliCommandParser.parse("/review").payload());
+        assertEquals(CliCommandParser.CommandType.REVIEW_PR, CliCommandParser.parse("/review pr").type());
+        assertNull(CliCommandParser.parse("/review pr").payload());
+        assertEquals(CliCommandParser.CommandType.REVIEW_PR,
+                CliCommandParser.parse("/review pr https://github.com/acme/widgets/pull/7").type());
+        assertEquals("https://github.com/acme/widgets/pull/7",
+                CliCommandParser.parse("/review pr https://github.com/acme/widgets/pull/7").payload());
+        assertEquals("7", CliCommandParser.parse("/review pr 7").payload());
+    }
+
+    @Test
+    void parsesGitHubRemoteUrlsForReviewNumberCommand() {
+        Main.GitHubRepoRef https = Main.parseGitHubRemoteUrl("https://github.com/acme/widgets.git");
+        Main.GitHubRepoRef ssh = Main.parseGitHubRemoteUrl("git@github.com:acme/widgets.git");
+
+        assertEquals("acme", https.owner());
+        assertEquals("widgets", https.repo());
+        assertEquals("acme", ssh.owner());
+        assertEquals("widgets", ssh.repo());
     }
 
     @Test

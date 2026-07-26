@@ -85,6 +85,7 @@ class ConversationHistoryCompactorTest {
         assertEquals("system", history.get(0).role());
         assertEquals("user", history.get(1).role());
         assertTrue(history.get(1).content().contains("已压缩的历史对话摘要"));
+        assertTrue(history.get(1).content().contains(ConversationHistoryCompactor.COMPACT_BOUNDARY_MARKER));
         assertTrue(history.get(1).content().contains("MOCK SUMMARY OF OLD CONTENT"));
         assertEquals("assistant", history.get(2).role());
 

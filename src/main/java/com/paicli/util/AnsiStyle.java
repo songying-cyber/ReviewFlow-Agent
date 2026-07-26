@@ -15,6 +15,7 @@ public final class AnsiStyle {
     private static final String GRAY = "\u001B[90m";
     private static final String PURPLE = "\u001B[38;5;141m";
     private static final String BG_PANEL = "\u001B[48;5;236m";
+    private static final int[] RAINBOW_256 = {196, 202, 226, 46, 51, 33, 93, 201};
     private static final boolean ENABLED = determineEnabled();
 
     private AnsiStyle() {
@@ -26,6 +27,33 @@ public final class AnsiStyle {
 
     public static String section(String text) {
         return wrap(BOLD + GREEN, text);
+    }
+
+    public static String logo(String text) {
+        return wrap(BOLD + CYAN, text);
+    }
+
+    public static String logo(String text, int rowOffset) {
+        if (!ENABLED || text == null || text.isEmpty()) {
+            return text;
+        }
+        int phase = (int) ((System.currentTimeMillis() / 350L) % RAINBOW_256.length);
+        StringBuilder sb = new StringBuilder(text.length() * 12);
+        int visibleIndex = 0;
+        for (int i = 0; i < text.length(); ) {
+            int cp = text.codePointAt(i);
+            if (Character.isWhitespace(cp)) {
+                sb.appendCodePoint(cp);
+            } else {
+                int color = RAINBOW_256[Math.floorMod(visibleIndex + rowOffset + phase, RAINBOW_256.length)];
+                sb.append("\u001B[1;38;5;").append(color).append('m');
+                sb.appendCodePoint(cp);
+                sb.append(RESET);
+                visibleIndex++;
+            }
+            i += Character.charCount(cp);
+        }
+        return sb.toString();
     }
 
     public static String answerMarker() {

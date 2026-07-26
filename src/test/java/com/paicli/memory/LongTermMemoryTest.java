@@ -126,4 +126,60 @@ class LongTermMemoryTest {
         assertEquals("global", LongTermMemory.scopeOf(legacy));
         assertTrue(LongTermMemory.isVisibleInProject(legacy, "/repo/current"));
     }
+
+    @Test
+    void shouldWriteMemoryIndexAndTopicFiles() throws Exception {
+        memory.store(new MemoryEntry("fact-topic", "默认用中文回答", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "global"), 10));
+
+        Path index = tempDir.resolve("MEMORY.md");
+        Path topic = tempDir.resolve("topics").resolve("fact-topic.md");
+
+        assertTrue(java.nio.file.Files.isRegularFile(index));
+        assertTrue(java.nio.file.Files.isRegularFile(topic));
+        String indexText = java.nio.file.Files.readString(index);
+        String topicText = java.nio.file.Files.readString(topic);
+        assertTrue(indexText.contains("[默认用中文回答](topics/fact-topic.md)"));
+        assertTrue(topicText.contains("id: fact-topic"));
+        assertTrue(topicText.contains("scope: global"));
+        assertTrue(topicText.contains("默认用中文回答"));
+    }
+
+    @Test
+    void shouldLoadTopicFilesWhenJsonIsMissing() throws Exception {
+        Path topics = tempDir.resolve("topics");
+        java.nio.file.Files.createDirectories(topics);
+        java.nio.file.Files.writeString(topics.resolve("fact-topic.md"), """
+                ---
+                id: fact-topic
+                name: 测试策略
+                description: 使用真实数据库跑集成测试
+                type: FACT
+                scope: project
+                project: /repo/current
+                modified: 2026-08-12T00:00:00Z
+                ---
+
+                集成测试优先使用真实数据库，不使用 mock。
+                """);
+
+        LongTermMemory reloaded = new LongTermMemory(tempDir.toFile());
+
+        assertEquals(1, reloaded.size());
+        MemoryEntry entry = reloaded.retrieve("fact-topic").orElseThrow();
+        assertEquals("集成测试优先使用真实数据库，不使用 mock。", entry.getContent());
+        assertEquals("project", entry.getMetadata().get("scope"));
+        assertEquals("/repo/current", entry.getMetadata().get("project"));
+    }
+
+    @Test
+    void shouldDeleteTopicFileWithEntry() throws Exception {
+        memory.store(new MemoryEntry("fact-delete", "要删除的记忆", MemoryEntry.MemoryType.FACT,
+                Map.of("scope", "global"), 10));
+
+        assertTrue(memory.delete("fact-delete"));
+
+        assertFalse(java.nio.file.Files.exists(tempDir.resolve("topics").resolve("fact-delete.md")));
+        assertFalse(java.nio.file.Files.readString(tempDir.resolve("MEMORY.md")).contains("fact-delete"));
+    }
 }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.browser.BrowserAuditMetadata;
+import com.paicli.sandbox.SandboxAuditMetadata;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -149,48 +150,95 @@ public class AuditLog {
             String reason,
             String approver,
             long durationMs,
-            BrowserAuditMetadata metadata
+            BrowserAuditMetadata metadata,
+            SandboxAuditMetadata sandbox,
+            String fingerprint
     ) {
         public static AuditEntry allow(String tool, String args, long durationMs) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
-                    OUTCOME_ALLOW, null, APPROVER_NONE, durationMs, null);
+                    OUTCOME_ALLOW, null, APPROVER_NONE, durationMs, null, null, null);
         }
 
         public static AuditEntry allow(String tool, String args, long durationMs, BrowserAuditMetadata metadata) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
-                    OUTCOME_ALLOW, null, APPROVER_NONE, durationMs, metadata);
+                    OUTCOME_ALLOW, null, APPROVER_NONE, durationMs, metadata, null, null);
+        }
+
+        public static AuditEntry allow(String tool, String args, long durationMs,
+                                       BrowserAuditMetadata metadata, String fingerprint) {
+            return new AuditEntry(Instant.now().toString(), tool, truncate(args),
+                    OUTCOME_ALLOW, null, APPROVER_NONE, durationMs, metadata, null, fingerprint);
+        }
+
+        public static AuditEntry allow(String tool, String args, long durationMs,
+                                       BrowserAuditMetadata metadata, SandboxAuditMetadata sandbox,
+                                       String fingerprint) {
+            return new AuditEntry(Instant.now().toString(), tool, truncate(args),
+                    OUTCOME_ALLOW, null, APPROVER_NONE, durationMs, metadata, sandbox, fingerprint);
         }
 
         public static AuditEntry allowByMention(String tool, String args, long durationMs) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
-                    OUTCOME_ALLOW, null, APPROVER_MENTION, durationMs, null);
+                    OUTCOME_ALLOW, null, APPROVER_MENTION, durationMs, null, null, null);
         }
 
         public static AuditEntry denyByHitl(String tool, String args, String reason, long durationMs) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
-                    OUTCOME_DENY, reason, APPROVER_HITL, durationMs, null);
+                    OUTCOME_DENY, reason, APPROVER_HITL, durationMs, null, null, null);
+        }
+
+        public static AuditEntry denyByHitl(String tool, String args, String reason, long durationMs,
+                                            String fingerprint) {
+            return new AuditEntry(Instant.now().toString(), tool, truncate(args),
+                    OUTCOME_DENY, reason, APPROVER_HITL, durationMs, null, null, fingerprint);
         }
 
         public static AuditEntry denyByPolicy(String tool, String args, String reason, long durationMs) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
-                    OUTCOME_DENY, reason, APPROVER_POLICY, durationMs, null);
+                    OUTCOME_DENY, reason, APPROVER_POLICY, durationMs, null, null, null);
         }
 
         public static AuditEntry denyByPolicy(String tool, String args, String reason, long durationMs,
                                               BrowserAuditMetadata metadata) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
-                    OUTCOME_DENY, reason, APPROVER_POLICY, durationMs, metadata);
+                    OUTCOME_DENY, reason, APPROVER_POLICY, durationMs, metadata, null, null);
+        }
+
+        public static AuditEntry denyByPolicy(String tool, String args, String reason, long durationMs,
+                                              BrowserAuditMetadata metadata, String fingerprint) {
+            return new AuditEntry(Instant.now().toString(), tool, truncate(args),
+                    OUTCOME_DENY, reason, APPROVER_POLICY, durationMs, metadata, null, fingerprint);
+        }
+
+        public static AuditEntry denyByPolicy(String tool, String args, String reason, long durationMs,
+                                              BrowserAuditMetadata metadata, SandboxAuditMetadata sandbox,
+                                              String fingerprint) {
+            return new AuditEntry(Instant.now().toString(), tool, truncate(args),
+                    OUTCOME_DENY, reason, APPROVER_POLICY, durationMs, metadata, sandbox, fingerprint);
         }
 
         public static AuditEntry error(String tool, String args, String reason, long durationMs) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
-                    OUTCOME_ERROR, reason, APPROVER_NONE, durationMs, null);
+                    OUTCOME_ERROR, reason, APPROVER_NONE, durationMs, null, null, null);
         }
 
         public static AuditEntry error(String tool, String args, String reason, long durationMs,
                                        BrowserAuditMetadata metadata) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
-                    OUTCOME_ERROR, reason, APPROVER_NONE, durationMs, metadata);
+                    OUTCOME_ERROR, reason, APPROVER_NONE, durationMs, metadata, null, null);
+        }
+
+        public static AuditEntry error(String tool, String args, String reason, long durationMs,
+                                       BrowserAuditMetadata metadata, String fingerprint) {
+            return new AuditEntry(Instant.now().toString(), tool, truncate(args),
+                    OUTCOME_ERROR, reason, APPROVER_NONE, durationMs, metadata, null, fingerprint);
+        }
+
+        public static AuditEntry error(String tool, String args, String reason, long durationMs,
+                                       BrowserAuditMetadata metadata, SandboxAuditMetadata sandbox,
+                                       String fingerprint) {
+            return new AuditEntry(Instant.now().toString(), tool, truncate(args),
+                    OUTCOME_ERROR, reason, APPROVER_NONE, durationMs, metadata, sandbox, fingerprint);
         }
     }
 }

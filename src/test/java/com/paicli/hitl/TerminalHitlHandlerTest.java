@@ -51,30 +51,30 @@ class TerminalHitlHandlerTest {
     }
 
     @Test
-    void aInputForMcpCanApproveEntireServer() {
-        Harness h = Harness.withInput("a\nserver\n");
+    void aInputForHighRiskMcpIsRejectedAndReprompts() {
+        Harness h = Harness.withInput("a\ny\n");
         ApprovalResult result = h.handler.requestApproval(MCP_CHROME_REQUEST);
 
-        assertEquals(ApprovalResult.Decision.APPROVED_ALL_BY_SERVER, result.decision());
-        assertTrue(h.handler.isApprovedAllByServer("chrome-devtools"));
+        assertEquals(ApprovalResult.Decision.APPROVED, result.decision());
+        assertFalse(h.handler.isApprovedAllByServer("chrome-devtools"));
         assertFalse(h.handler.isApprovedAllByTool("mcp__chrome-devtools__navigate_page"));
-        assertTrue(h.output().contains("MCP server chrome-devtools"));
+        assertTrue(h.output().contains("高风险操作不支持全部放行"));
     }
 
     @Test
-    void approvedServerCacheSkipsLaterMcpToolsFromSameServer() {
-        Harness h = Harness.withInput("a\nserver\n");
+    void approvedServerCacheDoesNotSkipHighRiskMcpTools() {
+        Harness h = Harness.withInput("a\ny\ny\n");
         h.handler.requestApproval(MCP_CHROME_REQUEST);
 
-        ApprovalResult cached = h.handler.requestApproval(MCP_CHROME_CLICK_REQUEST);
+        ApprovalResult result = h.handler.requestApproval(MCP_CHROME_CLICK_REQUEST);
 
-        assertEquals(ApprovalResult.Decision.APPROVED_ALL_BY_SERVER, cached.decision());
-        assertTrue(h.output().contains("已在本次会话中全部放行"));
+        assertEquals(ApprovalResult.Decision.APPROVED, result.decision());
+        assertFalse(h.output().contains("已在本次会话中全部放行"));
     }
 
     @Test
     void sensitiveRequestSkipsApprovedServerCache() {
-        Harness h = Harness.withInput("a\nserver\ny\n");
+        Harness h = Harness.withInput("y\ny\n");
         h.handler.requestApproval(MCP_CHROME_REQUEST);
         ApprovalRequest sensitive = ApprovalRequest.of(
                 "mcp__chrome-devtools__click",

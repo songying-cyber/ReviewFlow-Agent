@@ -3,6 +3,8 @@ package com.paicli.cli;
 import com.paicli.agent.Agent;
 import com.paicli.agent.AgentOrchestrator;
 import com.paicli.agent.PlanExecuteAgent;
+import com.paicli.benchmark.CodeReviewBenchOptions;
+import com.paicli.benchmark.CodeReviewBenchRunner;
 import com.paicli.browser.BrowserAuditMetadata;
 import com.paicli.browser.BrowserConnectivityCheck;
 import com.paicli.browser.BrowserGuard;
@@ -15,6 +17,15 @@ import com.paicli.hitl.HitlToolRegistry;
 import com.paicli.hitl.SwitchableHitlHandler;
 import com.paicli.hitl.RendererHitlHandler;
 import com.paicli.hitl.TerminalHitlHandler;
+import com.paicli.github.GitHubChangedFile;
+import com.paicli.github.GitHubCheckRun;
+import com.paicli.github.GitHubCiStatus;
+import com.paicli.github.GitHubCommitStatus;
+import com.paicli.github.GitHubConfig;
+import com.paicli.github.GitHubPrClient;
+import com.paicli.github.GitHubPrReference;
+import com.paicli.github.GitHubPrSnapshot;
+import com.paicli.github.GitHubReviewComment;
 import com.paicli.llm.LlmClient;
 import com.paicli.llm.LlmClientFactory;
 import com.paicli.memory.LongTermMemory;
@@ -39,13 +50,19 @@ import com.paicli.runtime.CancellationContext;
 import com.paicli.runtime.CancellationToken;
 import com.paicli.runtime.api.RuntimeApiServer;
 import com.paicli.runtime.api.RuntimeThreadStore;
+import com.paicli.runtime.task.DurableRunContext;
 import com.paicli.runtime.task.DurableTaskManager;
+import com.paicli.runtime.task.DurableToolRegistry;
 import com.paicli.runtime.task.TaskCommandFormatter;
+import com.paicli.sandbox.SandboxConfig;
+import com.paicli.sandbox.SandboxPolicy;
+import com.paicli.sandbox.mac.MacSeatbeltSandbox;
 import com.paicli.snapshot.RestoreResult;
 import com.paicli.snapshot.SnapshotService;
 import com.paicli.snapshot.TurnSnapshot;
 import com.paicli.skill.SkillRegistry;
 import com.paicli.tool.ToolRegistry;
+import com.paicli.tool.LlmToolIntentValidator;
 import com.paicli.util.AnsiStyle;
 import com.paicli.wechat.IlinkClient;
 import com.paicli.wechat.WechatAccount;
@@ -129,6 +146,11 @@ public class Main {
             "(?i)(--?(?:api[_-]?key|authorization|password|passwd|secret|token)\\s+)(\\S+)");
     private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
             "(?i)((?:api[_-]?key|authorization|password|passwd|secret|token)\\s*[=:]\\s*)(\\S+)");
+    private static final Pattern PR_NUMBER = Pattern.compile("\\d+");
+    private static final Pattern HTTPS_GITHUB_REMOTE = Pattern.compile(
+            "https?://[^/]+/([^/]+)/([^/]+?)(?:\\.git)?/?");
+    private static final Pattern SSH_GITHUB_REMOTE = Pattern.compile(
+            "(?:ssh://)?git@[^/:]+[:/]([^/]+)/([^/]+?)(?:\\.git)?/?");
     private static final int CTRL_O = 15;
     private static final String DEFAULT_CHROME_DEVTOOLS_MCP_JSON = """
             {
@@ -213,6 +235,22 @@ public class Main {
             startRuntimeApiAndBlock(args);
             return;
         }
+        if (isReviewPrCommand(args)) {
+            configureLogging();
+            int code = runReviewPrCommand(args, System.out, System.err);
+            if (code != 0) {
+                System.exit(code);
+            }
+            return;
+        }
+        if (isBenchmarkCommand(args)) {
+            configureLogging();
+            int code = runBenchmarkCommand(args, System.out, System.err);
+            if (code != 0) {
+                System.exit(code);
+            }
+            return;
+        }
 
         configureLogging();
 
@@ -230,6 +268,8 @@ public class Main {
             TerminalHitlHandler terminalHitlHandler = new TerminalHitlHandler(false);
             SwitchableHitlHandler hitlHandler = new SwitchableHitlHandler(terminalHitlHandler);
             HitlToolRegistry hitlToolRegistry = new HitlToolRegistry(hitlHandler);
+            hitlToolRegistry.setSandboxConfig(config.getSandbox());
+            configureToolIntentValidator(hitlToolRegistry, llmClient);
             BrowserSession browserSession = new BrowserSession();
             BrowserConnectivityCheck browserConnectivityCheck = new BrowserConnectivityCheck();
             hitlToolRegistry.setBrowserGuard(new BrowserGuard(browserSession, new SensitivePagePolicy()));
@@ -587,6 +627,7 @@ public class Main {
                                 config.setDefaultProvider(target.provider());
                                 config.save();
                                 reactAgent.setLlmClient(llmClient);
+                                configureToolIntentValidator(reactAgent.getToolRegistry(), llmClient);
                                 ui.println("✅ 已切换到: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")");
                                 ui.println("   上下文策略: " + reactAgent.getMemoryManager().getContextProfile().summary());
                                 ui.println("   对话上下文已保留，使用 /clear 可清空\n");
@@ -680,6 +721,12 @@ public class Main {
                                 hitlHandler));
                         continue;
                     }
+                    case SANDBOX -> {
+                        String result = handleSandboxCommand(config, reactAgent.getToolRegistry(), command.payload());
+                        printMcpCommandResult(ui, result);
+                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
+                        continue;
+                    }
                     case WECHAT -> {
                         ui.println(handleWechatCommand(command.payload(), lineReader, renderer, ui, wechatRuntime));
                         continue;
@@ -687,6 +734,32 @@ public class Main {
                     case TASK -> {
                         printMcpCommandResult(ui, TaskCommandFormatter.handle(taskManager, command.payload()));
                         continue;
+                    }
+                    case REVIEW_PR -> {
+                        if (command.payload() == null || command.payload().isBlank()) {
+                            ui.println("""
+                                    ❌ 请提供 GitHub PR，例如：
+                                      /review pr https://github.com/owner/repo/pull/123
+                                      /review pr owner/repo#123
+                                      /review pr 123
+                                    """);
+                            continue;
+                        }
+                        try {
+                            GitHubPrReference ref = resolveReviewPrReference(command.payload(), Path.of("."));
+                            ui.printf("🔎 正在拉取 PR 上下文: %s#%d%n", ref.repoFullName(), ref.number());
+                            GitHubPrSnapshot snapshot = new GitHubPrClient(GitHubConfig.fromEnvironment())
+                                    .fetchSnapshot(ref);
+                            ui.printf("✅ 已拉取 PR: %s%n", snapshot.pullRequest().title());
+                            ui.printf("   changed files: %d, review comments: %d, CI: %s%n%n",
+                                    snapshot.changedFiles().size(),
+                                    snapshot.reviewComments().size(),
+                                    snapshot.ciStatus().combinedState());
+                            input = buildReviewPrPrompt(snapshot);
+                        } catch (Exception e) {
+                            ui.println("❌ 拉取 PR 上下文失败: " + e.getMessage() + "\n");
+                            continue;
+                        }
                     }
                     case SKILL_LIST -> {
                         ui.println(SkillCommandHandler.list(skillRegistry));
@@ -861,6 +934,464 @@ public class Main {
                 && java.util.Arrays.stream(args).anyMatch("--http"::equalsIgnoreCase);
     }
 
+    private static boolean isReviewPrCommand(String[] args) {
+        return args != null
+                && args.length >= 2
+                && "review".equalsIgnoreCase(args[0])
+                && "pr".equalsIgnoreCase(args[1]);
+    }
+
+    private static boolean isBenchmarkCommand(String[] args) {
+        return args != null
+                && args.length >= 2
+                && "benchmark".equalsIgnoreCase(args[0])
+                && "code-review-bench".equalsIgnoreCase(args[1]);
+    }
+
+    static int runBenchmarkCommand(String[] args, PrintStream out, PrintStream err) {
+        BenchmarkCliParseResult parsed = parseCodeReviewBenchOptions(args);
+        if (parsed.error() != null) {
+            err.println(parsed.error());
+            err.println(codeReviewBenchUsage());
+            return 2;
+        }
+        LlmClient llmClient = null;
+        if (parsed.options().requiresLlm()) {
+            PaiCliConfig config = PaiCliConfig.load();
+            llmClient = LlmClientFactory.createFromConfig(config);
+            if (llmClient == null) {
+                err.println("❌ review 模式需要可用的 LLM API Key；可改用 --mode smoke 做链路检查。");
+                return 1;
+            }
+        }
+        try {
+            CodeReviewBenchRunner.RunResult result = new CodeReviewBenchRunner().run(parsed.options(), llmClient);
+            out.println("✅ Code Review Bench 运行完成");
+            out.println("   processed: " + result.processed());
+            out.println("   skipped: " + result.skipped());
+            out.println("   failed: " + result.failed());
+            out.println("   benchmark data: " + result.benchmarkData());
+            out.println("   candidates: " + result.candidatesFile());
+            out.println("   run summary: " + result.runFile());
+            if (!result.failures().isEmpty()) {
+                out.println("   failures:");
+                result.failures().forEach(failure -> out.println("     - " + failure));
+            }
+            return result.failed() == 0 ? 0 : 1;
+        } catch (Exception e) {
+            err.println("Code Review Bench 运行失败: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    static BenchmarkCliParseResult parseCodeReviewBenchOptions(String[] args) {
+        if (args == null || args.length < 2
+                || !"benchmark".equalsIgnoreCase(args[0])
+                || !"code-review-bench".equalsIgnoreCase(args[1])) {
+            return BenchmarkCliParseResult.error("未知 benchmark 命令");
+        }
+
+        Path offlineDir = null;
+        String tool = "paicli";
+        CodeReviewBenchOptions.Mode mode = CodeReviewBenchOptions.Mode.REVIEW;
+        int limit = 0;
+        String onlyUrl = null;
+        int parallelism = 1;
+        int timeoutSeconds = 180;
+        boolean force = false;
+        boolean inPlace = false;
+        boolean checkout = true;
+        Path outputData = null;
+        Path candidatesFile = null;
+        Path worktreeDir = null;
+
+        for (int i = 2; i < args.length; i++) {
+            String arg = args[i];
+            if ("--tool".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return BenchmarkCliParseResult.error("--tool 需要工具名");
+                }
+                tool = args[++i].trim();
+                continue;
+            }
+            if ("--mode".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return BenchmarkCliParseResult.error("--mode 需要 smoke 或 review");
+                }
+                try {
+                    mode = CodeReviewBenchOptions.Mode.parse(args[++i]);
+                } catch (IllegalArgumentException e) {
+                    return BenchmarkCliParseResult.error(e.getMessage());
+                }
+                continue;
+            }
+            if ("--limit".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return BenchmarkCliParseResult.error("--limit 需要数字");
+                }
+                try {
+                    limit = Integer.parseInt(args[++i]);
+                } catch (NumberFormatException e) {
+                    return BenchmarkCliParseResult.error("--limit 需要数字");
+                }
+                if (limit < 0) {
+                    return BenchmarkCliParseResult.error("--limit 不能为负数");
+                }
+                continue;
+            }
+            if ("--timeout-seconds".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return BenchmarkCliParseResult.error("--timeout-seconds 需要数字");
+                }
+                try {
+                    timeoutSeconds = Integer.parseInt(args[++i]);
+                } catch (NumberFormatException e) {
+                    return BenchmarkCliParseResult.error("--timeout-seconds 需要数字");
+                }
+                if (timeoutSeconds <= 0) {
+                    return BenchmarkCliParseResult.error("--timeout-seconds 必须大于 0");
+                }
+                continue;
+            }
+            if ("--parallel".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return BenchmarkCliParseResult.error("--parallel 需要数字");
+                }
+                try {
+                    parallelism = Integer.parseInt(args[++i]);
+                } catch (NumberFormatException e) {
+                    return BenchmarkCliParseResult.error("--parallel 需要数字");
+                }
+                if (parallelism <= 0) {
+                    return BenchmarkCliParseResult.error("--parallel 必须大于 0");
+                }
+                if (parallelism > 4) {
+                    return BenchmarkCliParseResult.error("--parallel 当前最大为 4");
+                }
+                continue;
+            }
+            if ("--only-url".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return BenchmarkCliParseResult.error("--only-url 需要 PR URL");
+                }
+                onlyUrl = args[++i].trim();
+                continue;
+            }
+            if ("--force".equalsIgnoreCase(arg)) {
+                force = true;
+                continue;
+            }
+            if ("--in-place".equalsIgnoreCase(arg)) {
+                inPlace = true;
+                continue;
+            }
+            if ("--no-checkout".equalsIgnoreCase(arg)) {
+                checkout = false;
+                continue;
+            }
+            if ("--worktree-dir".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return BenchmarkCliParseResult.error("--worktree-dir 需要目录路径");
+                }
+                worktreeDir = Path.of(args[++i]).toAbsolutePath().normalize();
+                continue;
+            }
+            if ("--output-data".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return BenchmarkCliParseResult.error("--output-data 需要文件路径");
+                }
+                outputData = Path.of(args[++i]).toAbsolutePath().normalize();
+                continue;
+            }
+            if ("--candidates-file".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return BenchmarkCliParseResult.error("--candidates-file 需要文件路径");
+                }
+                candidatesFile = Path.of(args[++i]).toAbsolutePath().normalize();
+                continue;
+            }
+            if (arg.startsWith("--")) {
+                return BenchmarkCliParseResult.error("未知参数: " + arg);
+            }
+            if (offlineDir != null) {
+                return BenchmarkCliParseResult.error("当前 benchmark code-review-bench 只接受一个 offline 目录");
+            }
+            offlineDir = Path.of(arg).toAbsolutePath().normalize();
+        }
+
+        if (offlineDir == null) {
+            return BenchmarkCliParseResult.error("请提供 Code Review Bench offline 目录");
+        }
+        if (tool == null || tool.isBlank()) {
+            return BenchmarkCliParseResult.error("--tool 不能为空");
+        }
+        Path resultsDir = offlineDir.resolve("results");
+        if (outputData == null) {
+            outputData = inPlace
+                    ? resultsDir.resolve("benchmark_data.json")
+                    : resultsDir.resolve("benchmark_data." + tool + ".json");
+        }
+        if (worktreeDir == null) {
+            worktreeDir = resultsDir.resolve("paicli-worktrees");
+        }
+        if (candidatesFile == null) {
+            String modelDir = sanitizeBenchmarkModelDir(firstNonBlank(
+                    System.getenv("MARTIAN_MODEL"),
+                    readDotEnvValue(offlineDir.resolve(".env"), "MARTIAN_MODEL")));
+            candidatesFile = resultsDir.resolve(modelDir).resolve("candidates.json");
+        }
+        return new BenchmarkCliParseResult(new CodeReviewBenchOptions(
+                offlineDir,
+                tool,
+                mode,
+                limit,
+                onlyUrl,
+                parallelism,
+                timeoutSeconds,
+                force,
+                inPlace,
+                checkout,
+                outputData.toAbsolutePath().normalize(),
+                candidatesFile.toAbsolutePath().normalize(),
+                worktreeDir.toAbsolutePath().normalize()), null);
+    }
+
+    record BenchmarkCliParseResult(CodeReviewBenchOptions options, String error) {
+        static BenchmarkCliParseResult error(String error) {
+            return new BenchmarkCliParseResult(null, error);
+        }
+    }
+
+    private static String sanitizeBenchmarkModelDir(String model) {
+        String value = model == null || model.isBlank() ? "openai/gpt-4o-mini" : model.trim();
+        return value.replace("/", "_");
+    }
+
+    private static String readDotEnvValue(Path envFile, String key) {
+        if (envFile == null || key == null || !Files.exists(envFile)) {
+            return null;
+        }
+        try {
+            for (String line : Files.readAllLines(envFile)) {
+                String trimmed = line.trim();
+                if (trimmed.isBlank() || trimmed.startsWith("#") || !trimmed.startsWith(key + "=")) {
+                    continue;
+                }
+                String value = trimmed.substring((key + "=").length()).trim();
+                if ((value.startsWith("\"") && value.endsWith("\""))
+                        || (value.startsWith("'") && value.endsWith("'"))) {
+                    value = value.substring(1, value.length() - 1);
+                }
+                return value;
+            }
+        } catch (IOException ignored) {
+            return null;
+        }
+        return null;
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static String codeReviewBenchUsage() {
+        return """
+                用法:
+                  paicli benchmark code-review-bench <benchmark-offline-dir> [--mode smoke|review] [--limit N] [--only-url PR_URL] [--parallel N] [--timeout-seconds N] [--tool paicli] [--force] [--in-place] [--no-checkout]
+                示例:
+                  java -jar target/paicli-1.0-SNAPSHOT.jar benchmark code-review-bench /path/to/code-review-benchmark/offline --mode smoke --limit 1
+                  java -jar target/paicli-1.0-SNAPSHOT.jar benchmark code-review-bench /path/to/code-review-benchmark/offline --mode review --limit 5 --parallel 3 --timeout-seconds 300 --in-place --force
+                输出:
+                  review 模式会写 results/benchmark_data.<tool>.json 与 results/<MARTIAN_MODEL>/candidates.json；--in-place 会同步更新 results/benchmark_data.json。
+                """.trim();
+    }
+
+    static int runReviewPrCommand(String[] args, PrintStream out, PrintStream err) {
+        ReviewPrCliOptions options = parseReviewPrCliOptions(args);
+        if (options.error() != null) {
+            err.println(options.error());
+            err.println(reviewPrUsage());
+            return 2;
+        }
+        if (!options.dryRun()) {
+            err.println("非交互 review pr 当前仅支持 --dry-run；交互式代码审查请在 CLI 内使用 /review pr <url|number>。");
+            err.println(reviewPrUsage());
+            return 2;
+        }
+        try {
+            GitHubPrReference ref = resolveReviewPrReference(options.prReference(), Path.of("."));
+            GitHubPrSnapshot snapshot = new GitHubPrClient(GitHubConfig.fromEnvironment()).fetchSnapshot(ref);
+            String prompt = buildReviewPrPrompt(snapshot);
+            if ("json".equals(options.format())) {
+                out.println(buildReviewPrSmokeJson(snapshot, prompt, options.includePrompt()));
+            } else {
+                printReviewPrSmokeText(snapshot, prompt, options.includePrompt(), out);
+            }
+            return 0;
+        } catch (Exception e) {
+            err.println("GitHub PR review dry-run 失败: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    static ReviewPrCliOptions parseReviewPrCliOptions(String[] args) {
+        if (args == null || args.length < 2 || !"review".equalsIgnoreCase(args[0])
+                || !"pr".equalsIgnoreCase(args[1])) {
+            return new ReviewPrCliOptions(null, false, "text", false,
+                    "未知 review 命令。");
+        }
+        String prReference = null;
+        boolean dryRun = false;
+        boolean includePrompt = false;
+        String format = "text";
+        for (int i = 2; i < args.length; i++) {
+            String arg = args[i];
+            if ("--dry-run".equalsIgnoreCase(arg)) {
+                dryRun = true;
+                continue;
+            }
+            if ("--include-prompt".equalsIgnoreCase(arg)) {
+                includePrompt = true;
+                continue;
+            }
+            if ("--format".equalsIgnoreCase(arg)) {
+                if (i + 1 >= args.length) {
+                    return new ReviewPrCliOptions(prReference, dryRun, format, includePrompt,
+                            "--format 需要指定 json 或 text");
+                }
+                format = args[++i].trim().toLowerCase(Locale.ROOT);
+                if (!"json".equals(format) && !"text".equals(format)) {
+                    return new ReviewPrCliOptions(prReference, dryRun, format, includePrompt,
+                            "--format 只支持 json 或 text");
+                }
+                continue;
+            }
+            if (arg.startsWith("--")) {
+                return new ReviewPrCliOptions(prReference, dryRun, format, includePrompt,
+                        "未知参数: " + arg);
+            }
+            if (prReference != null) {
+                return new ReviewPrCliOptions(prReference, dryRun, format, includePrompt,
+                        "当前 review pr 只接受一个 PR 引用参数");
+            }
+            prReference = arg;
+        }
+        if (prReference == null || prReference.isBlank()) {
+            return new ReviewPrCliOptions(prReference, dryRun, format, includePrompt,
+                    "请提供 PR URL、owner/repo#number 或 PR number");
+        }
+        return new ReviewPrCliOptions(prReference, dryRun, format, includePrompt, null);
+    }
+
+    record ReviewPrCliOptions(String prReference,
+                              boolean dryRun,
+                              String format,
+                              boolean includePrompt,
+                              String error) {
+    }
+
+    private static String reviewPrUsage() {
+        return """
+                用法:
+                  paicli review pr <url|owner/repo#number|number> --dry-run [--format text|json] [--include-prompt]
+                示例:
+                  java -jar target/paicli-1.0-SNAPSHOT.jar review pr https://github.com/keycloak/keycloak/pull/37429 --dry-run --format json
+                """.trim();
+    }
+
+    static String buildReviewPrSmokeJson(GitHubPrSnapshot snapshot, String prompt, boolean includePrompt)
+            throws IOException {
+        LinkedHashMap<String, Object> root = new LinkedHashMap<>();
+        root.put("ok", true);
+        root.put("mode", "dry_run");
+        root.put("readyForAgent", true);
+
+        var pr = snapshot.pullRequest();
+        LinkedHashMap<String, Object> prJson = new LinkedHashMap<>();
+        prJson.put("owner", pr.owner());
+        prJson.put("repo", pr.repo());
+        prJson.put("number", pr.number());
+        prJson.put("title", pr.title());
+        prJson.put("state", pr.state());
+        prJson.put("url", pr.htmlUrl());
+        prJson.put("baseRef", pr.baseRef());
+        prJson.put("baseSha", pr.baseSha());
+        prJson.put("headRef", pr.headRef());
+        prJson.put("headSha", pr.headSha());
+        prJson.put("author", pr.author());
+        root.put("pr", prJson);
+
+        List<GitHubChangedFile> files = snapshot.changedFiles() == null ? List.of() : snapshot.changedFiles();
+        List<GitHubReviewComment> comments = snapshot.reviewComments() == null ? List.of() : snapshot.reviewComments();
+        GitHubCiStatus ci = snapshot.ciStatus();
+        LinkedHashMap<String, Object> counts = new LinkedHashMap<>();
+        counts.put("changedFiles", files.size());
+        counts.put("reviewComments", comments.size());
+        counts.put("outdatedReviewComments", snapshot.outdatedReviewComments().size());
+        counts.put("diffChars", snapshot.diff() == null ? 0 : snapshot.diff().length());
+        counts.put("promptChars", prompt == null ? 0 : prompt.length());
+        root.put("counts", counts);
+
+        LinkedHashMap<String, Object> ciJson = new LinkedHashMap<>();
+        ciJson.put("combinedState", ci == null ? "unknown" : ci.combinedState());
+        ciJson.put("statuses", ci == null || ci.statuses() == null ? 0 : ci.statuses().size());
+        ciJson.put("checkRuns", ci == null || ci.checkRuns() == null ? 0 : ci.checkRuns().size());
+        root.put("ci", ciJson);
+
+        List<LinkedHashMap<String, Object>> filesJson = new ArrayList<>();
+        for (GitHubChangedFile file : files) {
+            LinkedHashMap<String, Object> fileJson = new LinkedHashMap<>();
+            fileJson.put("path", file.filename());
+            fileJson.put("status", file.status());
+            fileJson.put("additions", file.additions());
+            fileJson.put("deletions", file.deletions());
+            fileJson.put("changes", file.changes());
+            fileJson.put("previousFilename", file.previousFilename());
+            filesJson.add(fileJson);
+        }
+        root.put("changedFiles", filesJson);
+
+        if (includePrompt) {
+            root.put("prompt", prompt == null ? "" : prompt);
+        }
+        return new com.fasterxml.jackson.databind.ObjectMapper()
+                .writerWithDefaultPrettyPrinter()
+                .writeValueAsString(root);
+    }
+
+    private static void printReviewPrSmokeText(GitHubPrSnapshot snapshot,
+                                               String prompt,
+                                               boolean includePrompt,
+                                               PrintStream out) {
+        var pr = snapshot.pullRequest();
+        List<GitHubChangedFile> files = snapshot.changedFiles() == null ? List.of() : snapshot.changedFiles();
+        List<GitHubReviewComment> comments = snapshot.reviewComments() == null ? List.of() : snapshot.reviewComments();
+        GitHubCiStatus ci = snapshot.ciStatus();
+        out.printf("PR: %s/%s#%d%n", pr.owner(), pr.repo(), pr.number());
+        out.printf("title: %s%n", pr.title());
+        out.printf("state: %s%n", pr.state());
+        out.printf("base: %s @ %s%n", pr.baseRef(), pr.baseSha());
+        out.printf("head: %s @ %s%n", pr.headRef(), pr.headSha());
+        out.printf("changed files: %d%n", files.size());
+        out.printf("review comments: %d (%d outdated)%n", comments.size(), snapshot.outdatedReviewComments().size());
+        out.printf("ci: %s%n", ci == null ? "unknown" : ci.combinedState());
+        out.printf("diff chars: %d%n", snapshot.diff() == null ? 0 : snapshot.diff().length());
+        out.printf("prompt chars: %d%n", prompt == null ? 0 : prompt.length());
+        out.println("ready for agent: true");
+        if (includePrompt) {
+            out.println();
+            out.println(prompt == null ? "" : prompt);
+        }
+    }
+
     private static void startRuntimeApiAndBlock(String[] args) {
         PaiCliConfig config = PaiCliConfig.load();
         LlmClient client = LlmClientFactory.createFromConfig(config);
@@ -911,13 +1442,261 @@ public class Main {
     private static String runHeadlessTask(String prompt, LlmClient llmClient) {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
+        registry.setSandboxConfig(PaiCliConfig.load().getSandbox());
+        Agent agent = new Agent(llmClient, registry);
+        return agent.run(prompt);
+    }
+
+    static GitHubPrReference resolveReviewPrReference(String payload, Path cwd) throws IOException {
+        if (payload == null || payload.isBlank()) {
+            throw new IllegalArgumentException("请提供 PR URL、owner/repo#number 或 PR number");
+        }
+        String value = payload.trim();
+        if (value.contains(" ")) {
+            throw new IllegalArgumentException("当前 /review pr 只接受一个 PR 引用参数");
+        }
+        if (PR_NUMBER.matcher(value).matches()) {
+            GitHubRepoRef repo = resolveCurrentGitHubRepo(cwd);
+            return new GitHubPrReference(repo.owner(), repo.repo(), Integer.parseInt(value));
+        }
+        return GitHubPrReference.parse(value);
+    }
+
+    static GitHubRepoRef parseGitHubRemoteUrl(String remoteUrl) {
+        if (remoteUrl == null || remoteUrl.isBlank()) {
+            throw new IllegalArgumentException("当前目录没有 remote.origin.url，无法从 PR number 推断仓库");
+        }
+        String value = remoteUrl.trim();
+        var https = HTTPS_GITHUB_REMOTE.matcher(value);
+        if (https.matches()) {
+            return new GitHubRepoRef(https.group(1), stripGitSuffix(https.group(2)));
+        }
+        var ssh = SSH_GITHUB_REMOTE.matcher(value);
+        if (ssh.matches()) {
+            return new GitHubRepoRef(ssh.group(1), stripGitSuffix(ssh.group(2)));
+        }
+        throw new IllegalArgumentException("无法解析 GitHub remote: " + remoteUrl);
+    }
+
+    record GitHubRepoRef(String owner, String repo) {
+    }
+
+    private static GitHubRepoRef resolveCurrentGitHubRepo(Path cwd) throws IOException {
+        ProcessBuilder builder = new ProcessBuilder("git", "config", "--get", "remote.origin.url");
+        builder.directory((cwd == null ? Path.of(".") : cwd).toAbsolutePath().normalize().toFile());
+        builder.redirectErrorStream(true);
+        Process process = builder.start();
+        String remote;
+        try (BufferedReader reader = new BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
+            remote = reader.readLine();
+        }
+        try {
+            int exit = process.waitFor();
+            if (exit != 0 || remote == null || remote.isBlank()) {
+                throw new IOException("当前目录没有可用的 git remote.origin.url；请使用完整 PR URL");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("读取 git remote 被中断", e);
+        }
+        return parseGitHubRemoteUrl(remote);
+    }
+
+    public static String buildReviewPrPrompt(GitHubPrSnapshot snapshot) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("""
+                你现在是 GitHub Pull Request 代码审查 agent。请基于下面的真实 PR 目标基线到 head 的上下文进行审查；
+                不要默认拿当前本地分支 diff 代替 PR diff。必要时继续使用 read_file / grep_code / execute_command
+                查看相关文件、配置、文档和测试，并运行最小验证。请优先找真实 bug、行为回归、并发/持久化/安全风险、
+                配置/部署缺陷、数据迁移风险和缺失测试。不要因为风格偏好给低价值评论；不要发布 GitHub review，
+                除非用户明确要求发布。
+
+                """);
+
+        var pr = snapshot.pullRequest();
+        sb.append("## PR\n")
+                .append("- repo: ").append(pr.owner()).append('/').append(pr.repo()).append('\n')
+                .append("- number: ").append(pr.number()).append('\n')
+                .append("- title: ").append(pr.title()).append('\n')
+                .append("- state: ").append(pr.state()).append('\n')
+                .append("- author: ").append(pr.author()).append('\n')
+                .append("- base: ").append(pr.baseRef()).append(" @ ").append(pr.baseSha()).append('\n')
+                .append("- head: ").append(pr.headRef()).append(" @ ").append(pr.headSha()).append('\n')
+                .append("- url: ").append(pr.htmlUrl()).append("\n\n");
+        if (pr.body() != null && !pr.body().isBlank()) {
+            sb.append("## PR Body\n").append(truncate(pr.body(), 4_000)).append("\n\n");
+        }
+
+        appendCiSummary(sb, snapshot.ciStatus());
+        appendChangedFiles(sb, snapshot.changedFiles());
+        appendReviewComments(sb, snapshot);
+        appendDiff(sb, snapshot);
+        appendReviewStandards(sb);
+
+        sb.append("""
+                ## Review Output
+                回复必须以 findings 开头，按严重程度排序。每个 finding 使用以下结构：
+                [P0|P1|P2|P3] 问题标题
+                文件和行号
+                为什么是问题
+                建议修复方向
+
+                严重程度：
+                - P0：会导致数据丢失、生产事故、权限完全绕过、密钥泄露或服务不可用。
+                - P1：高概率生产安全/权限/数据一致性问题，合并前应修。
+                - P2：中等风险的可维护性、迁移、部署或行为缺陷，建议合并前修。
+                - P3：文档、体验、性能提示、可移植性或代码卫生问题。
+
+                如果没有发现问题，也要明确说明已检查范围、已运行验证、未验证范围和剩余风险。
+                """);
+        return sb.toString();
+    }
+
+    private static void appendReviewStandards(StringBuilder sb) {
+        sb.append("""
+                ## Review Standards
+                评审前先确认并在思考中使用这些基线信息：
+                - 目标分支/提交、PR head 分支/提交、base/head SHA、变更文件列表、diff stat、涉及的工程类型。
+                - 大 PR 先分层：安全和鉴权、数据和迁移、部署和配置、用户可见行为、测试和文档。
+                - 先找阻断合并的问题，再看普通优化；不要把无证据的猜测写成 finding。
+
+                重点检查项：
+                - 安全和鉴权：生产身份来源必须可信；后端不能信任 callback query、明文 user_id cookie、生产可用 mock header 或前端隐藏控件。
+                - 数据库迁移：migration 必须显式、可审计、可回滚、可重复执行；不要用 metadata create_all/drop_all 代替版本 DDL；不要多实例并发跑生产 migration/seed。
+                - 配置和环境变量：代码、.env.example、README、部署文档、Dockerfile 的变量名和默认值要一致；前端公开变量不能包含 secret；生产默认值不能不安全。
+                - 部署和网关：检查 Dockerfile context、.dockerignore、健康检查路径、base path、API base URL、回调 URL、测试/生产步骤边界和凭证泄露。
+                - 文档评审：文档是评审范围的一部分；新增工程文档中的启动、测试、构建、迁移和部署命令应可执行，路径应尽量使用仓库相对路径。
+                - 迭代文档：MR 若包含业务功能、工作流、接口、数据结构、部署流程、管理后台页面或回复策略等实质性变更，应检查是否有对应 docs/iterations 文档；纯测试修复、格式、注释或无行为变化的小修可不要求。
+                - 验证：尽量运行相关最小验证，如 git diff --check、后端测试/导入检查、前端 typecheck/build/test；若环境不满足，要明确记录限制，不把环境问题误判成代码结论。
+
+                验证结果必须区分：
+                - 已通过的命令。
+                - 命令失败的真实原因。
+                - 未验证范围和剩余风险。
+
+                """);
+    }
+
+    private static void appendCiSummary(StringBuilder sb, GitHubCiStatus ciStatus) {
+        if (ciStatus == null) {
+            return;
+        }
+        sb.append("## CI\n")
+                .append("- combined status: ").append(ciStatus.combinedState()).append('\n');
+        if (ciStatus.statuses() != null && !ciStatus.statuses().isEmpty()) {
+            sb.append("- commit statuses:\n");
+            for (GitHubCommitStatus status : ciStatus.statuses()) {
+                sb.append("  - ").append(status.context()).append(": ").append(status.state());
+                if (status.description() != null && !status.description().isBlank()) {
+                    sb.append(" - ").append(status.description());
+                }
+                sb.append('\n');
+            }
+        }
+        if (ciStatus.checkRuns() != null && !ciStatus.checkRuns().isEmpty()) {
+            sb.append("- check runs:\n");
+            for (GitHubCheckRun check : ciStatus.checkRuns()) {
+                sb.append("  - ").append(check.name()).append(": ").append(check.status())
+                        .append(" / ").append(check.conclusion()).append('\n');
+            }
+        }
+        sb.append('\n');
+    }
+
+    private static void appendChangedFiles(StringBuilder sb, List<GitHubChangedFile> files) {
+        sb.append("## Changed Files\n");
+        if (files == null || files.isEmpty()) {
+            sb.append("(none)\n\n");
+            return;
+        }
+        for (GitHubChangedFile file : files) {
+            sb.append("- ").append(file.filename())
+                    .append(" [").append(file.status()).append("]")
+                    .append(" +").append(file.additions())
+                    .append(" -").append(file.deletions());
+            if (file.previousFilename() != null && !file.previousFilename().isBlank()) {
+                sb.append(" (renamed from ").append(file.previousFilename()).append(')');
+            }
+            sb.append('\n');
+        }
+        sb.append('\n');
+    }
+
+    private static void appendReviewComments(StringBuilder sb, GitHubPrSnapshot snapshot) {
+        List<GitHubReviewComment> comments = snapshot.reviewComments();
+        if (comments == null || comments.isEmpty()) {
+            return;
+        }
+        sb.append("## Existing Review Comments\n");
+        List<GitHubReviewComment> outdated = snapshot.outdatedReviewComments();
+        for (GitHubReviewComment comment : comments.stream().limit(30).toList()) {
+            boolean isOutdated = outdated.stream().anyMatch(existing -> existing.id() == comment.id());
+            sb.append("- ").append(comment.path()).append(':')
+                    .append(comment.line() == null ? "?" : comment.line())
+                    .append(isOutdated ? " [outdated]" : "")
+                    .append(" by ").append(comment.author())
+                    .append(" - ").append(truncate(singleLine(comment.body()), 240))
+                    .append('\n');
+        }
+        if (comments.size() > 30) {
+            sb.append("- ... ").append(comments.size() - 30).append(" more comments omitted\n");
+        }
+        sb.append('\n');
+    }
+
+    private static void appendDiff(StringBuilder sb, GitHubPrSnapshot snapshot) {
+        sb.append("## Diff\n");
+        String diff = snapshot.diff();
+        if (diff != null && !diff.isBlank()) {
+            sb.append("```diff\n").append(truncate(diff, 60_000)).append("\n```\n\n");
+            return;
+        }
+        if (snapshot.changedFiles() != null) {
+            for (GitHubChangedFile file : snapshot.changedFiles()) {
+                if (file.patch() == null || file.patch().isBlank()) {
+                    continue;
+                }
+                sb.append("### ").append(file.filename()).append('\n')
+                        .append("```diff\n")
+                        .append(truncate(file.patch(), 8_000))
+                        .append("\n```\n");
+            }
+        }
+        sb.append('\n');
+    }
+
+    private static String stripGitSuffix(String repo) {
+        return repo != null && repo.endsWith(".git") ? repo.substring(0, repo.length() - 4) : repo;
+    }
+
+    private static String singleLine(String value) {
+        return value == null ? "" : value.replace('\n', ' ').replace('\r', ' ').trim();
+    }
+
+    private static String truncate(String value, int maxChars) {
+        if (value == null || value.length() <= maxChars) {
+            return value == null ? "" : value;
+        }
+        return value.substring(0, maxChars) + "\n[paicli: truncated]";
+    }
+
+    private static String runDurableHeadlessTask(String prompt, LlmClient llmClient, DurableTaskManager manager) {
+        String workflowId = DurableRunContext.workflowId();
+        String nodeId = DurableRunContext.nodeId();
+        ToolRegistry registry = new DurableToolRegistry(manager, workflowId, nodeId);
+        registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
+        registry.setSandboxConfig(PaiCliConfig.load().getSandbox());
         Agent agent = new Agent(llmClient, registry);
         return agent.run(prompt);
     }
 
     private static DurableTaskManager openTaskManager(AtomicReference<LlmClient> llmClientRef) {
         try {
-            return DurableTaskManager.openDefault(prompt -> runHeadlessTask(prompt, llmClientRef.get()));
+            AtomicReference<DurableTaskManager> managerRef = new AtomicReference<>();
+            DurableTaskManager manager = DurableTaskManager.openDefault(
+                    prompt -> runDurableHeadlessTask(prompt, llmClientRef.get(), managerRef.get()));
+            managerRef.set(manager);
+            return manager;
         } catch (Exception e) {
             throw new IllegalStateException("后台任务管理器初始化失败: " + e.getMessage(), e);
         }
@@ -1103,6 +1882,19 @@ public class Main {
     private static AgentOrchestrator createTeamAgent(LlmClient llmClient, Agent reactAgent, PrintStream out) {
         out.println("👥 使用 Multi-Agent 协作模式\n");
         return new AgentOrchestrator(llmClient, reactAgent.getToolRegistry(), reactAgent.getMemoryManager(), out);
+    }
+
+    private static void configureToolIntentValidator(ToolRegistry registry, LlmClient llmClient) {
+        if (registry == null) {
+            return;
+        }
+        if (!LlmToolIntentValidator.enabledByEnvironment()) {
+            registry.setToolIntentValidator(null);
+            return;
+        }
+        registry.setToolIntentValidator(new LlmToolIntentValidator(
+                llmClient,
+                LlmToolIntentValidator.validateReadOnlyByEnvironment()));
     }
 
     private static String runWithCancelSupport(Terminal terminal, PrintStream out, Callable<String> task) {
@@ -1551,6 +2343,11 @@ public class Main {
                 new SlashCommandHint("/browser status", "/browser status", "查看浏览器会话状态"),
                 new SlashCommandHint("/browser tabs", "/browser tabs", "查看 shared 模式真实 Chrome tab"),
                 new SlashCommandHint("/browser disconnect", "/browser disconnect", "切回 isolated 浏览器模式"),
+                new SlashCommandHint("/sandbox", "/sandbox", "查看 macOS 命令沙箱状态"),
+                new SlashCommandHint("/sandbox on", "/sandbox on", "开启 execute_command Seatbelt 沙箱"),
+                new SlashCommandHint("/sandbox off", "/sandbox off", "关闭命令沙箱"),
+                new SlashCommandHint("/sandbox strict on", "/sandbox strict on", "沙箱不可用时拒绝命令"),
+                new SlashCommandHint("/sandbox doctor", "/sandbox doctor", "检查 macOS 沙箱依赖"),
                 new SlashCommandHint("/wechat", "/wechat", "扫码绑定并启动微信 iLink 通道"),
                 new SlashCommandHint("/wechat setup", "/wechat setup", "重新扫码绑定并启动微信通道"),
                 new SlashCommandHint("/wechat status", "/wechat status", "查看微信通道状态"),
@@ -1558,7 +2355,12 @@ public class Main {
                 new SlashCommandHint("/task", "/task", "查看后台任务列表"),
                 new SlashCommandHint("/task add ", "/task add <任务内容>", "提交后台任务"),
                 new SlashCommandHint("/task cancel ", "/task cancel <task_id>", "取消后台任务"),
+                new SlashCommandHint("/task pause ", "/task pause <task_id>", "暂停后台任务"),
+                new SlashCommandHint("/task resume ", "/task resume <task_id>", "恢复后台任务"),
+                new SlashCommandHint("/task retry ", "/task retry <task_id>", "重试后台任务"),
+                new SlashCommandHint("/task compensate ", "/task compensate <task_id>", "补偿文件副作用"),
                 new SlashCommandHint("/task log ", "/task log <task_id>", "查看后台任务结果"),
+                new SlashCommandHint("/review pr ", "/review pr <url|number>", "拉取 GitHub PR 上下文并启动代码审查"),
                 new SlashCommandHint("/mcp", "/mcp", "查看 MCP server 状态"),
                 new SlashCommandHint("/mcp restart ", "/mcp restart <name>", "重启 MCP server"),
                 new SlashCommandHint("/mcp logs ", "/mcp logs <name>", "查看 MCP server 日志"),
@@ -1568,8 +2370,8 @@ public class Main {
                 new SlashCommandHint("/mcp prompts ", "/mcp prompts <name>", "查看 MCP prompts"),
                 new SlashCommandHint("/policy", "/policy", "查看安全策略状态"),
                 new SlashCommandHint("/config", "/config", "打开配置 palette（只读视图 + 切换提示）"),
-                new SlashCommandHint("/audit", "/audit", "查看今日最近 10 条危险工具审计"),
-                new SlashCommandHint("/audit ", "/audit [N]", "查看今日最近 N 条危险工具审计"),
+                new SlashCommandHint("/audit", "/audit", "查看今日最近 10 条工具审计"),
+                new SlashCommandHint("/audit ", "/audit [N]", "查看今日最近 N 条工具审计"),
                 new SlashCommandHint("/snapshot", "/snapshot", "查看最近 Side-Git 快照"),
                 new SlashCommandHint("/snapshot status", "/snapshot status", "查看 Side-Git 快照状态"),
                 new SlashCommandHint("/snapshot clean", "/snapshot clean", "清理当前项目 Side-Git 快照"),
@@ -2139,9 +2941,16 @@ public class Main {
     private static void printPolicyStatus(PrintStream out, Agent reactAgent) {
         out.println("🛡️ 安全策略状态：");
         out.println("   项目根: " + reactAgent.getToolRegistry().getProjectPath());
-        out.println("   危险工具: " + String.join(", ", ApprovalPolicy.getDangerousTools()) + "，以及所有 mcp__ 前缀工具");
+        out.println("   风险等级: " + ApprovalPolicy.policySummary());
+        out.println("   工具意图校验: " + (reactAgent.getToolRegistry().hasToolIntentValidator()
+                ? "已启用（LLM validator）"
+                : "未启用（PAICLI_TOOL_INTENT_VALIDATION=true 可开启）"));
         out.println("   路径围栏: 强制限定在项目根之内（read_file / write_file / list_dir / create_project）");
         out.println("   命令黑名单: sudo / rm -rf 全盘 / mkfs / dd of=/dev / fork bomb / curl|sh / find / / chmod 777 / / shutdown");
+        SandboxConfig sandbox = reactAgent.getToolRegistry().getSandboxConfig();
+        out.println("   macOS 命令沙箱: " + (sandbox.isEnabled() ? "ON" : "OFF")
+                + "，strict=" + sandbox.isRequired()
+                + "，network=" + (sandbox.getNetwork().isEnabled() ? "allow" : "deny"));
         out.println("   写入文件上限: 5MB");
         out.println("   命令执行上限: 60 秒，输出 8KB（截断）");
         out.println("   审计目录: " + reactAgent.getToolRegistry().getAuditLog().getAuditDir());
@@ -2302,6 +3111,135 @@ public class Main {
         out.println();
     }
 
+    private static String handleSandboxCommand(PaiCliConfig config, ToolRegistry registry, String payload) {
+        String normalized = payload == null || payload.isBlank()
+                ? "status"
+                : payload.trim();
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        SandboxConfig sandbox = config.getSandbox();
+
+        if ("status".equals(lower)) {
+            return sandboxStatus(sandbox);
+        }
+        if ("doctor".equals(lower)) {
+            return sandboxDoctor(sandbox, registry);
+        }
+        if ("on".equals(lower)) {
+            sandbox.setEnabled(true);
+            config.setSandbox(sandbox);
+            config.save();
+            registry.setSandboxConfig(sandbox);
+            return "✅ macOS 命令沙箱已开启";
+        }
+        if ("off".equals(lower)) {
+            sandbox.setEnabled(false);
+            config.setSandbox(sandbox);
+            config.save();
+            registry.setSandboxConfig(sandbox);
+            return "✅ 命令沙箱已关闭；execute_command 将回到普通高风险审批路径";
+        }
+        if ("strict on".equals(lower)) {
+            sandbox.setRequired(true);
+            config.setSandbox(sandbox);
+            config.save();
+            registry.setSandboxConfig(sandbox);
+            return "✅ 沙箱严格模式已开启：沙箱不可用时拒绝 execute_command";
+        }
+        if ("strict off".equals(lower)) {
+            sandbox.setRequired(false);
+            config.setSandbox(sandbox);
+            config.save();
+            registry.setSandboxConfig(sandbox);
+            return "✅ 沙箱严格模式已关闭";
+        }
+        if (lower.startsWith("excluded add ")) {
+            String pattern = normalized.substring("excluded add ".length()).trim();
+            if (pattern.isBlank()) {
+                return "❌ 请提供 excluded command pattern，例如 /sandbox excluded add docker:*";
+            }
+            List<String> patterns = new ArrayList<>(sandbox.getExcludedCommands());
+            if (!patterns.contains(pattern)) {
+                patterns.add(pattern);
+            }
+            sandbox.setExcludedCommands(patterns);
+            config.setSandbox(sandbox);
+            config.save();
+            registry.setSandboxConfig(sandbox);
+            return "✅ 已加入沙箱排除命令: " + pattern;
+        }
+        if (lower.startsWith("excluded remove ")) {
+            String pattern = normalized.substring("excluded remove ".length()).trim();
+            List<String> patterns = new ArrayList<>(sandbox.getExcludedCommands());
+            boolean removed = patterns.remove(pattern);
+            sandbox.setExcludedCommands(patterns);
+            config.setSandbox(sandbox);
+            config.save();
+            registry.setSandboxConfig(sandbox);
+            return removed ? "✅ 已移除沙箱排除命令: " + pattern : "📭 未找到排除命令: " + pattern;
+        }
+
+        return """
+                ❌ 未知 /sandbox 子命令: %s
+                可用命令：
+                  /sandbox status
+                  /sandbox on
+                  /sandbox off
+                  /sandbox strict on
+                  /sandbox strict off
+                  /sandbox excluded add <pattern>
+                  /sandbox excluded remove <pattern>
+                  /sandbox doctor
+                """.formatted(normalized).trim();
+    }
+
+    private static String sandboxStatus(SandboxConfig sandbox) {
+        boolean mac = SandboxPolicy.isMacOs();
+        boolean available = mac && new MacSeatbeltSandbox(sandbox, Path.of(".")).available();
+        String network = sandbox.getNetwork().isEnabled() ? "allow" : "deny";
+        return """
+                🧰 Sandbox: %s
+                   runtime: macos-seatbelt
+                   platform: %s
+                   sandbox-exec: %s
+                   strict: %s
+                   autoAllowCommandIfSandboxed: %s
+                   allowUnsandboxedCommands: %s
+                   network: %s
+                   excludedCommands: %s
+                """.formatted(
+                sandbox.isEnabled() ? "ON" : "OFF",
+                mac ? "macOS" : "unsupported",
+                available ? "available" : "missing/unsupported",
+                sandbox.isRequired() ? "ON" : "OFF",
+                sandbox.isAutoAllowCommandIfSandboxed() ? "ON" : "OFF",
+                sandbox.isAllowUnsandboxedCommands() ? "ON" : "OFF",
+                network,
+                sandbox.getExcludedCommands().isEmpty() ? "(none)" : String.join(", ", sandbox.getExcludedCommands())
+        ).trim();
+    }
+
+    private static String sandboxDoctor(SandboxConfig sandbox, ToolRegistry registry) {
+        boolean mac = SandboxPolicy.isMacOs();
+        MacSeatbeltSandbox runtime = new MacSeatbeltSandbox(sandbox, Path.of(registry.getProjectPath()));
+        boolean available = mac && runtime.available();
+        StringBuilder sb = new StringBuilder();
+        sb.append("🩺 macOS 沙箱检查\n");
+        sb.append("   macOS: ").append(mac ? "OK" : "unsupported").append('\n');
+        sb.append("   sandbox-exec: ").append(available ? "OK" : "missing/unsupported").append('\n');
+        sb.append("   project: ").append(Path.of(registry.getProjectPath()).toAbsolutePath().normalize()).append('\n');
+        sb.append("   enabled: ").append(sandbox.isEnabled()).append('\n');
+        sb.append("   strict: ").append(sandbox.isRequired()).append('\n');
+        sb.append("   network: ").append(sandbox.getNetwork().isEnabled() ? "allow" : "deny").append('\n');
+        if (!mac) {
+            sb.append("   说明: PaiCLI 内置沙箱只支持 macOS，其他系统不启用。\n");
+        } else if (!available) {
+            sb.append("   说明: 未找到可执行的 sandbox-exec；strict 模式下 execute_command 会被拒绝。\n");
+        } else {
+            sb.append("   说明: Seatbelt runtime 可用；开启 /sandbox on 后 execute_command 会被包裹执行。\n");
+        }
+        return sb.toString().trim();
+    }
+
     private static void printAuditTail(PrintStream out, Agent reactAgent, String payload) {
         int requested = parseAuditCount(payload, 10);
         List<AuditLog.AuditEntry> entries = reactAgent.getToolRegistry().getAuditLog().readRecent(requested);
@@ -2309,7 +3247,7 @@ public class Main {
             out.println("📭 今日尚无审计记录\n");
             return;
         }
-        out.println("📋 最近 " + entries.size() + " 条危险工具审计：");
+        out.println("📋 最近 " + entries.size() + " 条工具审计：");
         for (AuditLog.AuditEntry entry : entries) {
             out.printf("   [%s] %s %s (%dms, approver=%s)%n",
                     entry.outcome().toUpperCase(),
@@ -2320,11 +3258,22 @@ public class Main {
             if (entry.reason() != null && !entry.reason().isBlank()) {
                 out.println("        原因: " + entry.reason());
             }
+            if (entry.fingerprint() != null && !entry.fingerprint().isBlank()) {
+                out.println("        审批: " + entry.fingerprint());
+            }
             BrowserAuditMetadata metadata = entry.metadata();
             if (metadata != null) {
                 out.println("        浏览器: mode=" + metadata.browserMode()
                         + ", sensitive=" + metadata.sensitive()
                         + (metadata.targetUrl() == null ? "" : ", url=" + metadata.targetUrl()));
+            }
+            if (entry.sandbox() != null) {
+                out.println("        沙箱: enabled=" + entry.sandbox().enabled()
+                        + ", used=" + entry.sandbox().used()
+                        + ", runtime=" + entry.sandbox().runtime()
+                        + (entry.sandbox().unsandboxedReason().isBlank()
+                        ? ""
+                        : ", reason=" + entry.sandbox().unsandboxedReason()));
             }
         }
         out.println();
@@ -2830,12 +3779,19 @@ public class Main {
         String ready = "Model " + model + " (" + provider + ")";
         String capabilities = "ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG";
         String state = mcp + " · " + skills + " · ReAct";
-        List<String> lines = new ArrayList<>(List.of(
-                "   " + AnsiStyle.section("██████████") + "    " + AnsiStyle.emphasis("PaiCLI") + " " + AnsiStyle.section("π") + "  " + AnsiStyle.subtle("v" + VERSION),
-                "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(ready),
-                "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(state),
-                "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(capabilities),
-                "   " + AnsiStyle.section("  ██  ██"),
+        List<String> bannerText = List.of(
+                AnsiStyle.emphasis("codeflow"),
+                AnsiStyle.subtle(ready),
+                AnsiStyle.subtle(state),
+                AnsiStyle.subtle(capabilities)
+        );
+        List<String> lines = new ArrayList<>();
+        List<String> logo = startupLogoLines();
+        for (int i = 0; i < logo.size(); i++) {
+            String text = i < bannerText.size() ? "    " + bannerText.get(i) : "";
+            lines.add("   " + AnsiStyle.logo(logo.get(i), i) + text);
+        }
+        lines.addAll(List.of(
                 "",
                 "Tips for getting started:",
                 "1. Type " + AnsiStyle.emphasis("/") + " for commands and Tab completion",
@@ -2847,6 +3803,20 @@ public class Main {
             lines.add(AnsiStyle.subtle(info.note().replace('\n', ' ')));
         }
         return lines;
+    }
+
+    static List<String> startupLogoLines() {
+        return List.of(
+                " ██████   ██████  ███████   ███████ ",
+                "██       ██    ██ ██    ██  ██      ",
+                "██       ██    ██ ██     ██ ██      ",
+                "██       ██    ██ ██     ██ █████   ",
+                "██       ██    ██ ██    ██  ██      ",
+                " ██████   ██████  ███████   ███████ ",
+                "                                      ",
+                "                                      ",
+                "                                      "
+        );
     }
 
     static McpConfigBootstrapResult ensureDefaultMcpConfig(Path userHome) throws IOException {

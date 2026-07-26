@@ -145,6 +145,27 @@ class PaiCliCompleterTest {
     }
 
     @Test
+    void completesReviewPrCommand() {
+        PaiCliCompleter completer = new PaiCliCompleter(List::of);
+        List<Candidate> candidates = new ArrayList<>();
+
+        completer.complete(null, parsed("/review p", "p"), candidates);
+
+        assertTrue(candidates.stream().anyMatch(c -> c.displ().equals("/review pr <url|number>")));
+    }
+
+    @Test
+    void completesSandboxSubCommands() {
+        PaiCliCompleter completer = new PaiCliCompleter(List::of);
+        List<Candidate> candidates = new ArrayList<>();
+
+        completer.complete(null, parsed("/sandbox st", "st"), candidates);
+
+        assertTrue(candidates.stream().anyMatch(c -> c.value().equals("status")));
+        assertTrue(candidates.stream().anyMatch(c -> c.value().equals("strict on")));
+    }
+
+    @Test
     void completesLocalPathMentions() {
         PaiCliCompleter completer = new PaiCliCompleter(List::of);
         List<Candidate> candidates = new ArrayList<>();

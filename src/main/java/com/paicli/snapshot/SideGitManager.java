@@ -123,6 +123,26 @@ public class SideGitManager {
         }
     }
 
+    public synchronized RestoreResult restoreCommit(String commitId) throws IOException, GitAPIException {
+        if (!config.enabled()) {
+            return RestoreResult.failure("快照功能已关闭");
+        }
+        if (commitId == null || commitId.isBlank()) {
+            return RestoreResult.failure("快照 commit id 为空");
+        }
+        TurnSnapshot current = preRestoreSnapshot("restore-" + Instant.now().toEpochMilli(),
+                "Before restoring " + commitId);
+        try (Git git = openGit(); Repository repository = git.getRepository()) {
+            Map<String, ObjectId> targetTree = treeEntries(repository, ObjectId.fromString(commitId.trim()));
+            Map<String, ObjectId> currentTree = current == null
+                    ? Map.of()
+                    : treeEntries(repository, ObjectId.fromString(current.commitId()));
+            List<String> removed = deleteTrackedFilesMissingFromTarget(currentTree, targetTree);
+            List<String> restored = writeTargetTree(repository, targetTree);
+            return RestoreResult.success(commitId.trim(), restored, removed);
+        }
+    }
+
     public synchronized String formatStatus() {
         StringBuilder sb = new StringBuilder();
         sb.append("📸 Side-Git 快照状态\n");

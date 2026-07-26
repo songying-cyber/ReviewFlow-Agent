@@ -3,6 +3,7 @@ package com.paicli.config;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.paicli.sandbox.SandboxConfig;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -22,6 +23,7 @@ public class PaiCliConfig {
 
     private String defaultProvider = "glm";
     private Map<String, ProviderConfig> providers = new LinkedHashMap<>();
+    private SandboxConfig sandbox = new SandboxConfig();
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ProviderConfig {
@@ -58,6 +60,8 @@ public class PaiCliConfig {
     public void setDefaultProvider(String defaultProvider) { this.defaultProvider = defaultProvider; }
     public Map<String, ProviderConfig> getProviders() { return providers; }
     public void setProviders(Map<String, ProviderConfig> providers) { this.providers = providers; }
+    public SandboxConfig getSandbox() { return sandbox == null ? new SandboxConfig() : sandbox; }
+    public void setSandbox(SandboxConfig sandbox) { this.sandbox = sandbox == null ? new SandboxConfig() : sandbox; }
 
     public String getApiKey(String provider) {
         ProviderConfig providerConfig = providers.get(provider);

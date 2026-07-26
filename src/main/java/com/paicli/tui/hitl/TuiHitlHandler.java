@@ -57,12 +57,13 @@ public class TuiHitlHandler implements HitlHandler {
 
         String mcpServer = com.paicli.hitl.ApprovalPolicy.mcpServerName(request.toolName());
         boolean sensitivePerCall = request.sensitiveNotice() != null && !request.sensitiveNotice().isBlank();
+        boolean allowApproveAll = !sensitivePerCall && request.allowsApproveAll();
 
         // 检查是否已全部放行
-        if (!sensitivePerCall && isApprovedAllByTool(request.toolName())) {
+        if (allowApproveAll && isApprovedAllByTool(request.toolName())) {
             return ApprovalResult.approveAll();
         }
-        if (!sensitivePerCall && isApprovedAllByServer(mcpServer)) {
+        if (allowApproveAll && isApprovedAllByServer(mcpServer)) {
             return ApprovalResult.approveAllByServer();
         }
 

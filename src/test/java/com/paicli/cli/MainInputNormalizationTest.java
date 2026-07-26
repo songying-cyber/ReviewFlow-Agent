@@ -56,18 +56,27 @@ class MainInputNormalizationTest {
 
     @Test
     void startupBannerUsesOpenLayoutWithoutRightBorder() {
-        List<String> lines = Main.startupBannerLines();
+        List<String> lines = Main.startupBannerLines().stream()
+                .map(MainInputNormalizationTest::stripAnsi)
+                .toList();
 
-        assertTrue(lines.stream().anyMatch(line -> line.contains("PaiCLI")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("π")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("v16.1.0")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("████████")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("codeflow")));
+        assertTrue(lines.stream().noneMatch(line -> line.contains("PaiCLI π")));
+        assertTrue(lines.stream().noneMatch(line -> line.contains("v16.1.0")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("██████  ███████   ███████")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("Tips for getting started")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("@path")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("for shortcuts")));
         assertTrue(lines.stream().noneMatch(line -> line.contains("────────────────")));
         assertTrue(lines.stream().noneMatch(line -> line.endsWith("║")),
                 "banner should not depend on a padded right border");
+    }
+
+    private static String stripAnsi(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        return text.replaceAll("\\u001B\\[[0-?]*[ -/]*[@-~]", "");
     }
 
     @Test

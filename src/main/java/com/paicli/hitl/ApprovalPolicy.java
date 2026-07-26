@@ -1,70 +1,86 @@
 package com.paicli.hitl;
 
-import java.util.Set;
+import com.paicli.tool.ToolMetadata;
+import com.paicli.tool.ToolRiskLevel;
 
 /**
- * 危险操作识别策略 - 基于静态规则判断哪些工具调用需要人工确认
- *
- * 设计原则：
- * - 读取类操作（read_file、list_dir、glob_files、grep_code、search_code）不需要确认，无副作用
- * - 写入/执行类操作（write_file、execute_command）需要确认，有潜在破坏性
- * - create_project 属于写入操作，默认需要确认
- * - revert_turn 会批量回写工作区文件，默认需要确认
- * - MCP 工具来自外部 server，默认都需要确认
+ * 审批策略：工具声明自身风险等级，策略层按等级决定是否需要人工确认。
  */
 public class ApprovalPolicy {
-
-    // 需要人工确认的工具集合
-    private static final Set<String> DANGEROUS_TOOLS = Set.of(
-            "write_file",
-            "execute_command",
-            "create_project",
-            "revert_turn"
-    );
 
     private ApprovalPolicy() {
     }
 
+    public static boolean requiresApproval(ToolMetadata metadata) {
+        return metadata != null && requiresApproval(metadata.riskLevel());
+    }
+
+    public static boolean requiresApproval(ToolRiskLevel riskLevel) {
+        return riskLevel != null && riskLevel.requiresApprovalByDefault();
+    }
+
     /**
-     * 判断该工具调用是否需要人工确认
+     * 兼容旧调用：主执行路径应优先使用 {@link #requiresApproval(ToolMetadata)}。
      */
     public static boolean requiresApproval(String toolName) {
-        return DANGEROUS_TOOLS.contains(toolName) || isMcpTool(toolName);
+        if (isMcpTool(toolName)) {
+            return true;
+        }
+        return legacyMetadata(toolName).riskLevel().requiresApprovalByDefault();
+    }
+
+    public static String getDangerLevel(ToolMetadata metadata) {
+        ToolRiskLevel level = metadata == null ? ToolRiskLevel.READ_ONLY : metadata.riskLevel();
+        return switch (level) {
+            case READ_ONLY -> "🟢 只读";
+            case LOW_WRITE -> "🔵 低风险写";
+            case MEDIUM_WRITE -> "🟡 中风险写";
+            case HIGH_RISK -> "🔴 高风险";
+        };
     }
 
     /**
-     * 获取危险等级描述
+     * 兼容旧调用：主执行路径应优先使用 {@link #getDangerLevel(ToolMetadata)}。
      */
     public static String getDangerLevel(String toolName) {
-        return switch (toolName) {
-            case "execute_command" -> "🔴 高危";
-            case "revert_turn" -> "🔴 高危";
-            case "write_file" -> "🟡 中危";
-            case "create_project" -> "🟡 中危";
-            default -> isMcpTool(toolName) ? "🟡 MCP" : "🟢 安全";
+        if (isMcpTool(toolName)) {
+            return "🔴 高风险";
+        }
+        return getDangerLevel(legacyMetadata(toolName));
+    }
+
+    public static String getRiskDescription(ToolMetadata metadata) {
+        if (metadata != null && !metadata.sideEffectDescription().isBlank()) {
+            return metadata.sideEffectDescription();
+        }
+        ToolRiskLevel level = metadata == null ? ToolRiskLevel.READ_ONLY : metadata.riskLevel();
+        return switch (level) {
+            case READ_ONLY -> "只读取信息，不应修改本地文件、外部服务或会话状态";
+            case LOW_WRITE -> "会修改 PaiCLI 的低风险本地状态，默认允许但会审计";
+            case MEDIUM_WRITE -> "会修改项目文件、目录或会话状态，需要人工确认";
+            case HIGH_RISK -> "可能执行命令、批量恢复或调用外部系统，需要人工确认";
         };
     }
 
     /**
-     * 获取危险操作的风险说明
+     * 兼容旧调用：主执行路径应优先使用 {@link #getRiskDescription(ToolMetadata)}。
      */
     public static String getRiskDescription(String toolName) {
-        return switch (toolName) {
-            case "execute_command" -> "将在系统上执行 Shell 命令，可能修改文件、安装软件或影响系统状态";
-            case "revert_turn" -> "将按 Side-Git 快照批量恢复工作区文件，可能覆盖当前未保存修改";
-            case "write_file" -> "将写入或覆盖文件内容，原有内容将丢失";
-            case "create_project" -> "将在磁盘上创建新目录和文件";
-            default -> isMcpTool(toolName)
-                    ? "将调用外部 MCP server 提供的工具，可能访问网络、文件或第三方服务"
-                    : "安全的只读操作";
-        };
+        if (isMcpTool(toolName)) {
+            return "将调用外部 MCP server 提供的工具，可能访问网络、文件或第三方服务";
+        }
+        return getRiskDescription(legacyMetadata(toolName));
     }
 
-    /**
-     * 获取所有需要审批的工具名集合（用于测试和展示）
-     */
-    public static Set<String> getDangerousTools() {
-        return DANGEROUS_TOOLS;
+    public static String policySummary() {
+        return "READ_ONLY 默认放行；LOW_WRITE 默认放行并审计；MEDIUM_WRITE/HIGH_RISK 需要 HITL 审批；MCP 工具默认 HIGH_RISK";
+    }
+
+    public static ToolMetadata metadataForToolName(String toolName) {
+        if (isMcpTool(toolName)) {
+            return ToolMetadata.highRisk("将调用外部 MCP server 提供的工具，可能访问网络、文件或第三方服务");
+        }
+        return legacyMetadata(toolName);
     }
 
     public static boolean isMcpTool(String toolName) {
@@ -77,5 +93,18 @@ public class ApprovalPolicy {
         }
         String[] parts = toolName.split("__", 3);
         return parts.length >= 2 ? parts[1] : null;
+    }
+
+    private static ToolMetadata legacyMetadata(String toolName) {
+        return switch (toolName == null ? "" : toolName) {
+            case "write_file" -> ToolMetadata.mediumWrite("将写入或覆盖文件内容，原有内容将丢失");
+            case "create_project" -> ToolMetadata.mediumWrite("将在磁盘上创建新目录和文件");
+            case "browser_connect", "browser_disconnect" -> ToolMetadata.mediumWrite("将切换浏览器会话模式");
+            case "execute_command" -> ToolMetadata.highRisk("将在系统上执行 Shell 命令，可能修改文件、安装软件或影响系统状态");
+            case "revert_turn" -> ToolMetadata.highRisk("将按 Side-Git 快照批量恢复工作区文件，可能覆盖当前未保存修改");
+            case "load_skill" -> ToolMetadata.lowWrite("会把 Skill 指引注入下一轮上下文");
+            case "save_memory" -> ToolMetadata.lowWrite("会写入长期记忆");
+            default -> ToolMetadata.readOnly("只读取信息，不应修改本地文件、外部服务或会话状态");
+        };
     }
 }

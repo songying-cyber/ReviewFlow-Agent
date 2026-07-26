@@ -40,13 +40,14 @@ public final class RendererHitlHandler implements HitlHandler {
     public synchronized ApprovalResult requestApproval(ApprovalRequest request) {
         String mcpServer = ApprovalPolicy.mcpServerName(request.toolName());
         boolean sensitivePerCall = request.sensitiveNotice() != null && !request.sensitiveNotice().isBlank();
+        boolean allowApproveAll = !sensitivePerCall && request.allowsApproveAll();
 
-        if (!sensitivePerCall && isApprovedAllByTool(request.toolName())) {
+        if (allowApproveAll && isApprovedAllByTool(request.toolName())) {
             renderer.stream().println("  [HITL] " + request.toolName()
                     + " 已在本次会话中全部放行，自动通过");
             return ApprovalResult.approveAll();
         }
-        if (!sensitivePerCall && isApprovedAllByServer(mcpServer)) {
+        if (allowApproveAll && isApprovedAllByServer(mcpServer)) {
             renderer.stream().println("  [HITL] MCP server " + mcpServer
                     + " 已在本次会话中全部放行，自动通过");
             return ApprovalResult.approveAllByServer();
@@ -55,6 +56,9 @@ public final class RendererHitlHandler implements HitlHandler {
         ApprovalResult result = renderer.promptApproval(request);
         if (result == null) {
             return ApprovalResult.reject("渲染器返回 null");
+        }
+        if ((result.isApprovedAllForTool() || result.isApprovedAllForServer()) && !request.allowsApproveAll()) {
+            return ApprovalResult.reject("高风险操作不支持全部放行");
         }
         if (result.isApprovedAllForTool()) {
             approvedAllByTool.add(request.toolName());

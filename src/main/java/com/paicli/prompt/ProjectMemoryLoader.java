@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -36,11 +37,15 @@ public class ProjectMemoryLoader {
     }
 
     public String loadForPrompt() {
-        List<MemorySource> sources = sources();
+        return loadForPrompt(List.of());
+    }
+
+    public String loadForPrompt(List<Path> observedPaths) {
         StringBuilder body = new StringBuilder();
         Set<Path> importStack = new HashSet<>();
+        List<Path> observed = normalizeObservedPaths(observedPaths);
 
-        for (MemorySource source : sources) {
+        for (MemorySource source : sources(observed)) {
             if (!Files.isRegularFile(source.path())) {
                 continue;
             }
@@ -63,15 +68,29 @@ public class ProjectMemoryLoader {
         return "## PAI.md 项目记忆\n\n" + body;
     }
 
-    private List<MemorySource> sources() {
+    public List<Path> existingSourcePaths() {
+        return existingSourcePaths(List.of());
+    }
+
+    public List<Path> existingSourcePaths(List<Path> observedPaths) {
+        return sources(normalizeObservedPaths(observedPaths)).stream()
+                .map(MemorySource::path)
+                .filter(Files::isRegularFile)
+                .toList();
+    }
+
+    private List<MemorySource> sources(List<Path> observedPaths) {
         List<MemorySource> sources = new ArrayList<>();
         if (userConfigDir != null) {
             sources.add(new MemorySource(userConfigDir.resolve("PAI.md"), userConfigDir));
+            sources.addAll(ruleSources(userConfigDir.resolve("rules"), userConfigDir, observedPaths));
         }
         sources.add(new MemorySource(projectRoot.resolve("PAI.md"), projectRoot));
         sources.add(new MemorySource(projectRoot.resolve(".paicli").resolve("PAI.md"), projectRoot));
+        sources.addAll(ruleSources(projectRoot.resolve(".paicli").resolve("rules"), projectRoot, observedPaths));
         sources.add(new MemorySource(projectRoot.resolve("PAI.local.md"), projectRoot));
         sources.add(new MemorySource(projectRoot.resolve(".paicli").resolve("PAI.local.md"), projectRoot));
+        sources.addAll(nestedSources(observedPaths));
         return sources;
     }
 
@@ -92,7 +111,7 @@ public class ProjectMemoryLoader {
 
         try {
             StringBuilder out = new StringBuilder();
-            for (String line : Files.readAllLines(normalized, StandardCharsets.UTF_8)) {
+            for (String line : stripFrontmatter(Files.readString(normalized, StandardCharsets.UTF_8)).lines().toList()) {
                 String importPath = parseImport(line);
                 if (importPath == null) {
                     out.append(line).append("\n");
@@ -111,6 +130,138 @@ public class ProjectMemoryLoader {
         } finally {
             importStack.remove(normalized);
         }
+    }
+
+    private List<MemorySource> ruleSources(Path rulesDir, Path importRoot, List<Path> observedPaths) {
+        List<MemorySource> out = new ArrayList<>();
+        if (!Files.isDirectory(rulesDir)) {
+            return out;
+        }
+        try (var stream = Files.walk(rulesDir)) {
+            stream.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".md"))
+                    .sorted()
+                    .forEach(path -> {
+                        RuleFrontmatter frontmatter = readRuleFrontmatter(path);
+                        if (!frontmatter.hasPaths() || matchesObserved(frontmatter.paths(), observedPaths)) {
+                            out.add(new MemorySource(path, importRoot));
+                        }
+                    });
+        } catch (IOException e) {
+            log.warn("Failed to read PAI rules dir: {}", rulesDir, e);
+        }
+        return out;
+    }
+
+    private List<MemorySource> nestedSources(List<Path> observedPaths) {
+        List<MemorySource> out = new ArrayList<>();
+        Set<Path> seen = new HashSet<>();
+        for (Path observed : observedPaths) {
+            Path parent = Files.isDirectory(observed) ? observed : observed.getParent();
+            while (parent != null && parent.startsWith(projectRoot)) {
+                if (!parent.equals(projectRoot) && seen.add(parent)) {
+                    out.add(new MemorySource(parent.resolve("PAI.md"), projectRoot));
+                    out.add(new MemorySource(parent.resolve(".paicli").resolve("PAI.md"), projectRoot));
+                    out.add(new MemorySource(parent.resolve("PAI.local.md"), projectRoot));
+                    out.add(new MemorySource(parent.resolve(".paicli").resolve("PAI.local.md"), projectRoot));
+                    out.addAll(ruleSources(parent.resolve(".paicli").resolve("rules"), projectRoot, observedPaths));
+                }
+                parent = parent.getParent();
+            }
+        }
+        return out;
+    }
+
+    private List<Path> normalizeObservedPaths(List<Path> observedPaths) {
+        if (observedPaths == null || observedPaths.isEmpty()) {
+            return List.of();
+        }
+        return observedPaths.stream()
+                .filter(path -> path != null)
+                .map(path -> path.isAbsolute() ? path : projectRoot.resolve(path))
+                .map(path -> path.toAbsolutePath().normalize())
+                .filter(path -> path.startsWith(projectRoot))
+                .distinct()
+                .toList();
+    }
+
+    private boolean matchesObserved(List<String> globs, List<Path> observedPaths) {
+        if (globs.isEmpty() || observedPaths.isEmpty()) {
+            return false;
+        }
+        for (String glob : globs) {
+            String normalizedGlob = normalizeGlob(glob);
+            PathMatcher matcher = projectRoot.getFileSystem().getPathMatcher("glob:" + normalizedGlob);
+            for (Path observed : observedPaths) {
+                Path relative = projectRoot.relativize(observed);
+                if (matcher.matches(relative) || matcher.matches(observed)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String normalizeGlob(String glob) {
+        String trimmed = glob == null ? "" : glob.trim();
+        if (trimmed.isBlank()) {
+            return "__never_match__";
+        }
+        if (trimmed.startsWith("/")) {
+            return trimmed.substring(1);
+        }
+        return trimmed;
+    }
+
+    private RuleFrontmatter readRuleFrontmatter(Path path) {
+        try {
+            return parseRuleFrontmatter(Files.readString(path, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            log.warn("Failed to parse PAI rule frontmatter: {}", path, e);
+            return new RuleFrontmatter(List.of(), false);
+        }
+    }
+
+    private static RuleFrontmatter parseRuleFrontmatter(String text) {
+        if (text == null || !text.startsWith("---\n")) {
+            return new RuleFrontmatter(List.of(), false);
+        }
+        int end = text.indexOf("\n---", 4);
+        if (end <= 0) {
+            return new RuleFrontmatter(List.of(), false);
+        }
+        List<String> paths = new ArrayList<>();
+        boolean inPaths = false;
+        boolean hasPaths = false;
+        for (String line : text.substring(4, end).split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("paths:")) {
+                hasPaths = true;
+                inPaths = true;
+                String inline = trimmed.substring("paths:".length()).trim();
+                if (!inline.isBlank()) {
+                    paths.add(inline);
+                    inPaths = false;
+                }
+                continue;
+            }
+            if (inPaths && trimmed.startsWith("- ")) {
+                paths.add(trimmed.substring(2).trim());
+            } else if (!trimmed.startsWith("- ")) {
+                inPaths = false;
+            }
+        }
+        return new RuleFrontmatter(paths.stream().filter(s -> !s.isBlank()).toList(), hasPaths);
+    }
+
+    private static String stripFrontmatter(String text) {
+        if (text == null || !text.startsWith("---\n")) {
+            return text == null ? "" : text;
+        }
+        int end = text.indexOf("\n---", 4);
+        if (end <= 0) {
+            return text;
+        }
+        return text.substring(Math.min(text.length(), end + 4)).stripLeading();
     }
 
     private static String parseImport(String line) {
@@ -140,5 +291,8 @@ public class ProjectMemoryLoader {
             path = path.toAbsolutePath().normalize();
             importRoot = importRoot.toAbsolutePath().normalize();
         }
+    }
+
+    private record RuleFrontmatter(List<String> paths, boolean hasPaths) {
     }
 }

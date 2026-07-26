@@ -2,6 +2,7 @@ package com.paicli.agent;
 
 import com.paicli.llm.LlmClient;
 import com.paicli.llm.GLMClient;
+import com.paicli.tool.ToolRegistry.ToolExecutionResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -90,6 +91,50 @@ class AgentBudgetTest {
     }
 
     @Test
+    void repeatedEquivalentToolResultsTriggerNoProgressLimit() {
+        AgentBudget budget = new AgentBudget(1_000_000, 3, 50, 2, 1, 5);
+        List<ToolExecutionResult> sameResult = List.of(toolResult("read_file", "same content"));
+
+        budget.recordToolResults(sameResult);
+        assertEquals(AgentBudget.ExitReason.WITHIN_BUDGET, budget.check());
+
+        budget.recordToolResults(sameResult);
+        assertEquals(AgentBudget.ExitReason.WITHIN_BUDGET, budget.check());
+
+        budget.recordToolResults(sameResult);
+        assertEquals(AgentBudget.ExitReason.NO_PROGRESS_LIMIT, budget.check());
+    }
+
+    @Test
+    void consecutiveToolFailuresTriggerFailureLimit() {
+        AgentBudget budget = new AgentBudget(1_000_000, 3, 50, 5, 1, 2);
+
+        budget.recordToolResults(List.of(toolResult("read_file", "工具执行失败: no file")));
+        assertEquals(AgentBudget.ExitReason.WITHIN_BUDGET, budget.check());
+
+        budget.recordToolResults(List.of(toolResult("read_file", "工具执行失败: still no file")));
+        assertEquals(AgentBudget.ExitReason.TOOL_FAILURE_LIMIT, budget.check());
+    }
+
+    @Test
+    void invalidReflectionWithoutToolCallTriggersImmediately() {
+        AgentBudget budget = new AgentBudget(1_000_000, 3, 50, 4, 1, 5);
+
+        budget.recordNoToolResponse("我需要继续查看文件内容并分析这个问题。");
+
+        assertEquals(AgentBudget.ExitReason.INVALID_REFLECTION, budget.check());
+    }
+
+    @Test
+    void shortFinalAnswerIsNotInvalidReflection() {
+        AgentBudget budget = new AgentBudget(1_000_000, 3, 50, 4, 1, 5);
+
+        budget.recordNoToolResponse("可以");
+
+        assertEquals(AgentBudget.ExitReason.WITHIN_BUDGET, budget.check());
+    }
+
+    @Test
     void defaultTokenBudgetIsUnlimited() {
         // 默认不再用 80% × window 当硬限——长上下文 + 套餐用户场景下太容易撞墙。
         // 死循环防护交给 stagnation + hardMaxIterations 两道兜底。
@@ -118,5 +163,9 @@ class AgentBudgetTest {
     private LlmClient.ToolCall toolCall(String name, String args) {
         return new LlmClient.ToolCall("call_" + name + "_" + args.hashCode(),
                 new LlmClient.ToolCall.Function(name, args));
+    }
+
+    private ToolExecutionResult toolResult(String name, String result) {
+        return new ToolExecutionResult("call_" + name, name, "{}", result, 1, false, List.of());
     }
 }

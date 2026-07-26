@@ -69,7 +69,7 @@ class InlineApprovalPrompterTest {
     }
 
     @Test
-    void singleCharAOnMcpToolApproveAllByServer() throws Exception {
+    void singleCharAOnHighRiskMcpToolDoesNotApproveAll() throws Exception {
         Terminal terminal = mockTerminalReturning('a');
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
         InlineApprovalPrompter p = new InlineApprovalPrompter(
@@ -77,7 +77,8 @@ class InlineApprovalPrompterTest {
                 terminal,
                 new BufferedReader(new StringReader("server\n")));
         ApprovalResult result = p.prompt(ApprovalRequest.of("mcp__chrome-devtools__click", "{}", "test"));
-        assertEquals(ApprovalResult.Decision.APPROVED_ALL_BY_SERVER, result.decision());
+        assertEquals(ApprovalResult.Decision.REJECTED, result.decision());
+        assertTrue(sink.toString(StandardCharsets.UTF_8).contains("高风险操作不支持全部放行"));
     }
 
     @Test

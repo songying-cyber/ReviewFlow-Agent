@@ -3,6 +3,7 @@ package com.paicli.policy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import com.paicli.browser.BrowserAuditMetadata;
+import com.paicli.sandbox.SandboxAuditMetadata;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -64,6 +65,43 @@ class AuditLogTest {
         assertEquals("shared", entry.metadata().browserMode());
         assertTrue(entry.metadata().sensitive());
         assertEquals("https://github.com/settings/profile", entry.metadata().targetUrl());
+    }
+
+    @Test
+    void writesAndReadsApprovalFingerprint(@TempDir Path tempDir) {
+        AuditLog log = new AuditLog(tempDir);
+        log.record(AuditLog.AuditEntry.allow(
+                "write_file",
+                "{}",
+                1,
+                null,
+                "9f31c2ab"));
+
+        AuditLog.AuditEntry entry = log.readRecent(1).get(0);
+
+        assertEquals("9f31c2ab", entry.fingerprint());
+    }
+
+    @Test
+    void writesAndReadsSandboxMetadata(@TempDir Path tempDir) {
+        AuditLog log = new AuditLog(tempDir);
+        SandboxAuditMetadata sandbox = new SandboxAuditMetadata(
+                true, true, false, "macos-seatbelt", true, "", "deny", "/tmp/profile.sb", List.of());
+        log.record(AuditLog.AuditEntry.allow(
+                "execute_command",
+                "{\"command\":\"echo hi\"}",
+                1,
+                null,
+                sandbox,
+                "fp"));
+
+        AuditLog.AuditEntry entry = log.readRecent(1).get(0);
+
+        assertNotNull(entry.sandbox());
+        assertTrue(entry.sandbox().enabled());
+        assertTrue(entry.sandbox().used());
+        assertEquals("macos-seatbelt", entry.sandbox().runtime());
+        assertEquals("deny", entry.sandbox().network());
     }
 
     @Test
