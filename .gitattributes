@@ -1,2 +1,3 @@
-# Hide repository language statistics on GitHub.
+# Make GitHub language statistics show Python as the primary language.
 * linguist-vendored
+*.py linguist-vendored=false
