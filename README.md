@@ -1,6 +1,6 @@
 # ReviewFlow Agent
 
-一个成熟的 Java Agent CLI 产品，对标 Claude Code 作者为沉默王二，从第一期的 `ReAct` 单代理循环逐步演进到第十六期的 `TUI 产品化`。
+一个成熟的 Java Agent CLI 产品，围绕代码审查与 Agent CLI 工作流逐步演进，从第一期的 `ReAct` 单代理循环推进到第十六期的 `TUI 产品化`。
 
 当前进度：已完成第 16.1 期 inline 流式 TUI 形态修正、第 17 期 `LSP 诊断注入` MVP、第 18 期 `Git Side-History 快照与回滚` MVP、第 19 期 `Prompt 分层架构` MVP、第 20 期 `异步后台任务 + Runtime API` MVP、第 21 期 `图片复制粘贴输入` MVP、第 23 期 `微信 iLink 通道` 文本 MVP；已新增 GitHub PR review 结构化 client 基础模块和 `/review pr` CLI 审查入口。
 

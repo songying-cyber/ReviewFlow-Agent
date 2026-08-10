@@ -11,7 +11,7 @@
     <packaging>jar</packaging>
 
     <name>ReviewFlow Agent</name>
-    <description>A simple Java Agent CLI like Claude Code</description>
+    <description>ReviewFlow Agent code review and agent CLI workflow</description>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
